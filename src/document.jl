@@ -33,14 +33,17 @@ end
 Diagnostics() = Diagnostics(DiagEntry[])
 
 """
-Default numbering function: `Sec. N` / `Fig. N`. Override it in the preamble with
-`@pinaxsetup numberer = (kind, c) -> …`, where `kind` is `:section` or `:figure` and `c` is
-`(; section, figure, subfigure)` — `section` is the current section number, `figure` the
-document-wide figure count, and `subfigure` the figure's index within its section (for
-hierarchical schemes like `Fig. 2.3`).
+Default numbering function: `Sec. N` / `Fig. N` / `(N)` for equations. Override it in the
+preamble with `@pinaxsetup numberer = (kind, c) -> …`, where `kind` is `:section`, `:figure`,
+or `:equation` and `c` is `(; section, figure, subfigure, equation)` — `section` is the current
+section number, `figure` the document-wide figure count, `subfigure` the figure's index within
+its section (for hierarchical schemes like `Fig. 2.3`), and `equation` the document-wide
+equation count.
 """
 function _default_numberer(kind::Symbol, c)
-    return kind === :section ? "Sec. $(c.section)" : "Fig. $(c.figure)"
+    kind === :section && return "Sec. $(c.section)"
+    kind === :figure && return "Fig. $(c.figure)"
+    return "($(c.equation))"   # :equation — paper-style "(n)"
 end
 
 "Document settings (analogous to TeX \\documentclass + preamble)."

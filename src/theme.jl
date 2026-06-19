@@ -2,8 +2,9 @@
 #
 # v1 gallery: a single `index.html` with figures materialized into
 # `assets/figures/<page>/<section>/<id>.<fmt>`. Sec./Fig. numbers are assigned by the theme
-# (notes 03: numbering is the theme's job) and `@ref(:id)` cross-references resolve to numbered
-# links. Equations + KaTeX, @cite, CSS-counter display, and interactive JS come in later slices.
+# (notes 03: numbering is the theme's job), display equations are numbered + rendered with KaTeX,
+# and `@ref(:id)` / `@label(:id)` cross-references resolve to numbered links. @cite, CSS-counter
+# display, and interactive JS come in later slices.
 
 abstract type Theme end
 
@@ -30,8 +31,26 @@ const _GALLERY_CSS = """
   figure img{width:100%;height:auto}
   figcaption{font-size:.9rem;color:#444;margin-top:.4rem}
   .diag{border-left:4px solid #d33;padding-left:.8rem}
+  .pinax-eq{display:block}
 </style>
 """
+
+# KaTeX (loaded from a CDN; offline vendoring is a later slice). Renders `\$…\$` / `\$\$…\$\$`.
+const _KATEX_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist"
+const _KATEX_HEAD = string(
+    "<link rel=\"stylesheet\" href=\"", _KATEX_CDN, "/katex.min.css\">"
+)
+const _KATEX_FOOT = string(
+    "<script defer src=\"",
+    _KATEX_CDN,
+    "/katex.min.js\"></script>",
+    "<script defer src=\"",
+    _KATEX_CDN,
+    "/contrib/auto-render.min.js\"></script>",
+    "<script>window.addEventListener(\"load\",function(){renderMathInElement(document.body,",
+    "{delimiters:[{left:\"\$\$\",right:\"\$\$\",display:true},",
+    "{left:\"\$\",right:\"\$\",display:false}],throwOnError:false});});</script>",
+)
 
 # ---------- per-render emit state ----------
 
@@ -41,50 +60,110 @@ struct EmitCtx
     io::IOBuffer
     rdiag::Vector{DiagEntry}
     cache::RenderCache
-    nums::Dict{String,String}   # node anchor -> display number ("Fig. 3", "Sec. 2")
-    ids::Dict{Symbol,String}    # label id -> node anchor (for @ref resolution)
+    nums::Dict{String,String}                  # node/eq anchor -> display number ("Fig. 3", "(2)")
+    ids::Dict{Symbol,String}                   # label id -> anchor (sections, figures, equations)
+    eqseq::Dict{String,Vector{Tuple{String,Int}}}  # node anchor -> ordered [(eq anchor, eq number)]
 end
 
-# Theme-side numbering (notes 03/06: numbering is the theme's job). Sequential Sec./Fig. numbers,
-# continuous across the document by default, or reset per page when `numbering=:page`.
+# Display-equation block: an optional preceding @label(:id), then $$ ... $$ (newlines allowed).
+const _EQ_RE = r"(?:@label\(:(\w+)\)\s*)?\$\$\s*(.+?)\s*\$\$"s
+
+# Resolve @ref forms: `@ref(:id)` and `[text](@ref :id)`.
+const _REF_RE = r"\[([^\]]*)\]\(@ref\s+:(\w+)\)|@ref\(:(\w+)\)"
+
+# Theme-side numbering (notes 03/06). Assigns Sec./Fig./Eq. numbers in document order (continuous,
+# or reset per page when numbering=:page), scanning desc/caption sources for display equations.
+# Returns (nums, ids_eq, eqseq).
 function _gallery_numbers(doc::Document)
     nums = Dict{String,String}()
+    ids_eq = Dict{Symbol,String}()
+    eqseq = Dict{String,Vector{Tuple{String,Int}}}()
     perpage = doc.meta.numbering === :page
     numberer = doc.meta.numberer
-    secn = 0
-    fign = 0
+    secn = fign = eqn = 0
     for pg in doc.pages
         if perpage
-            secn = 0
-            fign = 0
+            secn = fign = eqn = 0
         end
         for sec in pg.sections
             secn += 1
             subfig = 0
             nums[sec.anchor] = string(
-                numberer(:section, (; section=secn, figure=fign, subfigure=subfig))
+                numberer(
+                    :section, (; section=secn, figure=fign, subfigure=subfig, equation=eqn)
+                ),
+            )
+            eqn = _scan_eqs!(
+                _descsrc(sec.desc), sec.anchor, secn, nums, ids_eq, eqseq, numberer, eqn
             )
             for fig in sec.figures
                 fign += 1
                 subfig += 1
                 nums[fig.anchor] = string(
-                    numberer(:figure, (; section=secn, figure=fign, subfigure=subfig))
+                    numberer(
+                        :figure,
+                        (; section=secn, figure=fign, subfigure=subfig, equation=eqn),
+                    ),
+                )
+                eqn = _scan_eqs!(
+                    fig.caption, fig.anchor, secn, nums, ids_eq, eqseq, numberer, eqn
                 )
             end
         end
     end
-    return nums
+    return nums, ids_eq, eqseq
+end
+
+_descsrc(d) = d === nothing ? "" : d.source
+
+# Scan one source for `$$…$$` blocks: number each equation, register `@label(:id)` ids, and record
+# the per-node ordered (anchor, number) list. Returns the updated equation counter.
+function _scan_eqs!(source, node_anchor, secn, nums, ids_eq, eqseq, numberer, eqn)
+    isempty(source) && return eqn
+    lst = Tuple{String,Int}[]
+    k = 0
+    for m in eachmatch(_EQ_RE, source)
+        eqn += 1
+        k += 1
+        label = m.captures[1]
+        anchor = label !== nothing ? _anchor(Symbol(label)) : string(node_anchor, "_eq", k)
+        nums[anchor] = string(
+            numberer(:equation, (; section=secn, figure=0, subfigure=0, equation=eqn))
+        )
+        label !== nothing && (ids_eq[Symbol(label)] = anchor)
+        push!(lst, (anchor, eqn))
+    end
+    isempty(lst) || (eqseq[node_anchor] = lst)
+    return eqn
 end
 
 # Label id -> node anchor, from the resolve table (single-page hrefs are "#anchor").
 _id2anchor(doc::Document) = Dict{Symbol,String}(id => n.anchor for (id, n) in doc.refs)
 
-# Resolve @ref tokens in a desc/caption source to numbered links and escape everything else.
-# Supported forms: `@ref(:id)` and `[text](@ref :id)`.
-const _REF_RE = r"\[([^\]]*)\]\(@ref\s+:(\w+)\)|@ref\(:(\w+)\)"
+# Render a desc/caption source: escape, wrap `$$…$$` equations (anchor + \tag for KaTeX), resolve
+# @ref links, and drop leftover @label tokens. `item` is the owning node's anchor.
+function _render_text(source::AbstractString, item, ctx::EmitCtx)
+    eqs = get(ctx.eqseq, item, Tuple{String,Int}[])
+    i = Ref(0)
+    out = replace(_esc(source), _EQ_RE => s -> _eq_sub(s, eqs, i))
+    out = replace(out, _REF_RE => s -> _ref_sub(s, ctx, item))
+    return replace(out, r"@label\(:\w+\)\s*" => "")
+end
 
-function _resolve_refs(source::AbstractString, ctx::EmitCtx, item)
-    return replace(_esc(source), _REF_RE => s -> _ref_sub(s, ctx, item))
+function _eq_sub(matched, eqs, i)
+    m = match(_EQ_RE, matched)
+    math = m.captures[2]
+    i[] += 1
+    anchor, num = i[] <= length(eqs) ? eqs[i[]] : ("", 0)
+    return string(
+        "<span class=\"pinax-eq\" id=\"",
+        anchor,
+        "\">\$\$ ",
+        math,
+        " \\tag{",
+        num,
+        "} \$\$</span>",
+    )
 end
 
 function _ref_sub(matched, ctx::EmitCtx, item)
@@ -107,13 +186,16 @@ function emit_document(
     theme::GalleryTheme, doc::Document, outdir::AbstractString, cache::RenderCache
 )
     io = IOBuffer()
+    nums, ids_eq, eqseq = _gallery_numbers(doc)
     ctx = EmitCtx(
-        String(outdir), io, DiagEntry[], cache, _gallery_numbers(doc), _id2anchor(doc)
+        String(outdir), io, DiagEntry[], cache, nums, merge(_id2anchor(doc), ids_eq), eqseq
     )
     title = isempty(doc.meta.title) ? "Pinax gallery" : doc.meta.title
     print(io, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">")
     print(io, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
-    print(io, "<title>", _esc(title), "</title>", _GALLERY_CSS, "</head><body>\n")
+    print(
+        io, "<title>", _esc(title), "</title>", _GALLERY_CSS, _KATEX_HEAD, "</head><body>\n"
+    )
     println(io, "<h1>", _esc(title), "</h1>")
 
     _emit_index(theme, doc, io)
@@ -133,6 +215,7 @@ function emit_document(
     end
     _emit_diagnostics(doc, ctx.rdiag, io)
 
+    print(io, _KATEX_FOOT)
     println(io, "</body></html>")
     path = joinpath(outdir, "index.html")
     write(path, String(take!(io)))
@@ -167,7 +250,7 @@ function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
         println(
             io,
             "<div class=\"desc\">",
-            _resolve_refs(sec.desc.source, ctx, sec.anchor),
+            _render_text(sec.desc.source, sec.anchor, ctx),
             "</div>",
         )
     end
@@ -219,7 +302,7 @@ function _emit_figure(fig::Figure, ctx::EmitCtx)
         end
     end
     num = get(ctx.nums, fig.anchor, "")
-    cap = isempty(fig.caption) ? "" : _resolve_refs(fig.caption, ctx, fig.anchor)
+    cap = isempty(fig.caption) ? "" : _render_text(fig.caption, fig.anchor, ctx)
     caphtml = if isempty(num)
         cap
     elseif isempty(cap)
