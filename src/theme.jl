@@ -32,6 +32,7 @@ const _GALLERY_CSS = """
   figcaption{font-size:.9rem;color:#444;margin-top:.4rem}
   .diag{border-left:4px solid #d33;padding-left:.8rem}
   .pinax-eq{display:block}
+  h3.facet{color:#555;margin:1rem 0 .3rem;font-size:1.05rem;font-weight:600}
 </style>
 """
 
@@ -254,9 +255,28 @@ function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
             "</div>",
         )
     end
+    if sec.facet isa AbstractString
+        for (val, figs) in _facet_groups(sec.figures, sec.facet)
+            label = if val === missing
+                string(sec.facet, ": (unset)")
+            else
+                string(sec.facet, " = ", val)
+            end
+            println(io, "<h3 class=\"facet\">", _esc(label), "</h3>")
+            _emit_figures(figs, sec, pg, theme, ctx)
+        end
+    else
+        _emit_figures(sec.figures, sec, pg, theme, ctx)
+    end
+    return println(io, "</section>")
+end
+
+# Emit one grid of figures (materialize each: streaming + cache).
+function _emit_figures(figs, sec::Section, pg::Page, theme, ctx::EmitCtx)
+    io = ctx.io
     println(io, "<div class=\"figgrid\">")
     fmts = figure_formats(theme)
-    for fig in sec.figures
+    for fig in figs
         base = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor, fig.anchor)
         try
             materialize!(fig, base, fmts, ctx.cache)   # cache hit skips gen (notes 10)
@@ -273,7 +293,37 @@ function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
         end
         _emit_figure(fig, ctx)
     end
-    return println(io, "</div></section>")
+    return println(io, "</div>")
+end
+
+# `by=` facet: group a section's figures by a ParamIO param axis (e.g. "system.g") (notes 05).
+function _facet_value(p, facet)
+    return (p isa ParamIO.DataKey && haskey(p.params, facet)) ? p.params[facet] : missing
+end
+
+# Sort key for facet values: numbers first (by value), then strings, then missing.
+_facetsort(x) =
+    if x === missing
+        (2, 0.0, "")
+    elseif x isa Number
+        (0, float(x), "")
+    else
+        (1, 0.0, string(x))
+    end
+
+function _facet_groups(figures, facet::AbstractString)
+    groups = Dict{Any,Vector{Figure}}()
+    order = Any[]
+    for fig in figures
+        v = _facet_value(fig.params, facet)
+        if !haskey(groups, v)
+            groups[v] = Figure[]
+            push!(order, v)
+        end
+        push!(groups[v], fig)
+    end
+    sort!(order; by=_facetsort)
+    return [(v, groups[v]) for v in order]
 end
 
 # A broken/empty figure: a visible card plus a link back to the diagnostics section.
