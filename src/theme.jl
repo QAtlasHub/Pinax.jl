@@ -29,10 +29,15 @@ const _GALLERY_CSS = """
   .figgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem}
   figure{margin:0;border:1px solid #ddd;border-radius:8px;padding:.5rem;background:#fff}
   figure img{width:100%;height:auto}
+  figure iframe.pinax-pdf{width:100%;height:460px;border:1px solid #eee;border-radius:4px;background:#fff}
+  a.pinax-open{display:inline-block;font-size:.85rem;margin-top:.3rem;color:#0366d6;text-decoration:none}
   figcaption{font-size:.9rem;color:#444;margin-top:.4rem}
   .diag{border-left:4px solid #d33;padding-left:.8rem}
   .pinax-eq{display:block}
   h3.facet{color:#555;margin:1rem 0 .3rem;font-size:1.05rem;font-weight:600}
+  .pinax-meta{color:#666;margin:-.4rem 0 1rem;font-size:.95rem}
+  .nfig{color:#888;font-weight:normal;font-size:.85em}
+  nav .nfig{color:#888}
 </style>
 """
 
@@ -228,6 +233,14 @@ function emit_document(
         io, "<title>", _esc(title), "</title>", _GALLERY_CSS, _KATEX_HEAD, "</head><body>\n"
     )
     println(io, "<h1>", _esc(title), "</h1>")
+    ntotal = _total_figures(doc)
+    println(
+        io,
+        "<div class=\"pinax-meta\">",
+        ntotal,
+        ntotal == 1 ? " figure" : " figures",
+        "</div>",
+    )
 
     _emit_index(theme, doc, io)
     for pg in doc.pages
@@ -253,18 +266,27 @@ function emit_document(
     return path
 end
 
-# index (table of contents): v1 shows names + links (:toc level). :cards/:rich come later.
+# Total figure count across the document (shown in the header, e.g. "547 figures").
+function _total_figures(doc::Document)
+    return sum(length(sec.figures) for pg in doc.pages for sec in pg.sections; init=0)
+end
+
+# index (table of contents): v1 shows names + links (:toc level), each with its figure count.
+# :cards/:rich come later.
 function _emit_index(::GalleryTheme, doc::Document, io)
     println(io, "<nav><strong>Contents</strong>")
     for pg in doc.pages
         println(io, "<a href=\"#", pg.anchor, "\">", _esc(pg.title), "</a>")
         for sec in pg.sections
+            n = length(sec.figures)
+            count = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
             println(
                 io,
                 "<a href=\"#",
                 sec.anchor,
                 "\" style=\"margin-left:1.2rem\">",
                 _esc(sec.title),
+                count,
                 "</a>",
             )
         end
@@ -276,6 +298,8 @@ function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
     io = ctx.io
     num = get(ctx.nums, sec.anchor, "")
     heading = isempty(num) ? _esc(sec.title) : string(_esc(num), ". ", _esc(sec.title))
+    n = length(sec.figures)
+    n > 0 && (heading *= string(" <span class=\"nfig\">(", n, ")</span>"))
     println(io, "<section class=\"section\" id=\"", sec.anchor, "\"><h2>", heading, "</h2>")
     if sec.desc !== nothing
         println(
@@ -376,8 +400,28 @@ function _emit_figure(fig::Figure, ctx::EmitCtx)
     println(io, "<figure id=\"", fig.anchor, "\">")
     for a in fig.assets
         rel = replace(relpath(a, ctx.outdir), '\\' => '/')   # forward slashes for URLs (Windows-safe)
-        if _ext(a) in ("svg", "png")
+        ext = _ext(a)
+        if ext in ("svg", "png")
             println(io, "<img src=\"", _esc(rel), "\" alt=\"", _esc(string(fig.id)), "\">")
+        elseif ext == "pdf"
+            # Embed PDFs via the browser's native viewer (notes 04 §3: "pdf -> iframe"), with an
+            # open/download fallback for browsers that block inline PDFs (e.g. some file:// setups).
+            println(
+                io,
+                "<iframe class=\"pinax-pdf\" src=\"",
+                _esc(rel),
+                "\" title=\"",
+                _esc(string(fig.id)),
+                "\"></iframe>",
+            )
+            println(
+                io,
+                "<a class=\"pinax-open\" href=\"",
+                _esc(rel),
+                "\" target=\"_blank\" rel=\"noopener\">open ",
+                _esc(basename(a)),
+                " ↗</a>",
+            )
         else
             println(io, "<a href=\"", _esc(rel), "\">", _esc(basename(a)), "</a>")
         end
