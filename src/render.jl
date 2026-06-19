@@ -29,7 +29,7 @@ end
 Render the catalogue: structure (pass 1, done by macros) -> resolve (pass 2) ->
 materialize + emit (pass 3, theme). Writes into the `out` directory and returns the
 path of the generated entry file. `doc` defaults to the implicit global document.
-`force` is accepted but not yet implemented (reserved for the cache-invalidation slice).
+`force=true` re-materializes every figure, ignoring the cache (notes 10).
 """
 function render(
     doc::Union{Document,Nothing}=current_document();
@@ -41,5 +41,8 @@ function render(
         error("Pinax: no document to render. Use `@page …` first, or pass a Document.")
     resolve!(doc)
     mkpath(out)
-    return emit_document(theme, doc, out)
+    cache = RenderCache(out, force)
+    path = emit_document(theme, doc, out, cache)
+    _finalize_cache!(cache)
+    return path
 end
