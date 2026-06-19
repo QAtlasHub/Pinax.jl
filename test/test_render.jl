@@ -100,7 +100,7 @@ using Test
         @test !occursin("<script>alert", html)             # raw script must not survive
     end
 
-    @testset "non-svg asset -> <a> link, not <img>" begin
+    @testset "pdf asset -> <iframe> embed + open link, not <img>" begin
         pdf = joinpath(tmp, "doc.pdf")
         write(pdf, "%PDF-1.4 stub")
         outdir = joinpath(tmp, "pdf")
@@ -112,8 +112,31 @@ using Test
         end
         html = read(Pinax.render(; out=outdir), String)
         @test isfile(joinpath(outdir, "assets", "figures", "p", "s", "s_fig1.pdf"))
-        @test occursin("<a href=\"assets/figures/p/s/s_fig1.pdf\"", html)
+        # embedded with the browser's native viewer (notes 04 §3), plus an open/download fallback
+        @test occursin(
+            "<iframe class=\"pinax-pdf\" src=\"assets/figures/p/s/s_fig1.pdf\"", html
+        )
+        @test occursin(
+            "<a class=\"pinax-open\" href=\"assets/figures/p/s/s_fig1.pdf\"", html
+        )
         @test !occursin("s_fig1.pdf\" alt", html)          # not emitted as <img>
+    end
+
+    @testset "other (non-embeddable) asset -> <a> link" begin
+        csv = joinpath(tmp, "data.csv")
+        write(csv, "x,y\n1,2\n")
+        outdir = joinpath(tmp, "csv")
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :s "S" begin
+                @figure csv
+            end
+        end
+        html = read(Pinax.render(; out=outdir), String)
+        @test isfile(joinpath(outdir, "assets", "figures", "p", "s", "s_fig1.csv"))
+        @test occursin("<a href=\"assets/figures/p/s/s_fig1.csv\"", html)
+        @test !occursin("s_fig1.csv\" alt", html)          # not an <img>
+        @test !occursin("<iframe", html)                   # not embedded (the CSS class is always present)
     end
 
     @testset "non-file, non-figure value -> diagnostic (non-fatal)" begin
@@ -156,5 +179,42 @@ using Test
         @test isdir(joinpath(outdir, "assets", "figures", "a_b", "s"))
         @test occursin("id=\"a_b\"", html)
         @test !occursin("a/b\"", html)                     # raw slash never in an id attribute
+    end
+
+    @testset "figure counts: section badge, nav count, header total" begin
+        outdir = joinpath(tmp, "counts")
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :a "Alpha" begin
+                @figure svg1
+                @figure svg2
+            end
+            @section :b "Beta" begin
+                @figure svg1
+            end
+        end
+        html = read(Pinax.render(; out=outdir), String)
+        # per-section count badge in the heading (next to the title)
+        @test occursin("Alpha <span class=\"nfig\">(2)</span>", html)
+        @test occursin("Beta <span class=\"nfig\">(1)</span>", html)
+        # nav links carry the same count
+        @test occursin(
+            "href=\"#a\" style=\"margin-left:1.2rem\">Alpha <span class=\"nfig\">(2)</span>",
+            html,
+        )
+        # document-wide total in the header
+        @test occursin("<div class=\"pinax-meta\">3 figures</div>", html)
+    end
+
+    @testset "header total figure count is singular for one figure" begin
+        outdir = joinpath(tmp, "counts1")
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :s "S" begin
+                @figure svg1
+            end
+        end
+        html = read(Pinax.render(; out=outdir), String)
+        @test occursin("<div class=\"pinax-meta\">1 figure</div>", html)
     end
 end
