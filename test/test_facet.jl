@@ -51,4 +51,36 @@ using ParamIO
         @test !occursin("class=\"facet\"", html)
         @test count("class=\"figgrid\"", html) == 1
     end
+
+    @testset "mixed numeric and string facet values sort numbers-first" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :s "S" by = "system.g" begin
+                @figure svg params = ParamIO.DataKey(
+                    Dict{String,Any}("system.g" => "high"), 0
+                )
+                @figure svg params = k(0.5)
+                @figure svg params = k(2.0)
+            end
+        end
+        html = read(Pinax.render(; out=site("fmix")), String)
+        p05 = first(findfirst("system.g = 0.5", html))
+        p20 = first(findfirst("system.g = 2.0", html))
+        phi = first(findfirst("system.g = high", html))
+        @test p05 < p20 < phi   # numbers (by value) before strings
+    end
+
+    @testset "facet preserves document-order figure numbers" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :s "S" by = "system.g" begin
+                @figure svg params = k(1.0)   # doc order 1 -> Fig. 1, emitted in the 1.0 group (2nd)
+                @figure svg params = k(0.5)   # doc order 2 -> Fig. 2, emitted in the 0.5 group (1st)
+            end
+        end
+        html = read(Pinax.render(; out=site("fnum")), String)
+        @test first(findfirst("system.g = 0.5", html)) <
+            first(findfirst("system.g = 1.0", html))
+        @test first(findfirst("Fig. 2", html)) < first(findfirst("Fig. 1", html))  # numbers follow doc order
+    end
 end

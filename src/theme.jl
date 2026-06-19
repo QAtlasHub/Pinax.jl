@@ -36,7 +36,9 @@ const _GALLERY_CSS = """
 </style>
 """
 
-# KaTeX (loaded from a CDN; offline vendoring is a later slice). Renders `\$…\$` / `\$\$…\$\$`.
+# KaTeX (loaded from a CDN; offline vendoring is a later slice). Inline `\$…\$` is rendered
+# client-side; display `\$\$…\$\$` is pre-processed server-side (numbered, anchored, @label
+# consumed) then rendered by KaTeX.
 const _KATEX_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist"
 const _KATEX_HEAD = string(
     "<link rel=\"stylesheet\" href=\"", _KATEX_CDN, "/katex.min.css\">"
@@ -72,6 +74,11 @@ const _EQ_RE = r"(?:@label\(:(\w+)\)\s*)?\$\$\s*(.+?)\s*\$\$"s
 # Resolve @ref forms: `@ref(:id)` and `[text](@ref :id)`.
 const _REF_RE = r"\[([^\]]*)\]\(@ref\s+:(\w+)\)|@ref\(:(\w+)\)"
 
+# Build the counters NamedTuple handed to the numberer.
+function _counters(secn, fign, subfig, eqn)
+    return (; section=secn, figure=fign, subfigure=subfig, equation=eqn)
+end
+
 # Theme-side numbering (notes 03/06). Assigns Sec./Fig./Eq. numbers in document order (continuous,
 # or reset per page when numbering=:page), scanning desc/caption sources for display equations.
 # Returns (nums, ids_eq, eqseq).
@@ -90,24 +97,37 @@ function _gallery_numbers(doc::Document)
             secn += 1
             subfig = 0
             nums[sec.anchor] = string(
-                numberer(
-                    :section, (; section=secn, figure=fign, subfigure=subfig, equation=eqn)
-                ),
+                numberer(:section, _counters(secn, fign, subfig, eqn))
             )
             eqn = _scan_eqs!(
-                _descsrc(sec.desc), sec.anchor, secn, nums, ids_eq, eqseq, numberer, eqn
+                _descsrc(sec.desc),
+                sec.anchor,
+                secn,
+                fign,
+                subfig,
+                nums,
+                ids_eq,
+                eqseq,
+                numberer,
+                eqn,
             )
             for fig in sec.figures
                 fign += 1
                 subfig += 1
                 nums[fig.anchor] = string(
-                    numberer(
-                        :figure,
-                        (; section=secn, figure=fign, subfigure=subfig, equation=eqn),
-                    ),
+                    numberer(:figure, _counters(secn, fign, subfig, eqn))
                 )
                 eqn = _scan_eqs!(
-                    fig.caption, fig.anchor, secn, nums, ids_eq, eqseq, numberer, eqn
+                    fig.caption,
+                    fig.anchor,
+                    secn,
+                    fign,
+                    subfig,
+                    nums,
+                    ids_eq,
+                    eqseq,
+                    numberer,
+                    eqn,
                 )
             end
         end
@@ -117,9 +137,11 @@ end
 
 _descsrc(d) = d === nothing ? "" : d.source
 
-# Scan one source for `$$…$$` blocks: number each equation, register `@label(:id)` ids, and record
-# the per-node ordered (anchor, number) list. Returns the updated equation counter.
-function _scan_eqs!(source, node_anchor, secn, nums, ids_eq, eqseq, numberer, eqn)
+# Scan one source for `$$…$$` blocks: number each equation (numberer gets the live section/figure
+# counters), register `@label(:id)` ids, record the per-node ordered (anchor, number) list.
+function _scan_eqs!(
+    source, node_anchor, secn, fign, subfig, nums, ids_eq, eqseq, numberer, eqn
+)
     isempty(source) && return eqn
     lst = Tuple{String,Int}[]
     k = 0
@@ -128,9 +150,7 @@ function _scan_eqs!(source, node_anchor, secn, nums, ids_eq, eqseq, numberer, eq
         k += 1
         label = m.captures[1]
         anchor = label !== nothing ? _anchor(Symbol(label)) : string(node_anchor, "_eq", k)
-        nums[anchor] = string(
-            numberer(:equation, (; section=secn, figure=0, subfigure=0, equation=eqn))
-        )
+        nums[anchor] = string(numberer(:equation, _counters(secn, fign, subfig, eqn)))
         label !== nothing && (ids_eq[Symbol(label)] = anchor)
         push!(lst, (anchor, eqn))
     end
@@ -188,9 +208,19 @@ function emit_document(
 )
     io = IOBuffer()
     nums, ids_eq, eqseq = _gallery_numbers(doc)
-    ctx = EmitCtx(
-        String(outdir), io, DiagEntry[], cache, nums, merge(_id2anchor(doc), ids_eq), eqseq
-    )
+    rdiag = DiagEntry[]
+    base_ids = _id2anchor(doc)
+    for k in keys(ids_eq)
+        haskey(base_ids, k) && push!(
+            rdiag,
+            DiagEntry(
+                WARNING,
+                string(k),
+                "equation @label(:$(k)) collides with a section/figure id",
+            ),
+        )
+    end
+    ctx = EmitCtx(String(outdir), io, rdiag, cache, nums, merge(base_ids, ids_eq), eqseq)
     title = isempty(doc.meta.title) ? "Pinax gallery" : doc.meta.title
     print(io, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">")
     print(io, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
@@ -296,20 +326,21 @@ function _emit_figures(figs, sec::Section, pg::Page, theme, ctx::EmitCtx)
     return println(io, "</div>")
 end
 
-# `by=` facet: group a section's figures by a ParamIO param axis (e.g. "system.g") (notes 05).
+# Extract param axis `facet` from a figure's params (a ParamIO.DataKey), or `missing` if absent.
+# Used by `_facet_groups` for `by=` faceting (notes 05).
 function _facet_value(p, facet)
     return (p isa ParamIO.DataKey && haskey(p.params, facet)) ? p.params[facet] : missing
 end
 
-# Sort key for facet values: numbers first (by value), then strings, then missing.
-_facetsort(x) =
-    if x === missing
-        (2, 0.0, "")
-    elseif x isa Number
-        (0, float(x), "")
-    else
-        (1, 0.0, string(x))
+# Sort key for facet values: numbers first (by value, NaN last), then strings, then missing.
+function _facetsort(x)
+    x === missing && return (2, 0.0, "")
+    if x isa Number
+        fx = float(x)
+        return (0, isnan(fx) ? Inf : fx, "")
     end
+    return (1, 0.0, string(x))
+end
 
 function _facet_groups(figures, facet::AbstractString)
     groups = Dict{Any,Vector{Figure}}()
