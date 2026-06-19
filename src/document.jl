@@ -58,6 +58,8 @@ mutable struct DocMeta
     numbering::Symbol             # numbering scope :global|:page (reset counters per page)
     numberer::Function            # (kind, counters) -> label string; preamble-overridable
     features::Vector{Symbol}      # gallery interactive layer toggles: :comments / :bookmarks / :export
+    css::Vector{String}           # user CSS overlay files (inlined after the theme's own CSS)
+    js::Vector{String}            # user JS overlay files (inlined after the theme's own JS)
 end
 function DocMeta(;
     title="",
@@ -70,6 +72,8 @@ function DocMeta(;
     numbering=:global,
     numberer=_default_numberer,
     features=Symbol[:comments, :bookmarks, :export],
+    css=String[],
+    js=String[],
 )
     return DocMeta(
         title,
@@ -82,6 +86,8 @@ function DocMeta(;
         numbering,
         numberer,
         collect(Symbol, features),
+        collect(String, css),
+        collect(String, js),
     )
 end
 
@@ -167,7 +173,9 @@ function reset!(; kwargs...)
         numbering=get(kw, :numbering, :global),
         numberer=get(kw, :numberer, _default_numberer),
         features=get(kw, :features, Symbol[:comments, :bookmarks, :export]),
-    )  # css/js are interpreted by the theme layer (ignored in this structure slice)
+        css=get(kw, :css, String[]),
+        js=get(kw, :js, String[]),
+    )
     CTX.document = Document(meta)
     CTX.page = nothing
     CTX.section = nothing
