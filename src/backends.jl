@@ -15,12 +15,27 @@ Save the figure object `x` to `base` (an extensionless base path) in `fmt` (:svg
 and return the actual path. Per-backend implementations are injected via package
 extensions (weakdeps) (notes 04).
 """
-function pinax_save end
 function pinax_save(x, base, fmt)
     return error(
         "Pinax: no `pinax_save` method for $(typeof(x)). " *
         "Pass a file path, or load the Plots/Makie extension.",
     )
+end
+
+"""
+    _save_with(saver, obj, base, fmt) -> path
+
+Helper for backend extensions. Builds the destination path `base.<fmt>`, ensures its
+directory exists, runs `saver(obj, dest)` — the contract is **`(obj, dest)`: figure first,
+path second** — verifies a file was actually written, and returns it.
+"""
+function _save_with(saver, obj, base, fmt)
+    dest = string(base, ".", fmt)
+    dir = dirname(dest)
+    isempty(dir) || mkpath(dir)
+    saver(obj, dest)
+    isfile(dest) || error("Pinax: backend save produced no file at $(dest)")
+    return dest
 end
 
 _ext(p) = (e=splitext(p)[2]; isempty(e) ? "" : lowercase(e[2:end]))
