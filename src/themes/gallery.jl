@@ -77,7 +77,7 @@ end
 
 const _GALLERY_CSS = """
 <style>
-  body{font-family:system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;line-height:1.5}
+  body{font-family:system-ui,sans-serif;max-width:1180px;margin:2rem auto;padding:0 1rem;line-height:1.5;background:#fafafa;color:#24292f}
   h1,h2{border-bottom:1px solid #eee;padding-bottom:.2rem}
   nav{background:#fafafa;border:1px solid #eee;border-radius:8px;padding:.6rem .9rem;margin:1rem 0}
   nav a{display:block;text-decoration:none;color:#0366d6}
@@ -85,8 +85,10 @@ const _GALLERY_CSS = """
   .desc p:first-child{margin-top:0}.desc p:last-child{margin-bottom:0}
   .desc table{border-collapse:collapse;margin:.5rem 0}
   .desc th,.desc td{border:1px solid #ccd;padding:.15rem .5rem;font-size:.9rem}
-  .figgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1rem}
-  figure{margin:0;border:1px solid #ddd;border-radius:8px;padding:.5rem;background:#fff}
+  section.section{background:#fff;border:1px solid #e2e5e9;border-radius:8px;padding:.85rem 1.15rem;margin:0 0 1.4rem;box-shadow:0 1px 2px rgba(27,31,36,.04)}
+  section.section>h2{margin-top:0}
+  .figgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem}
+  figure{margin:0;border:1px solid #e2e5e9;border-radius:8px;padding:.5rem;background:#fdfdfe}
   figure img{width:100%;height:auto}
   figure iframe.pinax-pdf{width:100%;height:460px;border:1px solid #eee;border-radius:4px;background:#fff}
   a.pinax-open{display:inline-block;font-size:.85rem;margin-top:.3rem;color:#0366d6;text-decoration:none}

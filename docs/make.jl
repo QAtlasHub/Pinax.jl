@@ -29,7 +29,7 @@ makedocs(;
         assets=["assets/favicon.ico", "assets/custom.css"],
     ),
     modules=[Pinax],
-    pages=["Home" => "index.md"],
+    pages=["Home" => "index.md", "API Reference" => "api.md"],
 )
 
 deploydocs(;
