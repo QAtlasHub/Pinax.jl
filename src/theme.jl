@@ -35,7 +35,9 @@ const _GALLERY_CSS = """
 # ---------- emit (the theme-dispatched entry point) ----------
 
 "Emit the doc tree to a single HTML file. Doubles as pass 3 (materialize + draw) (notes 02/06)."
-function emit_document(theme::GalleryTheme, doc::Document, outdir::AbstractString)
+function emit_document(
+    theme::GalleryTheme, doc::Document, outdir::AbstractString, cache::RenderCache
+)
     io = IOBuffer()
     rdiag = DiagEntry[]   # render-phase diagnostics; kept local so re-render stays idempotent
     title = isempty(doc.meta.title) ? "Pinax gallery" : doc.meta.title
@@ -55,7 +57,7 @@ function emit_document(theme::GalleryTheme, doc::Document, outdir::AbstractStrin
             "</h1>",
         )
         for sec in pg.sections
-            _emit_section(theme, sec, pg, outdir, io, rdiag)
+            _emit_section(theme, sec, pg, outdir, io, rdiag, cache)
         end
         println(io, "</section>")
     end
@@ -86,7 +88,7 @@ function _emit_index(::GalleryTheme, doc::Document, io)
     return println(io, "</nav>")
 end
 
-function _emit_section(theme, sec::Section, pg::Page, outdir, io, rdiag)
+function _emit_section(theme, sec::Section, pg::Page, outdir, io, rdiag, cache)
     println(
         io,
         "<section class=\"section\" id=\"",
@@ -102,7 +104,7 @@ function _emit_section(theme, sec::Section, pg::Page, outdir, io, rdiag)
     for fig in sec.figures
         base = joinpath(outdir, "assets", "figures", pg.anchor, sec.anchor, fig.anchor)
         try
-            fig.assets = _materialize(fig, base, fmts)
+            materialize!(fig, base, fmts, cache)   # cache hit skips gen (notes 10)
         catch e
             e isa InterruptException && rethrow()
             push!(rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
