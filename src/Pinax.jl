@@ -5,6 +5,7 @@ using DataVault
 using TOML
 using Markdown: Markdown
 using Bibliography: Bibliography
+using Sockets: Sockets
 
 # Design spec lives in notes/ (00–10).
 # Implemented incrementally: document model + structure macros -> resolve -> render -> cache -> theme …
@@ -16,6 +17,7 @@ include("cite.jl")       # BibTeX parsing for @cite / @bibliography (notes 03)
 include("comments.jl")   # id-keyed annotation store (gallery comment layer, notes 01 §4)
 include("theme.jl")      # theme = renderer (GalleryTheme)
 include("render.jl")     # render driver (pass 2 resolve + pass 3 materialize/emit)
+include("serve.jl")      # static HTTP preview server (Sockets) for the rendered gallery
 
 # structure macros (the manuscript DSL)
 export @pinaxsetup,
@@ -33,7 +35,7 @@ export @pinaxsetup,
     @md_str
 
 # render / theme / backend contract
-export render, Theme, GalleryTheme, register_theme!, pinax_save, is_figure
+export render, Theme, GalleryTheme, register_theme!, pinax_save, is_figure, serve
 
 # comment store (CLI / LLM-loop substrate)
 export read_comments, add_comment, set_bookmark!
