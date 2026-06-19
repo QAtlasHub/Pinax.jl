@@ -1,0 +1,125 @@
+/* pinax.css — styling for the interactive comment layer (notes 01 §4).
+   Inlined into the gallery by the GalleryTheme when interactive features are enabled. */
+
+#pinax-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  margin: 0.6rem 0;
+  font-size: 0.85rem;
+}
+#pinax-bar button,
+#pinax-bar .pinax-file {
+  font: inherit;
+  cursor: pointer;
+  background: #f6f8fa;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 0.2rem 0.55rem;
+  color: #24292f;
+}
+#pinax-bar button:hover,
+#pinax-bar .pinax-file:hover {
+  background: #eef1f4;
+}
+#pinax-bar button.on {
+  background: #fff8e1;
+  border-color: #e3b341;
+}
+#pinax-bar .pinax-file input {
+  display: none;
+}
+#pinax-bar .pinax-status {
+  color: #57606a;
+  margin-left: auto;
+}
+
+/* per-node controls injected by the JS */
+.pinax-ctl {
+  font: inherit;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0 0.25rem;
+  opacity: 0.65;
+}
+.pinax-ctl:hover {
+  opacity: 1;
+}
+h2 .pinax-ctl,
+figcaption .pinax-ctl {
+  font-size: 0.85rem;
+}
+
+/* a comment turn typed in the browser but not yet exported to comments.toml */
+.pinax-cmt.local {
+  border-left: 2px solid #e3b341;
+  padding-left: 0.5rem;
+}
+.pinax-cmt .unsaved {
+  color: #9a6700;
+  font-size: 0.8em;
+  margin-left: 0.3rem;
+}
+.pinax-cmt .del {
+  cursor: pointer;
+  color: #cf222e;
+  margin-left: 0.4rem;
+  opacity: 0.6;
+}
+.pinax-cmt .del:hover {
+  opacity: 1;
+}
+
+/* the inline editor */
+.pinax-editor {
+  margin: 0.4rem 0;
+}
+.pinax-editor textarea {
+  width: 100%;
+  min-height: 3.5rem;
+  font: inherit;
+  box-sizing: border-box;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 0.4rem;
+}
+.pinax-editor .row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  margin-top: 0.3rem;
+}
+.pinax-editor input.author {
+  font: inherit;
+  width: 7rem;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 0.15rem 0.4rem;
+}
+.pinax-editor button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid #d0d7de;
+  background: #f6f8fa;
+}
+.pinax-editor button.save {
+  background: #1f6feb;
+  border-color: #1f6feb;
+  color: #fff;
+}
+
+/* bookmark-only filter: hide non-bookmarked sections */
+body.pinax-filter section.section:not(.bookmarked) {
+  display: none;
+}

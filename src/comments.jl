@@ -91,6 +91,7 @@ end
 _read_toml(path) = isfile(path) ? TOML.parsefile(path) : Dict{String,Any}()
 
 function _write_toml(path, data)
+    mkpath(dirname(abspath(path)))   # allow writing to a not-yet-created location (CLI / LLM loop)
     open(path, "w") do io
         return TOML.print(io, data)
     end

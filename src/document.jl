@@ -57,6 +57,7 @@ mutable struct DocMeta
     index::Union{Symbol,Nothing}  # :toc|:cards|:rich override (nothing = theme default)
     numbering::Symbol             # numbering scope :global|:page (reset counters per page)
     numberer::Function            # (kind, counters) -> label string; preamble-overridable
+    features::Vector{Symbol}      # gallery interactive layer toggles: :comments / :bookmarks / :export
 end
 function DocMeta(;
     title="",
@@ -68,6 +69,7 @@ function DocMeta(;
     index=nothing,
     numbering=:global,
     numberer=_default_numberer,
+    features=Symbol[:comments, :bookmarks, :export],
 )
     return DocMeta(
         title,
@@ -79,6 +81,7 @@ function DocMeta(;
         index,
         numbering,
         numberer,
+        collect(Symbol, features),
     )
 end
 
@@ -163,7 +166,8 @@ function reset!(; kwargs...)
         index=get(kw, :index, nothing),
         numbering=get(kw, :numbering, :global),
         numberer=get(kw, :numberer, _default_numberer),
-    )  # css/js/features are interpreted by the theme layer (ignored in this structure slice)
+        features=get(kw, :features, Symbol[:comments, :bookmarks, :export]),
+    )  # css/js are interpreted by the theme layer (ignored in this structure slice)
     CTX.document = Document(meta)
     CTX.page = nothing
     CTX.section = nothing

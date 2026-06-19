@@ -20,6 +20,69 @@ struct GalleryTheme <: Theme end
 
 _esc(s) = replace(string(s), '&' => "&amp;", '<' => "&lt;", '>' => "&gt;", '"' => "&quot;")
 
+# Read a vendored gallery asset (assets/default/<name>), inlined into the single self-contained HTML.
+_asset(name) = read(normpath(joinpath(@__DIR__, "..", "assets", "default", name)), String)
+
+# JSON string literal, escaped so it is safe inside an HTML <script> block (`<`/`>`/`&` -> \uXXXX).
+function _jsonstr(s)
+    out = IOBuffer()
+    print(out, '"')
+    for c in string(s)
+        if c == '"'
+            print(out, "\\\"")
+        elseif c == '\\'
+            print(out, "\\\\")
+        elseif c == '\n'
+            print(out, "\\n")
+        elseif c == '\r'
+            print(out, "\\r")
+        elseif c == '\t'
+            print(out, "\\t")
+        elseif c in ('<', '>', '&')
+            print(out, "\\u", lpad(string(Int(c); base=16), 4, '0'))
+        elseif c < ' '
+            print(out, "\\u", lpad(string(Int(c); base=16), 4, '0'))
+        else
+            print(out, c)
+        end
+    end
+    print(out, '"')
+    return String(take!(out))
+end
+
+# Embed the committed comments/bookmarks (+ enabled features) as JSON for the browser write layer:
+# the JS merges this baseline with its localStorage additions when exporting comments.toml.
+function _emit_committed_json(io, comments, bookmarks, features)
+    print(io, "<script type=\"application/json\" id=\"pinax-committed\">{\"comments\":{")
+    first = true
+    for (id, turns) in comments
+        first || print(io, ",")
+        first = false
+        print(io, _jsonstr(string(id)), ":[")
+        for (i, c) in enumerate(turns)
+            i == 1 || print(io, ",")
+            print(
+                io, "{\"author\":", _jsonstr(c.author), ",\"text\":", _jsonstr(c.text), "}"
+            )
+        end
+        print(io, "]")
+    end
+    print(io, "},\"bookmarks\":{")
+    first = true
+    for id in bookmarks
+        first || print(io, ",")
+        first = false
+        print(io, _jsonstr(string(id)), ":true")
+    end
+    print(io, "},\"features\":[")
+    for (i, f) in enumerate(features)
+        i == 1 || print(io, ",")
+        print(io, _jsonstr(string(f)))
+    end
+    print(io, "]}</script>\n")
+    return nothing
+end
+
 const _GALLERY_CSS = """
 <style>
   body{font-family:system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;line-height:1.5}
@@ -86,6 +149,7 @@ struct EmitCtx
     citenums::Dict{Symbol,Int}                 # cite key -> [n] (first-appearance order)
     comments::Dict{Symbol,Vector{Comment}}     # section anchor -> comment turns (notes 01 §4)
     bookmarks::Set{Symbol}                     # bookmarked section anchors
+    features::Vector{Symbol}                   # interactive layer toggles (:comments/:bookmarks/:export)
 end
 
 # Display-equation block: an optional preceding @label(:id), then $$ ... $$ (newlines allowed).
@@ -352,6 +416,8 @@ function emit_document(
     bib = _load_bib(doc.meta.bib_sources, rdiag)
     citenums, citeorder = _gallery_citations(doc, bib)
     comments, bookmarks = read_comments(comments_file)
+    features = doc.meta.features
+    interactive = any(in(features), (:comments, :bookmarks, :export))
     ctx = EmitCtx(
         String(outdir),
         io,
@@ -364,13 +430,14 @@ function emit_document(
         citenums,
         comments,
         bookmarks,
+        features,
     )
     title = isempty(doc.meta.title) ? "Pinax gallery" : doc.meta.title
     print(io, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">")
     print(io, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
-    print(
-        io, "<title>", _esc(title), "</title>", _GALLERY_CSS, _KATEX_HEAD, "</head><body>\n"
-    )
+    print(io, "<title>", _esc(title), "</title>", _GALLERY_CSS, _KATEX_HEAD)
+    interactive && print(io, "<style>", _asset("pinax.css"), "</style>")
+    print(io, "</head><body>\n")
     println(io, "<h1>", _esc(title), "</h1>")
     ntotal = _total_figures(doc)
     println(
@@ -380,6 +447,7 @@ function emit_document(
         ntotal == 1 ? " figure" : " figures",
         "</div>",
     )
+    interactive && _emit_committed_json(io, comments, bookmarks, features)
 
     _emit_index(theme, doc, io; has_bib=(!isempty(citeorder)))
     for pg in doc.pages
@@ -399,6 +467,7 @@ function emit_document(
     _emit_bibliography(bib, citeorder, io)
     _emit_diagnostics(doc, ctx.rdiag, io)
 
+    interactive && print(io, "<script>", _asset("pinax.js"), "</script>")
     print(io, _KATEX_FOOT)
     println(io, "</body></html>")
     path = joinpath(outdir, "index.html")
@@ -437,7 +506,7 @@ end
 
 function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
     io = ctx.io
-    bookmarked = Symbol(sec.anchor) in ctx.bookmarks
+    bookmarked = (:bookmarks in ctx.features) && (Symbol(sec.anchor) in ctx.bookmarks)
     num = get(ctx.nums, sec.anchor, "")
     heading = isempty(num) ? _esc(sec.title) : string(_esc(num), ". ", _esc(sec.title))
     n = length(sec.figures)
@@ -476,6 +545,7 @@ end
 # target so the binding is visually unambiguous (notes 01 §4): the communication layer over the
 # figures (me / advisor / LLM). Author + markdown body, rendered server-side (raw HTML escaped).
 function _emit_comments(anchor::String, ctx::EmitCtx)
+    (:comments in ctx.features) || return nothing
     turns = get(ctx.comments, Symbol(anchor), Comment[])
     isempty(turns) && return nothing
     io = ctx.io
