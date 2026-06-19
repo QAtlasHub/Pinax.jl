@@ -72,3 +72,4 @@ function _resolve_theme(x)
 end
 
 include("themes/gallery.jl")   # default theme (registers :gallery)
+include("themes/latex.jl")     # LaTeX/PDF theme (registers :latex); reuses gallery helpers
