@@ -111,4 +111,36 @@ using Test
         @test occursin("<strong>emph</strong> caption", html)
         @test !occursin("<p><strong>emph</strong>", html)   # caption is not block-wrapped
     end
+
+    @testset "multi-paragraph caption keeps its <p> wrappers (unwrap guard)" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :s "S" begin
+                @figure svg
+                @caption "para one.\n\npara two."
+            end
+        end
+        html = read(Pinax.render(; out=site("capmulti")), String)
+        @test occursin("<figcaption>", html)
+        # two paragraphs -> _unwrap_p must NOT strip; both stay fully wrapped
+        @test occursin("<p>para one.</p>", html)
+        @test occursin("<p>para two.</p>", html)
+    end
+
+    @testset "table + inline math + @ref coexist in one desc" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :a "A" begin
+                @desc "| q | f |\n|---|---|\n| 1 | \$x^2\$ |\n\nSee @ref(:b)."
+            end
+            @section :b "B" begin
+                @figure svg
+            end
+        end
+        html = read(Pinax.render(; out=site("mixed")), String)
+        @test occursin("<table>", html)
+        @test occursin("\$x^2\$", html)                     # inline math survived inside a cell
+        @test occursin("<a href=\"#b\">Sec. 2</a>", html)   # @ref resolved
+        @test !occursin("\\tag", html)                      # inline math not spuriously numbered
+    end
 end

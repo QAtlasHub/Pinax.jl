@@ -1,10 +1,11 @@
 # theme.jl — a theme is a renderer over the structure IR (doc tree) (notes 06). Default = GalleryTheme.
 #
 # v1 gallery: a single `index.html` with figures materialized into
-# `assets/figures/<page>/<section>/<id>.<fmt>`. Sec./Fig. numbers are assigned by the theme
-# (notes 03: numbering is the theme's job), display equations are numbered + rendered with KaTeX,
-# and `@ref(:id)` / `@label(:id)` cross-references resolve to numbered links. @cite, CSS-counter
-# display, and interactive JS come in later slices.
+# `assets/figures/<page>/<section>/<id>.<fmt>`. Sec./Fig./Eq. numbers are assigned by the theme
+# server-side (notes 03: numbering is the theme's job); `@desc`/`@caption` prose is rendered to HTML
+# server-side via the Markdown stdlib, with math left to KaTeX (client-side). `@ref(:id)` resolves to
+# a numbered link; `@label(:id)` defines a label (for equations). @cite, CSS-counter display, and
+# interactive JS come in later slices.
 
 abstract type Theme end
 
@@ -169,47 +170,55 @@ end
 # Label id -> node anchor, from the resolve table (single-page hrefs are "#anchor").
 _id2anchor(doc::Document) = Dict{Symbol,String}(id => n.anchor for (id, n) in doc.refs)
 
-# Inline `$…$` math (single delimiters, one line, no inner `$`); left verbatim for client KaTeX.
+# Inline `$…$` math (single delimiters, one line, no inner `$`); HTML-escaped then re-injected for
+# client-side KaTeX.
 const _INLINE_EQ_RE = r"\$[^\$\n]+?\$"
 
+# Placeholder token wrapping a protected fragment (math / cross-reference) across the markdown pass.
+_tok(k) = string("PINAXxTOKx", k, "xENDx")
+
 # Render a desc/caption source to HTML. Prose is authored in markdown and rendered server-side via
-# the Markdown stdlib; math and Pinax cross-references are first replaced with placeholder tokens so
+# the Markdown stdlib; math and `@ref` cross-references are first replaced with placeholder tokens so
 # the markdown pass cannot mangle them, then re-injected. Display `$$…$$` become numbered, anchored
-# spans (KaTeX renders them client-side); inline `$…$` is kept verbatim for KaTeX; `@ref` resolves
-# to a numbered link; leftover `@label` is dropped. `item` is the owning node's anchor. `block=false`
-# unwraps the single paragraph markdown adds, for inline use in figure captions.
-function _render_text(source::AbstractString, item, ctx::EmitCtx; block::Bool=true)
+# spans (KaTeX renders them client-side); inline `$…$` is HTML-escaped and re-injected for KaTeX;
+# `@ref` resolves to a numbered link; a bare `@label` (not bound to a `$$…$$` block) is dropped.
+# `item` is the owning node's anchor. `block=false` unwraps the single paragraph markdown adds, for
+# inline use in figure captions.
+function _render_text(source::AbstractString, item::String, ctx::EmitCtx; block::Bool=true)
     eqs = get(ctx.eqseq, item, Tuple{String,Int}[])
     subs = String[]
-    tok!(html) = (push!(subs, html); string("PINAXxTOKx", length(subs), "xENDx"))
+    tok!(html) = (push!(subs, html); _tok(length(subs)))
     # 1. Protect math + refs (display `$$` before inline `$`, since `$$` contains `$`).
     i = Ref(0)
     s = replace(source, _EQ_RE => m -> tok!(_eq_html(m, eqs, i)))
     s = replace(s, _INLINE_EQ_RE => m -> tok!(_esc(m)))
     s = replace(s, _REF_RE => m -> tok!(_ref_html(m, ctx, item)))
     s = replace(s, r"@label\(:\w+\)\s*" => "")
-    # 2. Render the surviving prose as markdown (raw HTML is escaped -> safe).
-    html = _markdown(s)
+    # 2. Render the surviving prose as markdown (raw HTML is escaped -> safe). A parse failure is
+    #    non-fatal: fall back to escaped text and record a diagnostic (notes 09).
+    html = try
+        _markdown(s)
+    catch e
+        e isa InterruptException && rethrow()
+        push!(ctx.rdiag, DiagEntry(WARNING, item, "markdown render failed: $(e)"))
+        _esc(s)
+    end
     # 3. Re-inject the protected fragments.
     for (k, frag) in enumerate(subs)
-        html = replace(html, string("PINAXxTOKx", k, "xENDx") => frag)
+        html = replace(html, _tok(k) => frag)
     end
     return block ? html : _unwrap_p(html)
 end
 
-# Markdown -> HTML, falling back to escaped plain text if the parser ever throws (non-fatal).
+# Markdown -> HTML. Lets the (rare) parse error propagate; `_render_text` turns it into a diagnostic.
 function _markdown(s::AbstractString)
-    try
-        return rstrip(Markdown.html(Markdown.parse(s)))
-    catch
-        return _esc(s)
-    end
+    return rstrip(Markdown.html(Markdown.parse(s)))
 end
 
 # Drop the single `<p>…</p>` wrapper markdown adds, for inline contexts (captions).
 function _unwrap_p(html::AbstractString)
     if startswith(html, "<p>") && endswith(html, "</p>") && count("<p>", html) == 1
-        return html[(ncodeunits("<p>") + 1):(end - ncodeunits("</p>"))]
+        return chopsuffix(chopprefix(html, "<p>"), "</p>")
     end
     return html
 end
@@ -230,7 +239,7 @@ function _eq_html(matched, eqs, i)
     )
 end
 
-function _ref_html(matched, ctx::EmitCtx, item)
+function _ref_html(matched, ctx::EmitCtx, item::String)
     m = match(_REF_RE, matched)
     text = m.captures[1]
     id = m.captures[2] !== nothing ? m.captures[2] : m.captures[3]
