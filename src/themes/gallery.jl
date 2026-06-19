@@ -114,17 +114,48 @@ const _KATEX_CDN = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist"
 const _KATEX_HEAD = string(
     "<link rel=\"stylesheet\" href=\"", _KATEX_CDN, "/katex.min.css\">"
 )
-const _KATEX_FOOT = string(
-    "<script defer src=\"",
-    _KATEX_CDN,
-    "/katex.min.js\"></script>",
-    "<script defer src=\"",
-    _KATEX_CDN,
-    "/contrib/auto-render.min.js\"></script>",
-    "<script>window.addEventListener(\"load\",function(){renderMathInElement(document.body,",
-    "{delimiters:[{left:\"\$\$\",right:\"\$\$\",display:true},",
-    "{left:\"\$\",right:\"\$\",display:false}],throwOnError:false});});</script>",
-)
+# `@newcommand "\\E" raw"\\langle H\\rangle"` notation macros -> KaTeX `macros` option (notes 08 §2).
+function _macros_json(nc)
+    return if isempty(nc)
+        "{}"
+    else
+        string(
+            "{", join([string(_jsonstr(k), ":", _jsonstr(v)) for (k, v) in nc], ","), "}"
+        )
+    end
+end
+
+# KaTeX loader + auto-render, with the document's @newcommand macros wired into the renderer.
+function _katex_foot(newcommands)
+    return string(
+        "<script defer src=\"",
+        _KATEX_CDN,
+        "/katex.min.js\"></script>",
+        "<script defer src=\"",
+        _KATEX_CDN,
+        "/contrib/auto-render.min.js\"></script>",
+        "<script>window.addEventListener(\"load\",function(){renderMathInElement(document.body,",
+        "{delimiters:[{left:\"\$\$\",right:\"\$\$\",display:true},",
+        "{left:\"\$\",right:\"\$\",display:false}],macros:",
+        _macros_json(newcommands),
+        ",throwOnError:false});});</script>",
+    )
+end
+
+# Inline a user css/js overlay (notes 06 §5: appended after the theme's own assets, keeping the
+# single self-contained HTML). A missing file is non-fatal -> diagnostic.
+function _emit_overlay(io, paths, tag, rdiag)
+    for p in paths
+        if isfile(p)
+            print(io, "<", tag, ">", read(p, String), "</", tag, ">")
+        else
+            push!(
+                rdiag, DiagEntry(WARNING, "preamble", "$(tag) overlay file not found: $(p)")
+            )
+        end
+    end
+    return nothing
+end
 
 # ---------- per-render emit state ----------
 
@@ -429,6 +460,7 @@ function emit_document(
     print(io, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
     print(io, "<title>", _esc(title), "</title>", _GALLERY_CSS, _KATEX_HEAD)
     interactive && print(io, "<style>", _asset("pinax.css"), "</style>")
+    _emit_overlay(io, doc.meta.css, "style", rdiag)   # user CSS overlay (notes 06 §5)
     print(io, "</head><body>\n")
     println(io, "<h1>", _esc(title), "</h1>")
     ntotal = _total_figures(doc)
@@ -460,7 +492,8 @@ function emit_document(
     _emit_diagnostics(doc, ctx.rdiag, io)
 
     interactive && print(io, "<script>", _asset("pinax.js"), "</script>")
-    print(io, _KATEX_FOOT)
+    _emit_overlay(io, doc.meta.js, "script", rdiag)   # user JS overlay (notes 06 §5)
+    print(io, _katex_foot(doc.newcommands))           # @newcommand -> KaTeX macros (notes 08 §2)
     println(io, "</body></html>")
     path = joinpath(outdir, "index.html")
     write(path, String(take!(io)))
