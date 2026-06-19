@@ -1,0 +1,11 @@
+[assets_figures_attractors_lorenz_lorenz_fig1]
+key = "17869841057206308291"
+assets = ["assets/figures/attractors/lorenz/lorenz_fig1.svg"]
+
+[assets_figures_attractors_lorenz_lorenz_fig2]
+key = "10525908136158179217"
+assets = ["assets/figures/attractors/lorenz/lorenz_fig2.svg"]
+
+[assets_figures_attractors_rossler_rossler_fig1]
+key = "6781465049766531561"
+assets = ["assets/figures/attractors/rossler/rossler_fig1.svg"]
