@@ -117,7 +117,15 @@ const _GALLERY_CSS = """
   .card-body{padding:.7rem .9rem}
   .card-title{font-weight:600;font-size:1.05rem}
   .card-summary{color:#555;font-size:.9rem;margin-top:.2rem}
+  .card-sections{margin-top:.5rem;font-size:.85rem;color:#57606a}
+  .card-sections .sec-item{padding:.1rem 0}
+  .card-sections .sec-name{font-weight:600;color:#444}
   .card-meta{color:#8b949e;font-size:.82rem;margin-top:.45rem}
+  .pinax-toc{list-style:none;padding:0;margin:1.2rem 0}
+  .pinax-toc>li{padding:.5rem 0;border-bottom:1px solid #eaecef}
+  .pinax-toc a{font-weight:600;color:#0366d6;text-decoration:none}
+  .pinax-toc .toc-summary{color:#555;font-weight:400}
+  .pinax-toc .toc-meta{color:#8b949e;font-size:.85rem}
 </style>
 """
 
@@ -541,8 +549,9 @@ function _emit_toc_nav(doc::Document, io; has_bib::Bool=false)
     return println(io, "</nav>")
 end
 
-# The index: one card per page (thumbnail + title + counts) linking to `<page>.html`.
-function _emit_cards(doc::Document, io, outdir)
+# The index: one card per page (thumbnail + title + summary + counts) linking to `<page>.html`.
+# `rich=true` (index level :rich) additionally lists each page's sections beneath its summary.
+function _emit_cards(doc::Document, io, outdir; rich::Bool=false)
     println(io, "<div class=\"pinax-cards\">")
     for pg in doc.pages
         nfig = sum(length(s.figures) for s in pg.sections; init=0)
@@ -563,6 +572,22 @@ function _emit_cards(doc::Document, io, outdir)
             _esc(pg.title),
             "</div>",
         )
+        pg.summary === nothing ||
+            print(io, "<div class=\"card-summary\">", _esc(pg.summary), "</div>")
+        if rich && !isempty(pg.sections)
+            print(io, "<div class=\"card-sections\">")
+            for sec in pg.sections
+                print(
+                    io,
+                    "<div class=\"sec-item\"><span class=\"sec-name\">",
+                    _esc(sec.title),
+                    "</span>",
+                )
+                sec.summary === nothing || print(io, " — ", _esc(sec.summary))
+                print(io, "</div>")
+            end
+            print(io, "</div>")
+        end
         print(
             io,
             "<div class=\"card-meta\">",
@@ -574,6 +599,40 @@ function _emit_cards(doc::Document, io, outdir)
         )
     end
     return println(io, "</div>")
+end
+
+# A compact alternative index (level :toc): a link list with one-line summaries, no thumbnails.
+function _emit_toc_index(doc::Document, io)
+    println(io, "<ul class=\"pinax-toc\">")
+    for pg in doc.pages
+        nfig = sum(length(s.figures) for s in pg.sections; init=0)
+        nsec = length(pg.sections)
+        print(io, "<li><a href=\"", pg.anchor, ".html\">", _esc(pg.title), "</a>")
+        pg.summary === nothing ||
+            print(io, " <span class=\"toc-summary\">— ", _esc(pg.summary), "</span>")
+        print(
+            io,
+            " <span class=\"toc-meta\">(",
+            nsec,
+            nsec == 1 ? " section, " : " sections, ",
+            nfig,
+            nfig == 1 ? " figure)" : " figures)",
+            "</span></li>",
+        )
+    end
+    return println(io, "</ul>")
+end
+
+# Emit the multi-page index at the resolved verbosity. `@pinaxsetup index=…` (meta.index) overrides
+# the theme's `index_level`: :toc (link list) | :cards (thumbnail cards, default) | :rich (cards + sections).
+function _emit_index(theme::GalleryTheme, doc::Document, io, outdir)
+    level = something(doc.meta.index, index_level(theme))
+    if level === :toc
+        _emit_toc_index(doc, io)
+    else
+        _emit_cards(doc, io, outdir; rich=(level === :rich))
+    end
+    return nothing
 end
 
 """
@@ -703,7 +762,7 @@ function emit_document(
         ntotal == 1 ? " figure" : " figures",
         "</div>",
     )
-    _emit_cards(doc, io, outdir)
+    _emit_index(theme, doc, io, outdir)
     _emit_diagnostics(doc, rdiag, io)
     _emit_foot(io, doc, katex_mode, false, rdiag)
     path = joinpath(outdir, "index.html")

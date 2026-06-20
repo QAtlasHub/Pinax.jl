@@ -126,6 +126,7 @@ end
 mutable struct Page
     id::Symbol
     title::String
+    summary::Union{String,Nothing}   # one-line page description, shown on its index card
     anchor::String
     thumbnail::Union{FigRef,Nothing} # explicit @thumbnail
     no_thumbnail::Bool
@@ -298,10 +299,13 @@ end
 
 # ============================================================ structure macros
 
-"A page. `@page :id \"Title\" begin … end`"
-macro page(id, title, body)
+"A page. `@page :id \"Title\" [summary=…] begin … end`"
+macro page(args...)
+    length(args) >= 3 || error("@page needs :id, \"title\", and a begin…end body")
+    id, title, body = args[1], args[2], args[end]
+    enter = _call(:_enter_page!, (esc(id), esc(title)), _kwspecs(args[3:(end - 1)]))
     return quote
-        _enter_page!($(esc(id)), $(esc(title)))
+        $enter
         try
             $(esc(body))
         finally
@@ -311,9 +315,17 @@ macro page(id, title, body)
     end
 end
 
-function _enter_page!(id::Symbol, title)
+function _enter_page!(id::Symbol, title; summary=nothing)
     doc = _ensure_document!()
-    pg = Page(id, string(title), _anchor(id), nothing, false, Section[])
+    pg = Page(
+        id,
+        string(title),
+        summary === nothing ? nothing : string(summary),
+        _anchor(id),
+        nothing,
+        false,
+        Section[],
+    )
     push!(doc.pages, pg)
     CTX.page = pg
     CTX.section = nothing
