@@ -2,6 +2,12 @@
 
 [← All examples](../examples.md)
 
+**Source:** [LSystems.jl](https://github.com/sotashimozono/LSystems.jl) — `DEFINED_LSYSTEMS`, `grow_string`, `LSystems.string2positions`.
+
+```@raw html
+<p style="margin:.2rem 0 1rem"><a href="../galleries/lsystems/"><b>▶ Open the compiled Pinax gallery</b></a></p>
+```
+
 An [L-system](https://en.wikipedia.org/wiki/L-system) grows a string by repeatedly applying
 substitution rules to an axiom, then a turtle interprets the string as geometry.
 [LSystems.jl](https://github.com/sotashimozono/LSystems.jl) loads each system from a JSON config;

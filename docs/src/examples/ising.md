@@ -2,6 +2,12 @@
 
 [← All examples](../examples.md)
 
+**Source:** self-contained — a 2-D Metropolis simulation written inline with `Plots` + `Random`.
+
+```@raw html
+<p style="margin:.2rem 0 1rem"><a href="../galleries/ising/"><b>▶ Open the compiled Pinax gallery</b></a></p>
+```
+
 A self-contained 2-D Ising Monte Carlo: Metropolis single-spin flips on a periodic lattice with
 Hamiltonian $H=-J\sum_{\langle ij\rangle} s_i s_j$, accepting a flip with probability
 $\min\!\bigl(1, e^{-\beta\Delta E}\bigr)$. The model orders below the Onsager temperature

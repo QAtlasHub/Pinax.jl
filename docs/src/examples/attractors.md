@@ -2,6 +2,12 @@
 
 [← All examples](../examples.md)
 
+**Source:** [DynamicalModels.jl](https://github.com/sotashimozono/DynamicalModels.jl) — `Lorenz`, `Rossler`, `ode_solver(RK4, …)`.
+
+```@raw html
+<p style="margin:.2rem 0 1rem"><a href="../galleries/attractors/"><b>▶ Open the compiled Pinax gallery</b></a></p>
+```
+
 Integrate the Lorenz and Rössler systems from
 [DynamicalModels.jl](https://github.com/sotashimozono/DynamicalModels.jl) and draw each as a **3-D
 attractor plus 2-D projections** — three figures per section, so they lay out as a 3-column grid

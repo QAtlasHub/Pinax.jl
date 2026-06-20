@@ -32,10 +32,10 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Examples" => [
-            "Overview" => "examples.md",
-            "1 · Chaotic attractors" => "examples/attractors.md",
-            "2 · L-system fractals" => "examples/lsystems.md",
-            "3 · Ising model (Monte Carlo)" => "examples/ising.md",
+            "Introduction" => "examples.md",
+            "Chaotic attractors" => "examples/attractors.md",
+            "L-system fractals" => "examples/lsystems.md",
+            "Ising model (Monte Carlo)" => "examples/ising.md",
         ],
         "API Reference" => "api.md",
     ],
