@@ -29,7 +29,16 @@ makedocs(;
         assets=["assets/favicon.ico", "assets/custom.css"],
     ),
     modules=[Pinax],
-    pages=["Home" => "index.md", "API Reference" => "api.md"],
+    pages=[
+        "Home" => "index.md",
+        "Examples" => [
+            "Overview" => "examples.md",
+            "1 · Chaotic attractors" => "examples/attractors.md",
+            "2 · L-system fractals" => "examples/lsystems.md",
+            "3 · Ising model (Monte Carlo)" => "examples/ising.md",
+        ],
+        "API Reference" => "api.md",
+    ],
 )
 
 deploydocs(;

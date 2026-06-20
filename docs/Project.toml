@@ -2,9 +2,12 @@
 Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 DynamicalModels = "155b56ea-488f-4a64-96b5-1bbed62c0e47"
+LSystems = "a3e1f8ee-70d8-4c26-a6f5-dc669742461a"
 Pinax = "e782a80a-1ac9-479e-ba2b-0f3433ef5b4f"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 
 [sources]
 DynamicalModels = {rev = "main", url = "https://github.com/sotashimozono/DynamicalModels.jl"}
+LSystems = {rev = "main", url = "https://github.com/sotashimozono/LSystems.jl"}
 Pinax = {path = ".."}
