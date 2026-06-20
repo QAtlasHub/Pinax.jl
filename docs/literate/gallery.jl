@@ -15,17 +15,17 @@ t = collect(0.0:0.02:80.0)
 lorenz = ode_solver(RK4, Lorenz(), t, [1.0, 1.0, 1.0])
 rossler = ode_solver(RK4, Rossler(), t, [1.0, 1.0, 1.0])
 function orbit3d(tr; kw...)
-    plot(tr[:, 1], tr[:, 2], tr[:, 3]; legend=false, lw=0.4, size=(420, 360), kw...)
+    return plot(tr[:, 1], tr[:, 2], tr[:, 3]; legend=false, lw=0.4, size=(420, 360), kw...)
 end
 function proj(tr, i, j; kw...)
-    plot(tr[:, i], tr[:, j]; legend=false, lw=0.4, size=(420, 360), kw...)
+    return plot(tr[:, i], tr[:, j]; legend=false, lw=0.4, size=(420, 360), kw...)
 end
 
 # ## Example 2 — L-system fractals (LSystems.jl)
 function lsys(name, iter; kw...)
     tile = DEFINED_LSYSTEMS[name]
     pos = LSystems.string2positions(tile, grow_string(tile, iter))
-    plot(
+    return plot(
         [p[1] for p in pos],
         [p[2] for p in pos];
         legend=false,
@@ -70,7 +70,7 @@ function run_ising(L, T; equil, measure)
 end
 Random.seed!(20240620)
 function snap(T)
-    heatmap(
+    return heatmap(
         run_ising(64, T; equil=600, measure=1)[1];
         aspect_ratio=:equal,
         c=:grays,

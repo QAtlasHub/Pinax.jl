@@ -64,7 +64,7 @@ makedocs(;
 # plus one HTML page per @page) for deploy. A fresh module keeps its definitions out of Main.
 let build = joinpath(@__DIR__, "build")
     cd(build) do
-        Base.include(Module(:PinaxGallery), GALLERY_JL)
+        return Base.include(Module(:PinaxGallery), GALLERY_JL)
     end
 end
 
