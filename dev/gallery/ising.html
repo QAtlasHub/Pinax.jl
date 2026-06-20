@@ -1,4 +1,4 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ising model (Monte Carlo) · Pinax example gallery</title><style>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Ising model (Monte Carlo, via DataVault) · Pinax example gallery</title><style>
   body{font-family:system-ui,sans-serif;max-width:1180px;margin:2rem auto;padding:0 1rem;line-height:1.5;background:#fafafa;color:#24292f}
   h1,h2{border-bottom:1px solid #eee;padding-bottom:.2rem}
   nav{background:#fafafa;border:1px solid #eee;border-radius:8px;padding:.6rem .9rem;margin:1rem 0}
@@ -183,37 +183,29 @@ body.pinax-filter section.section:not(.bookmarked) {
 }
 </style></head><body>
 <nav class="pinax-top"><a href="index.html">← Pinax example gallery</a></nav>
-<h1>Ising model (Monte Carlo)</h1>
-<div class="pinax-meta">4 figures</div>
+<h1>Ising model (Monte Carlo, via DataVault)</h1>
+<div class="pinax-meta">2 figures</div>
 <script type="application/json" id="pinax-committed">{"comments":{},"bookmarks":{},"features":["comments","bookmarks","export"]}</script>
 <section class="page" id="ising">
 <nav><strong>Contents</strong>
-<a href="#snapshots">Spin configurations <span class="nfig">(3)</span></a>
-<a href="#magnetization">Magnetization curve <span class="nfig">(1)</span></a>
+<a href="#magnetization">Magnetization vs temperature <span class="nfig">(1)</span></a>
+<a href="#dynamics">Spin dynamics near Tc <span class="nfig">(1)</span></a>
 </nav>
-<section class="section" id="snapshots"><h2>Sec. 5. Spin configurations <span class="nfig">(3)</span></h2>
-<div class="desc"><p>Equilibrated $64\times64$ states across $T_c\approx2.269$: ordered, critical, disordered.</p></div>
-<div class="figgrid">
-<figure id="snapshots_fig1">
-<img src="assets/figures/ising/snapshots/snapshots_fig1.svg" alt="snapshots_fig1">
-<figcaption><b>Fig. 12.</b> $T&lt;T_c$ — ordered</figcaption>
-</figure>
-<figure id="snapshots_fig2">
-<img src="assets/figures/ising/snapshots/snapshots_fig2.svg" alt="snapshots_fig2">
-<figcaption><b>Fig. 13.</b> $T\approx T_c$ — critical</figcaption>
-</figure>
-<figure id="snapshots_fig3">
-<img src="assets/figures/ising/snapshots/snapshots_fig3.svg" alt="snapshots_fig3">
-<figcaption><b>Fig. 14.</b> $T&gt;T_c$ — disordered</figcaption>
-</figure>
-</div>
-</section>
-<section class="section" id="magnetization"><h2>Sec. 6. Magnetization curve <span class="nfig">(1)</span></h2>
-<div class="desc"><p>Order parameter $\langle\lvert m\rvert\rangle(T)$ with the Onsager $T_c$ marked.</p></div>
+<section class="section" id="magnetization"><h2>Sec. 5. Magnetization vs temperature <span class="nfig">(1)</span></h2>
+<div class="desc"><p>Order parameter read back from the vault: $\langle\lvert m\rvert\rangle$ collapses through the Onsager $T_c\approx2.269$ &#40;dashed&#41;.</p></div>
 <div class="figgrid">
 <figure id="magnetization_fig1">
 <img src="assets/figures/ising/magnetization/magnetization_fig1.svg" alt="magnetization_fig1">
-<figcaption><b>Fig. 15.</b> $\langle\lvert m\rvert\rangle$ vs $T$</figcaption>
+<figcaption><b>Fig. 12.</b> each point is one DataVault key &#40;one temperature&#41;</figcaption>
+</figure>
+</div>
+</section>
+<section class="section" id="dynamics"><h2>Sec. 6. Spin dynamics near Tc <span class="nfig">(1)</span></h2>
+<div class="desc"><p>The raw spin snapshots stored in the vault, played back as an animation.</p></div>
+<div class="figgrid figgrid-wide">
+<figure id="dynamics_system_T_2_27__sample_1">
+<img src="assets/figures/ising/dynamics/dynamics_system_T_2_27__sample_1.gif" alt="dynamics_system_T_2_27__sample_1">
+<figcaption><b>Fig. 13.</b> spin lattice near $T_c$ — data-aware &#40;re-rendered only if this key&#39;s vault data changes&#41;</figcaption>
 </figure>
 </div>
 </section>
