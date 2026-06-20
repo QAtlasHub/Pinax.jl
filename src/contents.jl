@@ -4,7 +4,8 @@
 # the gallery card/toc CSS (`_GALLERY_CSS`) so the meta-index looks like a per-gallery index, but is
 # otherwise a light, self-contained page (no KaTeX, no doc tree): the targets are pre-rendered.
 
-# Read an optional entry field; entries are NamedTuples (or anything supporting `haskey`/`get`).
+# Read an optional entry field. Entries are NamedTuples (the documented form); the generic
+# fallback also serves any Symbol-keyed collection (e.g. `Dict{Symbol,Any}`) via `get`.
 _entry_get(e::NamedTuple, k::Symbol, default) = haskey(e, k) ? e[k] : default
 _entry_get(e, k::Symbol, default) = get(e, k, default)
 
@@ -30,12 +31,12 @@ Each entry is a `NamedTuple` describing one target gallery:
 | `summary`   |    no    | one-line description                                          |
 | `thumbnail` |    no    | image path/URL for the card thumbnail (referenced as-is)      |
 | `meta`      |    no    | small caption line, e.g. `"12 pages · 540 figures"`           |
-| `items`     |    no    | `Vector{<:AbstractString}` listed under the summary at `:rich` |
+| `items`     |    no    | list of strings, shown under the summary at `:rich` (each `string`-ified) |
 
 `level` mirrors the gallery index verbosity: `:toc` (link list), `:cards` (thumbnail cards,
-default), `:rich` (cards + each entry's `items`). Hrefs and thumbnails are referenced as given — the
-targets are expected to already exist relative to `out`; this neither renders the galleries nor
-copies their assets.
+default), `:rich` (cards + each entry's `items`). Hrefs and thumbnails are emitted verbatim, so give
+paths relative to the generated `index.html` (or absolute URLs); this neither renders the galleries
+nor copies their assets — the targets are expected to already exist.
 
 ```julia
 Pinax.contents(

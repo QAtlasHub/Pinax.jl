@@ -50,6 +50,16 @@ using Test
         @test occursin("<div class=\"sec-item\">Heat capacity</div>", html)
         @test occursin("<div class=\"sec-item\">Entropy</div>", html)
         @test occursin("<div class=\"card-summary\">Equilibrium TPQ</div>", html)  # still shown
+        # an explicit empty `items` vector is suppressed too (distinct from an absent field)
+        empty_items = read(
+            Pinax.contents(
+                [(; title="A", href="a.html", items=String[])];
+                out=sitedir("c3b"),
+                level=:rich,
+            ),
+            String,
+        )
+        @test !occursin("<div class=\"card-sections\">", empty_items)
     end
 
     @testset "level=:toc is a compact link list, not cards" begin
@@ -79,5 +89,14 @@ using Test
         @test_throws ErrorException Pinax.contents(
             [(; title="A", href="a.html")]; out=sitedir("e2"), level=:bogus
         )
+    end
+
+    @testset "no entries renders a valid, empty index" begin
+        path = Pinax.contents(NamedTuple[]; out=sitedir("c6"), title="Empty Atlas")
+        html = read(path, String)
+        @test isfile(path)
+        @test occursin("0 galleries", html)
+        @test occursin("<div class=\"pinax-cards\">", html)   # container present, no cards inside
+        @test !occursin("<a class=\"pinax-card\"", html)
     end
 end
