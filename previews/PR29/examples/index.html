@@ -3,14 +3,14 @@
 lorenz = ode_solver(RK4, Lorenz(), t, [1.0, 1.0, 1.0])
 rossler = ode_solver(RK4, Rossler(), t, [1.0, 1.0, 1.0])
 function orbit3d(tr; kw...)
-    plot(tr[:, 1], tr[:, 2], tr[:, 3]; legend=false, lw=0.4, size=(420, 360), kw...)
+    return plot(tr[:, 1], tr[:, 2], tr[:, 3]; legend=false, lw=0.4, size=(420, 360), kw...)
 end
 function proj(tr, i, j; kw...)
-    plot(tr[:, i], tr[:, j]; legend=false, lw=0.4, size=(420, 360), kw...)
+    return plot(tr[:, i], tr[:, j]; legend=false, lw=0.4, size=(420, 360), kw...)
 end</code></pre><h2 id="Example-2-—-L-system-fractals-(LSystems.jl)"><a class="docs-heading-anchor" href="#Example-2-—-L-system-fractals-(LSystems.jl)">Example 2 — L-system fractals (LSystems.jl)</a><a id="Example-2-—-L-system-fractals-(LSystems.jl)-1"></a><a class="docs-heading-anchor-permalink" href="#Example-2-—-L-system-fractals-(LSystems.jl)" title="Permalink"></a></h2><pre><code class="language-julia hljs">function lsys(name, iter; kw...)
     tile = DEFINED_LSYSTEMS[name]
     pos = LSystems.string2positions(tile, grow_string(tile, iter))
-    plot(
+    return plot(
         [p[1] for p in pos],
         [p[2] for p in pos];
         legend=false,
@@ -52,7 +52,7 @@ function run_ising(L, T; equil, measure)
 end
 Random.seed!(20240620)
 function snap(T)
-    heatmap(
+    return heatmap(
         run_ising(64, T; equil=600, measure=1)[1];
         aspect_ratio=:equal,
         c=:grays,
@@ -137,4 +137,4 @@ end
         end
         @caption md&quot;$\langle\lvert m\rvert\rangle$ vs $T$&quot;
     end
-end</code></pre><p>Render: a multi-page document → a thumbnail index + one page per <code>@page</code>.</p><pre><code class="language-julia hljs">Pinax.render(; out=&quot;gallery&quot;)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../api/">API Reference »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Saturday 20 June 2026 03:08">Saturday 20 June 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+end</code></pre><p>Render: a multi-page document → a thumbnail index + one page per <code>@page</code>.</p><pre><code class="language-julia hljs">Pinax.render(; out=&quot;gallery&quot;)</code></pre></article><nav class="docs-footer"><a class="docs-footer-prevpage" href="../">« Home</a><a class="docs-footer-nextpage" href="../api/">API Reference »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Saturday 20 June 2026 03:15">Saturday 20 June 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
