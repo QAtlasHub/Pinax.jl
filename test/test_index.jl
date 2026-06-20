@@ -49,7 +49,8 @@ using Test
         @test occursin("<div class=\"card-summary\">alpha blurb</div>", html)
         @test !occursin("<div class=\"card-sections\">", html)  # breakdown is :rich-only
         @test !occursin("inner a", html)                        # section summary is :rich-only
-        @test count("<div class=\"card-summary\">", html) == 1  # Beta has none → no card
+        @test count("<a class=\"pinax-card\"", html) == 2       # both pages get a card
+        @test count("<div class=\"card-summary\">", html) == 1  # only Alpha's summary shown
     end
 
     @testset "index=:rich adds a per-section breakdown under each card" begin
@@ -92,5 +93,23 @@ using Test
         @test !occursin("<div class=\"pinax-cards\">", html)   # cards replaced by the list
         @test occursin("<span class=\"toc-summary\">— alpha blurb</span>", html)
         @test occursin("<a href=\"a.html\">Alpha</a>", html)
+        @test occursin("<span class=\"toc-meta\">(1 section, 1 figure)</span>", html)
+    end
+
+    @testset "index=:rich with a section-less page emits no card-sections for it" begin
+        @pinaxsetup index = :rich
+        @page :empty "Empty" summary = "no sections yet" begin end
+        @page :a "Alpha" summary = "blurb" begin
+            @section :s "S" begin
+                @figure svg
+            end
+        end
+        html = read(Pinax.render(; out=sitedir("rich_empty")), String)
+        @test occursin("<div class=\"card-summary\">no sections yet</div>", html)  # card still shown
+        @test count("<div class=\"card-sections\">", html) == 1                    # only Alpha's
+    end
+
+    @testset "an invalid index= level is rejected, not silently degraded" begin
+        @test_throws ErrorException @pinaxsetup index = :bogus
     end
 end

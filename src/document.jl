@@ -126,7 +126,7 @@ end
 mutable struct Page
     id::Symbol
     title::String
-    summary::Union{String,Nothing}   # one-line page description, shown on its index card
+    summary::Union{String,Nothing}   # one-line page description, shown on the multi-page index (card or toc)
     anchor::String
     thumbnail::Union{FigRef,Nothing} # explicit @thumbnail
     no_thumbnail::Bool
@@ -170,13 +170,19 @@ current_section() = CTX.section
 "Reset the implicit document (fresh, empty). The preamble `@pinaxsetup` calls this."
 function reset!(; kwargs...)
     kw = Dict{Symbol,Any}(kwargs)
+    idx = get(kw, :index, nothing)
+    idx === nothing ||
+        idx in (:toc, :cards, :rich) ||
+        error(
+            "Pinax: @pinaxsetup index= must be :toc, :cards, or :rich (got $(repr(idx)))."
+        )
     meta = DocMeta(;
         title=get(kw, :title, ""),
         theme=get(kw, :theme, :gallery),
         base_url=get(kw, :base_url, ""),
         format=get(kw, :format, Symbol[:svg, :pdf]),
         debug=get(kw, :debug, false),
-        index=get(kw, :index, nothing),
+        index=idx,
         numbering=get(kw, :numbering, :global),
         numberer=get(kw, :numberer, _default_numberer),
         features=get(kw, :features, Symbol[:comments, :bookmarks, :export]),
