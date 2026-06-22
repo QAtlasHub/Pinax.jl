@@ -1,5 +1,6 @@
 using Pinax
 using Test
+using ParamIO
 
 # The :agent backend renders the SAME document as structured data (agent.json + agent.md) instead of
 # human HTML — selectable by theme. Each figure carries its verification substrate (code / params /
@@ -31,15 +32,30 @@ using Test
     @test occursin("\"part\":\"thermal\"", j)
     @test occursin("\"summary\":\"Control: N, g\"", j)
     @test occursin("\"code\":\"svg\"", j)                  # the generating expression (verification)
-    @test occursin("\"params\":\"(N = 24, g = 0.5)\"", j)  # the data binding (provenance)
+    @test occursin("\"params\":{\"N\":24,\"g\":0.5}", j)   # structured data binding (NamedTuple axes)
     @test occursin("energy_fig1.svg", j)                   # the rendered asset path
     @test occursin("\"text\":\"converged\"", j)            # the id-keyed comment thread
 
     md = read(joinpath(tmp, "agent", "agent.md"), String)
     @test occursin("[id: energy]", md)
     @test occursin("[fig: energy_fig1]", md)
-    @test occursin("data: (N = 24, g = 0.5)", md)
+    @test occursin("data: N=24, g=0.5", md)
 
     # the agent backend is registered like any other (self-hosting: no privileged core)
     @test Pinax._resolve_theme(:agent) isa Pinax.AgentTheme
+end
+
+@testset "agent backend: ParamIO DataKey params → structured, sorted axis map" begin
+    tmp = mktempdir()
+    svg = joinpath(tmp, "f.svg")
+    write(svg, "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>")
+    # a DataKey's dotted axes are emitted as a structured, key-sorted JSON object (via the ParamIO ext)
+    key = ParamIO.DataKey(Dict{String,Any}("system.g" => 0.5, "system.N" => 16), 0)
+    Pinax.reset!(; title="d")
+    @page :p "P" begin
+        @figure svg params = key
+        @caption "c"
+    end
+    j = read(Pinax.render(; out=joinpath(tmp, "a"), theme=:agent), String)
+    @test occursin("\"params\":{\"system.N\":16,\"system.g\":0.5}", j)  # sorted dotted axes, native nums
 end
