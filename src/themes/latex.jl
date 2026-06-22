@@ -6,10 +6,18 @@
 # maps straight to `\newcommand`. If `latexmk`/`pdflatex` is on PATH the `.tex` is compiled to PDF;
 # otherwise the `.tex` is emitted for the user to compile. `@raw` (HTML) is skipped by this theme.
 
-struct LaTeXTheme <: Theme end
+"""
+Abstract base for the LaTeX theme: its `emit_*` methods are defined on `LaTeXBase`, so a custom theme
+`struct MyTeX <: LaTeXBase end` inherits the whole LaTeX renderer and overrides only the dispatch
+points it wants (e.g. `emit_figure(::MyTeX, …)`).
+"""
+abstract type LaTeXBase <: Theme end
 
-output_format(::LaTeXTheme) = :latex
-figure_formats(::LaTeXTheme) = Symbol[:pdf]   # vector PDF for print / pdflatex \includegraphics
+"LaTeX/PDF theme — emit a compilable `.tex` from the doc tree."
+struct LaTeXTheme <: LaTeXBase end
+
+output_format(::LaTeXBase) = :latex
+figure_formats(::LaTeXBase) = Symbol[:pdf]   # vector PDF for print / pdflatex \includegraphics
 
 # Single-pass LaTeX escaping for plain text (titles, bib entries). Markdown bodies instead go
 # through `Markdown.latex`, which does its own escaping.
@@ -106,12 +114,12 @@ struct LaTeXCtx
 end
 
 # `@desc`/`@caption` markdown → LaTeX (the latex theme's emit_text).
-function emit_text(::LaTeXTheme, source, item, ctx::LaTeXCtx; block=true)
+function emit_text(::LaTeXBase, source, item, ctx; block=true)
     return _latex_render(source, ctx.ids, ctx.rdiag)
 end
 
 # A node's co-located comments as a "Notes" itemize.
-function emit_comments(theme::LaTeXTheme, anchor, ctx::LaTeXCtx)
+function emit_comments(theme::LaTeXBase, anchor, ctx)
     turns = get(ctx.comments, Symbol(anchor), Comment[])
     isempty(turns) && return nothing
     io = ctx.io
@@ -125,7 +133,7 @@ function emit_comments(theme::LaTeXTheme, anchor, ctx::LaTeXCtx)
 end
 
 # One (already-materialized) figure → a \includegraphics figure.
-function emit_figure(theme::LaTeXTheme, fig, ctx::LaTeXCtx)
+function emit_figure(theme::LaTeXBase, fig, ctx)
     isempty(fig.assets) && return nothing
     io = ctx.io
     rel = replace(relpath(fig.assets[1], ctx.outdir), '\\' => '/')
@@ -138,10 +146,12 @@ function emit_figure(theme::LaTeXTheme, fig, ctx::LaTeXCtx)
 end
 
 # Materialize each figure to `assetdir`, then emit it (the LaTeX analogue of the gallery's emit_view).
-function _latex_emit_figs!(theme::LaTeXTheme, figs, assetdir, ctx::LaTeXCtx)
+function _latex_emit_figs!(theme::LaTeXBase, figs, assetdir, ctx)
     for fig in figs
         try
-            materialize!(fig, joinpath(assetdir, fig.anchor), Symbol[:pdf], ctx.cache)
+            materialize!(
+                fig, joinpath(assetdir, fig.anchor), figure_formats(theme), ctx.cache
+            )
         catch e
             e isa InterruptException && rethrow()
             push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
@@ -152,7 +162,7 @@ function _latex_emit_figs!(theme::LaTeXTheme, figs, assetdir, ctx::LaTeXCtx)
     return nothing
 end
 
-function emit_section(theme::LaTeXTheme, sec, pg, ctx::LaTeXCtx)
+function emit_section(theme::LaTeXBase, sec, pg, ctx)
     io = ctx.io
     println(io, "\\subsection{", _texesc(sec.title), "}\\label{", sec.anchor, "}")
     sec.desc === nothing || println(io, emit_text(theme, sec.desc.source, sec.anchor, ctx))
@@ -163,7 +173,7 @@ function emit_section(theme::LaTeXTheme, sec, pg, ctx::LaTeXCtx)
     return nothing
 end
 
-function emit_page(theme::LaTeXTheme, pg, ctx::LaTeXCtx)
+function emit_page(theme::LaTeXBase, pg, ctx)
     io = ctx.io
     # a page = one \section; its page-level (page-as-leaf) desc + figures, then its subsections
     println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
@@ -184,7 +194,7 @@ function _part_title(doc::Document, pid)
 end
 
 function emit_document(
-    theme::LaTeXTheme,
+    theme::LaTeXBase,
     doc::Document,
     outdir::AbstractString,
     cache::RenderCache;

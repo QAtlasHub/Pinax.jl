@@ -4,15 +4,23 @@
 # output here is JSON/text, not a "document".
 #
 # Per figure it carries the verification substrate so an agent can reconcile a claim against evidence
-# ("data 照合"): the deferred CODE that produced it, the PARAMS / DataKey it is bound to (provenance),
+# ("data reconciliation"): the deferred CODE that produced it, the PARAMS / DataKey it is bound to,
 # the rendered ASSET path (for vision models), the human CAPTION/claim, and the id-keyed COMMENT
 # thread. Output: `agent.json` (machine / MCP-resource-shaped, every unit id-addressable) and
 # `agent.md` (token-lean read view to paste to an LLM).
 
-struct AgentTheme <: Theme end
+"""
+Abstract base for the agent / MCP backend: its `emit_*` methods are defined on `AgentBase`, so a
+custom theme `struct MyAgent <: AgentBase end` inherits the serializer and overrides only the dispatch
+points it wants (e.g. `emit_figure(::MyAgent, …)` to add a field to the JSON).
+"""
+abstract type AgentBase <: Theme end
 
-output_format(::AgentTheme) = :agent
-figure_formats(::AgentTheme) = Symbol[:svg]   # generated figures → svg; pre-made file paths copy as-is
+"Agent / MCP backend — emit the document as structured data (agent.json + agent.md)."
+struct AgentTheme <: AgentBase end
+
+output_format(::AgentBase) = :agent
+figure_formats(::AgentBase) = Symbol[:svg]   # generated figures → svg; pre-made file paths copy as-is
 
 # ---------- shared: materialize a unit's figures (assets are the verifiable artifact) ----------
 
@@ -36,13 +44,12 @@ struct AgentCtx
     io::IOBuffer
     outdir::String
     comments::Dict{Symbol,Vector{Comment}}
-    fmts::Vector{Symbol}
     cache::RenderCache
     rdiag::Vector{DiagEntry}
 end
 
 # One figure → its JSON object (the verification substrate: caption/code/params/assets/comments).
-function emit_figure(::AgentTheme, fig, ctx::AgentCtx)
+function emit_figure(::AgentBase, fig, ctx)
     io = ctx.io
     print(
         io,
@@ -70,8 +77,8 @@ function emit_figure(::AgentTheme, fig, ctx::AgentCtx)
 end
 
 # Materialize then emit a JSON array of figures.
-function _agent_figs!(theme::AgentTheme, figs, assetdir, ctx::AgentCtx)
-    _agent_materialize!(figs, assetdir, ctx.fmts, ctx.cache, ctx.rdiag)
+function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
+    _agent_materialize!(figs, assetdir, figure_formats(theme), ctx.cache, ctx.rdiag)
     io = ctx.io
     print(io, "[")
     for (i, fig) in enumerate(figs)
@@ -82,7 +89,7 @@ function _agent_figs!(theme::AgentTheme, figs, assetdir, ctx::AgentCtx)
     return nothing
 end
 
-function emit_section(theme::AgentTheme, sec, pg, ctx::AgentCtx)
+function emit_section(theme::AgentBase, sec, pg, ctx)
     io = ctx.io
     print(
         io,
@@ -104,7 +111,7 @@ function emit_section(theme::AgentTheme, sec, pg, ctx::AgentCtx)
     return nothing
 end
 
-function emit_page(theme::AgentTheme, pg, ctx::AgentCtx)
+function emit_page(theme::AgentBase, pg, ctx)
     io = ctx.io
     print(
         io,
@@ -133,7 +140,7 @@ function emit_page(theme::AgentTheme, pg, ctx::AgentCtx)
 end
 
 # Build the whole agent.json (title + parts + pages, the latter via the per-node contract).
-function _agent_json(theme::AgentTheme, doc::Document, ctx::AgentCtx)
+function _agent_json(theme::AgentBase, doc::Document, ctx)
     io = ctx.io
     print(io, "{\"title\":", _jsonstr(doc.meta.title), ",\"parts\":[")
     for (i, (pid, ptitle)) in enumerate(doc.parts)
@@ -205,7 +212,7 @@ end
 # ---------- emit ----------
 
 function emit_document(
-    theme::AgentTheme,
+    theme::AgentBase,
     doc::Document,
     outdir::AbstractString,
     cache::RenderCache;
@@ -214,9 +221,7 @@ function emit_document(
     comments, _bm = read_comments(comments_file)
     rdiag = DiagEntry[]
     mkpath(outdir)
-    ctx = AgentCtx(
-        IOBuffer(), String(outdir), comments, figure_formats(theme), cache, rdiag
-    )
+    ctx = AgentCtx(IOBuffer(), String(outdir), comments, cache, rdiag)
     write(joinpath(outdir, "agent.json"), _agent_json(theme, doc, ctx))
     write(joinpath(outdir, "agent.md"), _agent_markdown(doc, outdir, comments))
     # materialize failures leave a figure's `assets` empty in the JSON (the agent sees the gap);
