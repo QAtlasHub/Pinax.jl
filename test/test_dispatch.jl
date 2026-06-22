@@ -53,3 +53,49 @@ Pinax.emit_text(::PlainText, source, item, ctx; block=true) = string("TXT[", sou
     h = read(Pinax.render(; out=joinpath(tmp, "o"), theme=PlainText()), String)
     @test occursin("TXT[hello]", h)   # the overridden text renderer is used for the section desc
 end
+
+# The latex and agent themes are abstract bases too (LaTeXBase / AgentBase), so they are overridable
+# the same way — the override *mechanism* is uniform (the per-node node set differs per backend). This
+# also exercises emit_section(::AgentBase) (the "sections" array), emit_comments(::LaTeXBase) (the
+# Notes itemize), and a `figure_formats` trait override inherited from LaTeXBase.
+struct TaggedTeX <: Pinax.LaTeXBase end
+Pinax.figure_formats(::TaggedTeX) = Symbol[:svg]   # overrides the [:pdf] inherited from LaTeXBase
+Pinax.emit_figure(::TaggedTeX, fig, ctx) = println(ctx.io, "%% TAGFIG ", fig.id)
+
+struct TaggedAgent <: Pinax.AgentBase end
+function Pinax.emit_figure(::TaggedAgent, fig, ctx)
+    return print(ctx.io, "{\"id\":\"", fig.id, "\",\"tagged\":true}")
+end
+
+@testset "latex/agent variant overrides one point, inherits the rest" begin
+    tmp = mktempdir()
+    svg = joinpath(tmp, "f.svg")
+    write(svg, "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>")
+    cf = joinpath(tmp, "comments.toml")
+    mkpath(tmp)
+    Pinax.reset!(; title="x")
+    @page :p "P" begin
+        @section :s "S" begin
+            @desc md"d"
+            @figure svg
+            @caption "c"
+        end
+    end
+    Pinax.add_comment(cf, :s, "a note"; author="me")
+
+    # latex: emit_figure overridden; emit_document/page/section + emit_comments inherited
+    tex = read(
+        Pinax.render(; out=joinpath(tmp, "tex"), theme=TaggedTeX(), comments_file=cf),
+        String,
+    )
+    @test occursin("%% TAGFIG s_fig1", tex)   # the override fired
+    @test occursin("\\subsection{S}", tex)    # emit_section inherited
+    @test occursin("Notes", tex)              # emit_comments (the section's comment) exercised
+    @test Pinax.figure_formats(TaggedTeX()) == Symbol[:svg]  # trait override dispatches to the variant
+
+    # agent: emit_figure overridden; emit_section (the "sections" array) inherited
+    Pinax.render(; out=joinpath(tmp, "agent"), theme=TaggedAgent(), comments_file=cf)
+    j = read(joinpath(tmp, "agent", "agent.json"), String)
+    @test occursin("\"tagged\":true", j)      # the override fired
+    @test occursin("\"sections\":[", j)       # emit_section(::AgentBase) emitted the sections array
+end

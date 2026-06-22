@@ -4,33 +4,42 @@
 # output here is JSON/text, not a "document".
 #
 # Per figure it carries the verification substrate so an agent can reconcile a claim against evidence
-# ("data 照合"): the deferred CODE that produced it, the PARAMS / DataKey it is bound to (provenance),
+# ("data reconciliation"): the deferred CODE that produced it, the PARAMS / DataKey it is bound to,
 # the rendered ASSET path (for vision models), the human CAPTION/claim, and the id-keyed COMMENT
 # thread. Output: `agent.json` (machine / MCP-resource-shaped, every unit id-addressable) and
 # `agent.md` (token-lean read view to paste to an LLM).
 
-struct AgentTheme <: Theme end
+"""
+Abstract base for the agent / MCP backend: its `emit_*` methods are defined on `AgentBase`, so a
+custom theme `struct MyAgent <: AgentBase end` inherits the serializer and overrides only the dispatch
+points it wants (e.g. `emit_figure(::MyAgent, …)` to add a field to the JSON).
+"""
+abstract type AgentBase <: Theme end
 
-output_format(::AgentTheme) = :agent
-figure_formats(::AgentTheme) = Symbol[:svg]   # generated figures → svg; pre-made file paths copy as-is
+"Agent / MCP backend — emit the document as structured data (agent.json + agent.md)."
+struct AgentTheme <: AgentBase end
 
-# ---------- shared: materialize a unit's figures (assets are the verifiable artifact) ----------
-
-function _agent_materialize!(figs, dir, fmts, cache, rdiag)
-    for fig in figs
-        try
-            materialize!(fig, joinpath(dir, fig.anchor), fmts, cache)
-        catch e
-            e isa InterruptException && rethrow()
-            push!(rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
-        end
-    end
-    return nothing
-end
+output_format(::AgentBase) = :agent
+figure_formats(::AgentBase) = Symbol[:svg]   # generated figures → svg; pre-made file paths copy as-is
 
 # ---------- JSON emit (the machine / MCP substrate) ----------
 
-function _agent_fig_json(io, fig::Figure, outdir, comments)
+# Per-render agent state, threaded through the per-node contract methods on `AgentBase`
+# (emit_document/page/section/figure), serializing to JSON instead of HTML. `ctx` is left UNTYPED on
+# those methods on purpose — annotating it `::AgentCtx` can re-introduce dispatch ambiguity with
+# variants. Same override *mechanism* as the gallery, not the same node set: the agent has no
+# emit_text/emit_comments — a figure's comments are embedded inline in its JSON object.
+struct AgentCtx
+    io::IOBuffer
+    outdir::String
+    comments::Dict{Symbol,Vector{Comment}}
+    cache::RenderCache
+    rdiag::Vector{DiagEntry}
+end
+
+# One figure → its JSON object (the verification substrate: caption/code/params/assets/comments).
+function emit_figure(::AgentBase, fig, ctx)
+    io = ctx.io
     print(
         io,
         "{\"id\":",
@@ -45,10 +54,10 @@ function _agent_fig_json(io, fig::Figure, outdir, comments)
     )
     for (i, a) in enumerate(fig.assets)
         i == 1 || print(io, ",")
-        print(io, _jsonstr(replace(relpath(a, outdir), '\\' => '/')))
+        print(io, _jsonstr(replace(relpath(a, ctx.outdir), '\\' => '/')))
     end
     print(io, "],\"comments\":[")
-    for (i, c) in enumerate(get(comments, Symbol(fig.anchor), Comment[]))
+    for (i, c) in enumerate(get(ctx.comments, Symbol(fig.anchor), Comment[]))
         i == 1 || print(io, ",")
         print(io, "{\"author\":", _jsonstr(c.author), ",\"text\":", _jsonstr(c.text), "}")
     end
@@ -56,17 +65,82 @@ function _agent_fig_json(io, fig::Figure, outdir, comments)
     return nothing
 end
 
-function _agent_figs_json(io, figs, outdir, comments)
+# Materialize each figure (the asset is the verifiable artifact), then emit them as a JSON array.
+# Inlined rather than a shared helper so formats come straight from `figure_formats(theme)` — keeps
+# the materialize-all-then-emit-all two-phase shape and mirrors `_latex_emit_figs!`.
+function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
+    fmts = figure_formats(theme)
+    for fig in figs
+        try
+            materialize!(fig, joinpath(assetdir, fig.anchor), fmts, ctx.cache)
+        catch e
+            e isa InterruptException && rethrow()
+            push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+        end
+    end
+    io = ctx.io
     print(io, "[")
     for (i, fig) in enumerate(figs)
         i == 1 || print(io, ",")
-        _agent_fig_json(io, fig, outdir, comments)
+        emit_figure(theme, fig, ctx)
     end
-    return print(io, "]")
+    print(io, "]")
+    return nothing
 end
 
-function _agent_json(doc::Document, outdir, comments, fmts, cache, rdiag)
-    io = IOBuffer()
+function emit_section(theme::AgentBase, sec, pg, ctx)
+    io = ctx.io
+    print(
+        io,
+        "{\"id\":",
+        _jsonstr(string(sec.id)),
+        ",\"title\":",
+        _jsonstr(sec.title),
+        ",\"desc\":",
+        sec.desc === nothing ? "null" : _jsonstr(sec.desc.source),
+        ",\"figures\":",
+    )
+    _agent_figs!(
+        theme,
+        sec.figures,
+        joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor),
+        ctx,
+    )
+    print(io, "}")
+    return nothing
+end
+
+function emit_page(theme::AgentBase, pg, ctx)
+    io = ctx.io
+    print(
+        io,
+        "{\"id\":",
+        _jsonstr(string(pg.id)),
+        ",\"title\":",
+        _jsonstr(pg.title),
+        ",\"part\":",
+        pg.part === nothing ? "null" : _jsonstr(string(pg.part)),
+        ",\"summary\":",
+        pg.summary === nothing ? "null" : _jsonstr(pg.summary),
+        ",\"desc\":",
+        pg.desc === nothing ? "null" : _jsonstr(pg.desc.source),
+        ",\"figures\":",
+    )
+    _agent_figs!(
+        theme, pg.figures, joinpath(ctx.outdir, "assets", "figures", pg.anchor), ctx
+    )
+    print(io, ",\"sections\":[")
+    for (j, sec) in enumerate(pg.sections)
+        j == 1 || print(io, ",")
+        emit_section(theme, sec, pg, ctx)
+    end
+    print(io, "]}")
+    return nothing
+end
+
+# Build the whole agent.json (title + parts + pages, the latter via the per-node contract).
+function _agent_json(theme::AgentBase, doc::Document, ctx)
+    io = ctx.io
     print(io, "{\"title\":", _jsonstr(doc.meta.title), ",\"parts\":[")
     for (i, (pid, ptitle)) in enumerate(doc.parts)
         i == 1 || print(io, ",")
@@ -85,50 +159,7 @@ function _agent_json(doc::Document, outdir, comments, fmts, cache, rdiag)
     print(io, "],\"pages\":[")
     for (i, pg) in enumerate(doc.pages)
         i == 1 || print(io, ",")
-        _agent_materialize!(
-            pg.figures, joinpath(outdir, "assets", "figures", pg.anchor), fmts, cache, rdiag
-        )
-        for sec in pg.sections
-            _agent_materialize!(
-                sec.figures,
-                joinpath(outdir, "assets", "figures", pg.anchor, sec.anchor),
-                fmts,
-                cache,
-                rdiag,
-            )
-        end
-        print(
-            io,
-            "{\"id\":",
-            _jsonstr(string(pg.id)),
-            ",\"title\":",
-            _jsonstr(pg.title),
-            ",\"part\":",
-            pg.part === nothing ? "null" : _jsonstr(string(pg.part)),
-            ",\"summary\":",
-            pg.summary === nothing ? "null" : _jsonstr(pg.summary),
-            ",\"desc\":",
-            pg.desc === nothing ? "null" : _jsonstr(pg.desc.source),
-            ",\"figures\":",
-        )
-        _agent_figs_json(io, pg.figures, outdir, comments)
-        print(io, ",\"sections\":[")
-        for (j, sec) in enumerate(pg.sections)
-            j == 1 || print(io, ",")
-            print(
-                io,
-                "{\"id\":",
-                _jsonstr(string(sec.id)),
-                ",\"title\":",
-                _jsonstr(sec.title),
-                ",\"desc\":",
-                sec.desc === nothing ? "null" : _jsonstr(sec.desc.source),
-                ",\"figures\":",
-            )
-            _agent_figs_json(io, sec.figures, outdir, comments)
-            print(io, "}")
-        end
-        print(io, "]}")
+        emit_page(theme, pg, ctx)
     end
     print(io, "]}")
     return String(take!(io))
@@ -180,7 +211,7 @@ end
 # ---------- emit ----------
 
 function emit_document(
-    ::AgentTheme,
+    theme::AgentBase,
     doc::Document,
     outdir::AbstractString,
     cache::RenderCache;
@@ -188,12 +219,9 @@ function emit_document(
 )
     comments, _bm = read_comments(comments_file)
     rdiag = DiagEntry[]
-    fmts = figure_formats(AgentTheme())
     mkpath(outdir)
-    write(
-        joinpath(outdir, "agent.json"),
-        _agent_json(doc, outdir, comments, fmts, cache, rdiag),
-    )
+    ctx = AgentCtx(IOBuffer(), String(outdir), comments, cache, rdiag)
+    write(joinpath(outdir, "agent.json"), _agent_json(theme, doc, ctx))
     write(joinpath(outdir, "agent.md"), _agent_markdown(doc, outdir, comments))
     # materialize failures leave a figure's `assets` empty in the JSON (the agent sees the gap);
     # no separate diagnostics file is emitted for the machine view.

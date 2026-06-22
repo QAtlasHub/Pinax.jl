@@ -1,4 +1,4 @@
-# themes/latex.jl — a LaTeX theme: emit a compilable `.tex` (→ PDF) from the doc tree (notes 06 §4).
+# themes/latex.jl — a LaTeX theme: emit a compilable `.tex` (→ PDF) from the doc tree (notes 11).
 #
 # Enabled by the pluggable-theme framework (theme.jl). `@desc`/`@caption` markdown is converted to
 # LaTeX via the Markdown stdlib (`Markdown.latex`); math is native ($…$ / display); `@ref`/`@cite`
@@ -6,10 +6,18 @@
 # maps straight to `\newcommand`. If `latexmk`/`pdflatex` is on PATH the `.tex` is compiled to PDF;
 # otherwise the `.tex` is emitted for the user to compile. `@raw` (HTML) is skipped by this theme.
 
-struct LaTeXTheme <: Theme end
+"""
+Abstract base for the LaTeX theme: its `emit_*` methods are defined on `LaTeXBase`, so a custom theme
+`struct MyTeX <: LaTeXBase end` inherits the whole LaTeX renderer and overrides only the dispatch
+points it wants (e.g. `emit_figure(::MyTeX, …)`).
+"""
+abstract type LaTeXBase <: Theme end
 
-output_format(::LaTeXTheme) = :latex
-figure_formats(::LaTeXTheme) = Symbol[:pdf]   # vector PDF for print / pdflatex \includegraphics
+"LaTeX/PDF theme — emit a compilable `.tex` from the doc tree."
+struct LaTeXTheme <: LaTeXBase end
+
+output_format(::LaTeXBase) = :latex
+figure_formats(::LaTeXBase) = Symbol[:pdf]   # vector PDF for print / pdflatex \includegraphics
 
 # Single-pass LaTeX escaping for plain text (titles, bib entries). Markdown bodies instead go
 # through `Markdown.latex`, which does its own escaping.
@@ -93,54 +101,90 @@ function _latex_render(source::AbstractString, ids, rdiag)
     return out
 end
 
-# Emit a list of figures (each materialized as PDF, \includegraphics'd) into the LaTeX stream.
-function _latex_figs!(io, figs, assetdir, ids, cache, rdiag, outdir)
-    for fig in figs
-        base = joinpath(assetdir, fig.anchor)
-        try
-            materialize!(fig, base, Symbol[:pdf], cache)
-        catch e
-            e isa InterruptException && rethrow()
-            push!(rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
-            continue
-        end
-        isempty(fig.assets) && continue
-        rel = replace(relpath(fig.assets[1], outdir), '\\' => '/')
-        println(io, "\\begin{figure}[htbp]\\centering")
-        println(io, "\\includegraphics[width=0.8\\linewidth]{", rel, "}")
-        cap = isempty(fig.caption) ? "" : _latex_render(fig.caption, ids, rdiag)
-        isempty(cap) || println(io, "\\caption{", cap, "}")
-        println(io, "\\label{", fig.anchor, "}\\end{figure}")
-    end
-    return nothing
+# Per-render LaTeX state, threaded through the per-node contract methods on `LaTeXBase`
+# (emit_document/page/section/figure/text/comments). `ctx` is left UNTYPED on those methods on
+# purpose — annotating it `::LaTeXCtx` would force every variant to reuse this exact struct and can
+# re-introduce dispatch ambiguity. Same override *mechanism* as the gallery, not the same node set
+# (the gallery additionally has emit_head/foot/index/view).
+struct LaTeXCtx
+    io::IOBuffer
+    ids::Dict{Symbol,String}
+    comments::Dict{Symbol,Vector{Comment}}
+    cache::RenderCache
+    rdiag::Vector{DiagEntry}
+    outdir::String
 end
 
-# Emit a node's co-located comments as a "Notes" itemize.
-function _latex_comments!(io, anchor, comments, ids, rdiag)
-    turns = get(comments, Symbol(anchor), Comment[])
+# `@desc`/`@caption` markdown → LaTeX (the latex theme's emit_text).
+function emit_text(::LaTeXBase, source, item, ctx; block=true)
+    return _latex_render(source, ctx.ids, ctx.rdiag)
+end
+
+# A node's co-located comments as a "Notes" itemize.
+function emit_comments(theme::LaTeXBase, anchor, ctx)
+    turns = get(ctx.comments, Symbol(anchor), Comment[])
     isempty(turns) && return nothing
+    io = ctx.io
     println(io, "\\par\\noindent\\textbf{Notes.}\\begin{itemize}")
     for c in turns
         who = isempty(c.author) ? "" : string("\\textbf{", _texesc(c.author), "} ")
-        println(io, "\\item ", who, _latex_render(c.text, ids, rdiag))
+        println(io, "\\item ", who, emit_text(theme, c.text, anchor, ctx))
     end
     println(io, "\\end{itemize}")
     return nothing
 end
 
-function _latex_section(io, sec::Section, pg::Page, ids, comments, cache, rdiag, outdir)
+# One (already-materialized) figure → a \includegraphics figure.
+function emit_figure(theme::LaTeXBase, fig, ctx)
+    isempty(fig.assets) && return nothing
+    io = ctx.io
+    rel = replace(relpath(fig.assets[1], ctx.outdir), '\\' => '/')
+    println(io, "\\begin{figure}[htbp]\\centering")
+    println(io, "\\includegraphics[width=0.8\\linewidth]{", rel, "}")
+    cap = isempty(fig.caption) ? "" : emit_text(theme, fig.caption, fig.anchor, ctx)
+    isempty(cap) || println(io, "\\caption{", cap, "}")
+    println(io, "\\label{", fig.anchor, "}\\end{figure}")
+    return nothing
+end
+
+# Materialize each figure to `assetdir`, then emit it (the LaTeX analogue of the gallery's emit_view).
+function _latex_emit_figs!(theme::LaTeXBase, figs, assetdir, ctx)
+    for fig in figs
+        try
+            materialize!(
+                fig, joinpath(assetdir, fig.anchor), figure_formats(theme), ctx.cache
+            )
+        catch e
+            e isa InterruptException && rethrow()
+            push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+            continue
+        end
+        emit_figure(theme, fig, ctx)
+    end
+    return nothing
+end
+
+function emit_section(theme::LaTeXBase, sec, pg, ctx)
+    io = ctx.io
     println(io, "\\subsection{", _texesc(sec.title), "}\\label{", sec.anchor, "}")
-    sec.desc === nothing || println(io, _latex_render(sec.desc.source, ids, rdiag))
-    _latex_figs!(
-        io,
-        sec.figures,
-        joinpath(outdir, "figures", pg.anchor, sec.anchor),
-        ids,
-        cache,
-        rdiag,
-        outdir,
+    sec.desc === nothing || println(io, emit_text(theme, sec.desc.source, sec.anchor, ctx))
+    _latex_emit_figs!(
+        theme, sec.figures, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx
     )
-    _latex_comments!(io, sec.anchor, comments, ids, rdiag)
+    emit_comments(theme, sec.anchor, ctx)
+    return nothing
+end
+
+function emit_page(theme::LaTeXBase, pg, ctx)
+    io = ctx.io
+    # a page = one \section; its page-level (page-as-leaf) desc + figures, then its subsections
+    println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
+    pg.desc === nothing || println(io, emit_text(theme, pg.desc.source, pg.anchor, ctx))
+    _latex_emit_figs!(theme, pg.figures, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
+    emit_comments(theme, pg.anchor, ctx)
+    for sec in pg.sections
+        emit_section(theme, sec, pg, ctx)
+    end
     return nothing
 end
 
@@ -152,7 +196,7 @@ function _part_title(doc::Document, pid)
 end
 
 function emit_document(
-    ::LaTeXTheme,
+    theme::LaTeXBase,
     doc::Document,
     outdir::AbstractString,
     cache::RenderCache;
@@ -165,6 +209,7 @@ function emit_document(
     _, citeorder = _gallery_citations(doc, bib)
     comments, _bm = read_comments(comments_file)
     title = isempty(doc.meta.title) ? "Pinax gallery" : doc.meta.title
+    ctx = LaTeXCtx(io, ids, comments, cache, rdiag, String(outdir))
 
     println(io, "\\documentclass{article}")
     println(
@@ -183,22 +228,7 @@ function emit_document(
             println(io, "\\part{", _texesc(_part_title(doc, pg.part)), "}")
         end
         prev_part = pg.part
-        # a page = one \section; its page-level (page-as-leaf) desc + figures, then its subsections
-        println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
-        pg.desc === nothing || println(io, _latex_render(pg.desc.source, ids, rdiag))
-        _latex_figs!(
-            io,
-            pg.figures,
-            joinpath(outdir, "figures", pg.anchor),
-            ids,
-            cache,
-            rdiag,
-            outdir,
-        )
-        _latex_comments!(io, pg.anchor, comments, ids, rdiag)
-        for sec in pg.sections
-            _latex_section(io, sec, pg, ids, comments, cache, rdiag, outdir)
-        end
+        emit_page(theme, pg, ctx)
     end
     if !isempty(citeorder)
         println(io, "\\begin{thebibliography}{99}")
