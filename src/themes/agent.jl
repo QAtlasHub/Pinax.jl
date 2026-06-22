@@ -22,24 +22,13 @@ struct AgentTheme <: AgentBase end
 output_format(::AgentBase) = :agent
 figure_formats(::AgentBase) = Symbol[:svg]   # generated figures → svg; pre-made file paths copy as-is
 
-# ---------- shared: materialize a unit's figures (assets are the verifiable artifact) ----------
-
-function _agent_materialize!(figs, dir, fmts, cache, rdiag)
-    for fig in figs
-        try
-            materialize!(fig, joinpath(dir, fig.anchor), fmts, cache)
-        catch e
-            e isa InterruptException && rethrow()
-            push!(rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
-        end
-    end
-    return nothing
-end
-
 # ---------- JSON emit (the machine / MCP substrate) ----------
 
-# Per-render agent state — the `ctx` for the contract methods (the agent theme emits JSON, not HTML).
-# It implements the same per-node contract as the gallery (emit_page/section/figure), just serializing.
+# Per-render agent state, threaded through the per-node contract methods on `AgentBase`
+# (emit_document/page/section/figure), serializing to JSON instead of HTML. `ctx` is left UNTYPED on
+# those methods on purpose — annotating it `::AgentCtx` can re-introduce dispatch ambiguity with
+# variants. Same override *mechanism* as the gallery, not the same node set: the agent has no
+# emit_text/emit_comments — a figure's comments are embedded inline in its JSON object.
 struct AgentCtx
     io::IOBuffer
     outdir::String
@@ -76,9 +65,19 @@ function emit_figure(::AgentBase, fig, ctx)
     return nothing
 end
 
-# Materialize then emit a JSON array of figures.
+# Materialize each figure (the asset is the verifiable artifact), then emit them as a JSON array.
+# Inlined rather than a shared helper so formats come straight from `figure_formats(theme)` — keeps
+# the materialize-all-then-emit-all two-phase shape and mirrors `_latex_emit_figs!`.
 function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
-    _agent_materialize!(figs, assetdir, figure_formats(theme), ctx.cache, ctx.rdiag)
+    fmts = figure_formats(theme)
+    for fig in figs
+        try
+            materialize!(fig, joinpath(assetdir, fig.anchor), fmts, ctx.cache)
+        catch e
+            e isa InterruptException && rethrow()
+            push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+        end
+    end
     io = ctx.io
     print(io, "[")
     for (i, fig) in enumerate(figs)

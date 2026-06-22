@@ -55,9 +55,11 @@ Pinax.emit_text(::PlainText, source, item, ctx; block=true) = string("TXT[", sou
 end
 
 # The latex and agent themes are abstract bases too (LaTeXBase / AgentBase), so they are overridable
-# the same way — the per-node contract is uniform across all three formats. This also exercises
-# emit_section(::AgentBase) (the "sections" array) and emit_comments(::LaTeXBase) (the Notes itemize).
+# the same way — the override *mechanism* is uniform (the per-node node set differs per backend). This
+# also exercises emit_section(::AgentBase) (the "sections" array), emit_comments(::LaTeXBase) (the
+# Notes itemize), and a `figure_formats` trait override inherited from LaTeXBase.
 struct TaggedTeX <: Pinax.LaTeXBase end
+Pinax.figure_formats(::TaggedTeX) = Symbol[:svg]   # overrides the [:pdf] inherited from LaTeXBase
 Pinax.emit_figure(::TaggedTeX, fig, ctx) = println(ctx.io, "%% TAGFIG ", fig.id)
 
 struct TaggedAgent <: Pinax.AgentBase end
@@ -89,6 +91,7 @@ end
     @test occursin("%% TAGFIG s_fig1", tex)   # the override fired
     @test occursin("\\subsection{S}", tex)    # emit_section inherited
     @test occursin("Notes", tex)              # emit_comments (the section's comment) exercised
+    @test Pinax.figure_formats(TaggedTeX()) == Symbol[:svg]  # trait override dispatches to the variant
 
     # agent: emit_figure overridden; emit_section (the "sections" array) inherited
     Pinax.render(; out=joinpath(tmp, "agent"), theme=TaggedAgent(), comments_file=cf)

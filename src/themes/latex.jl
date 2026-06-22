@@ -1,4 +1,4 @@
-# themes/latex.jl — a LaTeX theme: emit a compilable `.tex` (→ PDF) from the doc tree (notes 06 §4).
+# themes/latex.jl — a LaTeX theme: emit a compilable `.tex` (→ PDF) from the doc tree (notes 11).
 #
 # Enabled by the pluggable-theme framework (theme.jl). `@desc`/`@caption` markdown is converted to
 # LaTeX via the Markdown stdlib (`Markdown.latex`); math is native ($…$ / display); `@ref`/`@cite`
@@ -101,9 +101,11 @@ function _latex_render(source::AbstractString, ids, rdiag)
     return out
 end
 
-# Per-render LaTeX state — the `ctx` threaded through the contract methods (notes 11). The LaTeX theme
-# implements the same per-node contract as the gallery (emit_page/section/figure/text/comments), just
-# emitting `.tex` instead of HTML; emit_document orchestrates via these dispatch points.
+# Per-render LaTeX state, threaded through the per-node contract methods on `LaTeXBase`
+# (emit_document/page/section/figure/text/comments). `ctx` is left UNTYPED on those methods on
+# purpose — annotating it `::LaTeXCtx` would force every variant to reuse this exact struct and can
+# re-introduce dispatch ambiguity. Same override *mechanism* as the gallery, not the same node set
+# (the gallery additionally has emit_head/foot/index/view).
 struct LaTeXCtx
     io::IOBuffer
     ids::Dict{Symbol,String}
