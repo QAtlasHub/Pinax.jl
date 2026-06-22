@@ -64,6 +64,7 @@ mutable struct DocMeta
     css::Vector{String}           # user CSS overlay files (inlined after the theme's own CSS)
     js::Vector{String}            # user JS overlay files (inlined after the theme's own JS)
     katex::Symbol                 # gallery math assets: :cdn (default) | :local (vendored, offline)
+    assets::Symbol                # theme CSS/JS: :default (separate style.css/app.js) | :inline (embedded)
 end
 function DocMeta(;
     title="",
@@ -79,6 +80,7 @@ function DocMeta(;
     css=String[],
     js=String[],
     katex=:cdn,
+    assets=:default,
 )
     return DocMeta(
         title,
@@ -94,6 +96,7 @@ function DocMeta(;
         collect(String, css),
         collect(String, js),
         katex,
+        assets,
     )
 end
 
@@ -191,6 +194,9 @@ function reset!(; kwargs...)
         error(
             "Pinax: @pinaxsetup index= must be :toc, :cards, or :rich (got $(repr(idx)))."
         )
+    ast = get(kw, :assets, :default)
+    ast in (:default, :inline) ||
+        error("Pinax: @pinaxsetup assets= must be :default or :inline (got $(repr(ast))).")
     meta = DocMeta(;
         title=get(kw, :title, ""),
         theme=get(kw, :theme, :gallery),
@@ -204,6 +210,7 @@ function reset!(; kwargs...)
         css=get(kw, :css, String[]),
         js=get(kw, :js, String[]),
         katex=get(kw, :katex, :cdn),
+        assets=ast,
     )
     CTX.document = Document(meta)
     CTX.part = nothing

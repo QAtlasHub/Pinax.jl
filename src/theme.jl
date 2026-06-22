@@ -22,6 +22,39 @@ figure_formats(::Theme) = Symbol[:svg]    # formats requested from figure object
 index_level(::Theme) = :cards             # default table-of-contents verbosity (:toc | :cards | :rich)
 number(::Theme, node) = nothing           # optional numbering override (the gallery numbers server-side)
 
+# ---- per-node rendering contract (the "display UI" for each IR node; notes 11) ----
+#
+# A theme renders by specializing these generic functions on its theme type via multiple dispatch.
+# The default HTML gallery defines them on the abstract `GalleryBase` (themes/gallery.jl), so a custom
+# theme `struct MyTheme <: GalleryBase end` inherits them all and overrides only what it needs.
+# `ctx` is the theme's own per-render state, passed opaquely.
+
+"Render the multi-page index of pages. `emit_index(theme, doc, io, outdir, bookmarks)`."
+function emit_index end
+
+"Render one page's body (its page-level content + in-page sections). `emit_page(theme, page, ctx)`."
+function emit_page end
+
+"Render one section into the theme's output stream. `emit_section(theme, section, page, ctx)`."
+function emit_section end
+
+"""
+    emit_view(theme, ::Val{view}, figs, assetdir, layout, ctx)
+
+Render a unit's figures in the named `view`. The default view is `:grid`; add a method on
+`::Val{:graph}` / `::Val{:table}` (etc.) to introduce a new per-unit presentation.
+"""
+function emit_view end
+
+"Render one figure — its assets, caption and co-located comments. `emit_figure(theme, figure, ctx)`."
+function emit_figure end
+
+"Render a markdown+math source (a `@desc`/`@caption`). `emit_text(theme, source, item, ctx; block)`."
+function emit_text end
+
+"Render a node's id-keyed comments inline. `emit_comments(theme, anchor, ctx)`."
+function emit_comments end
+
 """
     emit_document(theme, doc, outdir, cache; comments_file) -> path
 

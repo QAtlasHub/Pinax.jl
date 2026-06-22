@@ -9,8 +9,8 @@ using Test
     svg = joinpath(tmp, "a.svg")
     write(svg, "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>")
 
-    @testset "default features inline the JS/CSS + committed JSON baseline" begin
-        Pinax.reset!()
+    @testset "inline asset mode embeds the JS/CSS + committed JSON baseline" begin
+        Pinax.reset!(; assets=:inline)
         @page :p "P" begin
             @section :s "S" begin
                 @figure svg

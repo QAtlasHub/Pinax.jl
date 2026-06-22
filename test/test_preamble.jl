@@ -35,7 +35,7 @@ using Test
     @testset "css overlay is inlined after the theme CSS" begin
         cssf = joinpath(tmp, "extra.css")
         write(cssf, ".MYMARK{color:red}")
-        Pinax.reset!(; css=[cssf])
+        Pinax.reset!(; css=[cssf], assets=:inline)
         @page :p "P" begin
             @section :s "S" begin
                 @figure svg
@@ -48,7 +48,7 @@ using Test
     @testset "js overlay is inlined" begin
         jsf = joinpath(tmp, "extra.js")
         write(jsf, "console.log('MYJSMARK');")
-        Pinax.reset!(; js=[jsf])
+        Pinax.reset!(; js=[jsf], assets=:inline)
         @page :p "P" begin
             @section :s "S" begin
                 @figure svg
@@ -59,7 +59,7 @@ using Test
     end
 
     @testset "missing overlay file -> diagnostic (non-fatal)" begin
-        Pinax.reset!(; css=[joinpath(tmp, "nope.css")])
+        Pinax.reset!(; css=[joinpath(tmp, "nope.css")], assets=:inline)
         @page :p "P" begin
             @section :s "S" begin
                 @figure svg
