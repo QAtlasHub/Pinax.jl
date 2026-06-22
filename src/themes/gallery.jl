@@ -5,8 +5,16 @@
 # server-side; @desc/@caption are markdown (Markdown stdlib) + KaTeX (client); comments render
 # co-located and round-trip to comments.toml via the inlined interactive layer (notes 01/03/06).
 
-"Default theme: a self-contained HTML gallery (v1 minimal)."
-struct GalleryTheme <: Theme end
+"""
+Abstract base for the default HTML gallery. Its rendering methods (`emit_document`, `emit_section`,
+`emit_view`, `emit_figure`, …) are defined on `GalleryBase`, so a custom theme
+`struct MyTheme <: GalleryBase end` inherits the whole gallery and overrides only the dispatch points
+it cares about (e.g. just `emit_figure(::MyTheme, …)`).
+"""
+abstract type GalleryBase <: Theme end
+
+"The default theme: a self-contained, interactive HTML gallery."
+struct GalleryTheme <: GalleryBase end
 
 # ---------- HTML helpers ----------
 
@@ -389,7 +397,7 @@ _tok(k) = string("PINAXxTOKx", k, "xENDx")
 # `@ref` resolves to a numbered link; a bare `@label` (not bound to a `$$…$$` block) is dropped.
 # `item` is the owning node's anchor. `block=false` unwraps the single paragraph markdown adds, for
 # inline use in figure captions.
-function _render_text(source::AbstractString, item::String, ctx::EmitCtx; block::Bool=true)
+function emit_text(theme::GalleryBase, source, item, ctx; block::Bool=true)
     eqs = get(ctx.eqseq, item, Tuple{String,Int}[])
     subs = String[]
     tok!(html) = (push!(subs, html); _tok(length(subs)))
@@ -416,7 +424,7 @@ function _render_text(source::AbstractString, item::String, ctx::EmitCtx; block:
     return block ? html : _unwrap_p(html)
 end
 
-# Markdown -> HTML. Lets the (rare) parse error propagate; `_render_text` turns it into a diagnostic.
+# Markdown -> HTML. Lets the (rare) parse error propagate; `emit_text` turns it into a diagnostic.
 function _markdown(s::AbstractString)
     return rstrip(Markdown.html(Markdown.parse(s)))
 end
@@ -598,27 +606,67 @@ function _card_thumb!(io, pg::Page, outdir, bookmarks)
     return nothing
 end
 
-# Shared <head> … <body> opener for every emitted file.
-function _emit_head(io, title, doc, katex_mode, interactive, rdiag)
+# The gallery's own CSS/JS combined into one blob, for the `:default` (external) asset mode: a shared
+# style.css / app.js the pages link, instead of inlining the same bytes into every file (notes 11).
+_css_raw(s) = strip(replace(s, r"</?style>" => ""))
+function _combined_css(doc, interactive)
+    parts = String[_css_raw(_GALLERY_CSS)]
+    interactive && push!(parts, _asset("pinax.css"))
+    for p in doc.meta.css
+        isfile(p) && push!(parts, read(p, String))
+    end
+    return join(parts, "\n")
+end
+function _combined_js(doc, interactive)
+    parts = String[]
+    interactive && push!(parts, _asset("pinax.js"))
+    for p in doc.meta.js
+        isfile(p) && push!(parts, read(p, String))
+    end
+    return join(parts, "\n")
+end
+_has_js(doc, interactive) = interactive || !isempty(doc.meta.js)
+
+# Theme CSS into <head>, dispatched on the asset mode (`Val(doc.meta.assets)`): `:inline` embeds the
+# <style> blocks (self-contained file); `:default` links the shared style.css emit_document wrote.
+function _emit_styles(::GalleryBase, ::Val{:inline}, io, doc, interactive, rdiag)
+    print(io, _GALLERY_CSS)
+    interactive && print(io, "<style>", _asset("pinax.css"), "</style>")
+    return _emit_overlay(io, doc.meta.css, "style", rdiag)   # user CSS overlay (notes 06 §5)
+end
+function _emit_styles(::GalleryBase, ::Val{:default}, io, doc, interactive, rdiag)
+    return print(io, "<link rel=\"stylesheet\" href=\"style.css\">")
+end
+
+# Theme JS before </body>, dispatched on the asset mode (mirrors _emit_styles).
+function _emit_scripts(::GalleryBase, ::Val{:inline}, io, doc, interactive, rdiag)
+    interactive && print(io, "<script>", _asset("pinax.js"), "</script>")
+    return _emit_overlay(io, doc.meta.js, "script", rdiag)   # user JS overlay (notes 06 §5)
+end
+function _emit_scripts(::GalleryBase, ::Val{:default}, io, doc, interactive, rdiag)
+    return _has_js(doc, interactive) && print(io, "<script src=\"app.js\"></script>")
+end
+
+# Shared <head> … <body> opener for every emitted file — a dispatch point (a variant theme can
+# override the shell). KaTeX is its own asset system (`katex=`); `assets=` governs the gallery CSS/JS.
+function emit_head(theme::GalleryBase, io, title, doc, katex_mode, interactive, rdiag)
     print(io, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">")
     print(io, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
-    print(io, "<title>", _esc(title), "</title>", _GALLERY_CSS, _katex_head(katex_mode))
-    interactive && print(io, "<style>", _asset("pinax.css"), "</style>")
-    _emit_overlay(io, doc.meta.css, "style", rdiag)   # user CSS overlay (notes 06 §5)
+    print(io, "<title>", _esc(title), "</title>", _katex_head(katex_mode))
+    _emit_styles(theme, Val(doc.meta.assets), io, doc, interactive, rdiag)
     return print(io, "</head><body>\n")
 end
 
-# Shared scripts + </body></html> closer.
-function _emit_foot(io, doc, katex_mode, interactive, rdiag)
-    interactive && print(io, "<script>", _asset("pinax.js"), "</script>")
-    _emit_overlay(io, doc.meta.js, "script", rdiag)   # user JS overlay (notes 06 §5)
+# Shared scripts + </body></html> closer — a dispatch point.
+function emit_foot(theme::GalleryBase, io, doc, katex_mode, interactive, rdiag)
+    _emit_scripts(theme, Val(doc.meta.assets), io, doc, interactive, rdiag)
     print(io, _katex_foot(doc.newcommands, katex_mode))   # @newcommand -> KaTeX macros (notes 08 §2)
     return println(io, "</body></html>")
 end
 
 # A page's body: its own (page-as-leaf) description / raw panels / figures, then — if it has any
 # in-page subsections — a Contents nav and the sections, then the page's own co-located comments.
-function _emit_page_body(theme, pg::Page, ctx::EmitCtx)
+function emit_page(theme::GalleryBase, pg, ctx)
     io = ctx.io
     pg.summary === nothing ||
         println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
@@ -626,7 +674,7 @@ function _emit_page_body(theme, pg::Page, ctx::EmitCtx)
         println(
             io,
             "<div class=\"desc\">",
-            _render_text(pg.desc.source, pg.anchor, ctx),
+            emit_text(theme, pg.desc.source, pg.anchor, ctx),
             "</div>",
         )
     end
@@ -635,7 +683,7 @@ function _emit_page_body(theme, pg::Page, ctx::EmitCtx)
     end
     if !isempty(pg.figures)
         assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor)
-        _emit_figures(pg.figures, pg.layout, assetdir, theme, ctx)
+        emit_view(theme, Val(:grid), pg.figures, assetdir, pg.layout, ctx)
     end
     if !isempty(pg.sections)
         println(io, "<nav><strong>Contents</strong>")
@@ -646,10 +694,10 @@ function _emit_page_body(theme, pg::Page, ctx::EmitCtx)
         end
         println(io, "</nav>")
         for sec in pg.sections
-            _emit_section(theme, sec, pg, ctx)
+            emit_section(theme, sec, pg, ctx)
         end
     end
-    _emit_comments(pg.anchor, ctx)   # the page (file node) can carry its own comments
+    emit_comments(theme, pg.anchor, ctx)   # the page (file node) can carry its own comments
     return nothing
 end
 
@@ -831,7 +879,7 @@ end
 
 # Emit the multi-page index at the resolved verbosity. `@pinaxsetup index=…` (meta.index) overrides
 # the theme's `index_level`: :toc (link list) | :cards (thumbnail cards, default) | :rich (cards + sections).
-function _emit_index(theme::GalleryTheme, doc::Document, io, outdir, bookmarks)
+function emit_index(theme::GalleryBase, doc, io, outdir, bookmarks)
     level = something(doc.meta.index, index_level(theme))
     if level === :toc
         _emit_toc_index(doc, io)
@@ -847,7 +895,7 @@ Emit the doc tree (also pass 3: materialize + draw). A single `@page` renders to
 thumbnail cards linking to them (notes 02/06).
 """
 function emit_document(
-    theme::GalleryTheme,
+    theme::GalleryBase,
     doc::Document,
     outdir::AbstractString,
     cache::RenderCache;
@@ -875,6 +923,13 @@ function emit_document(
     katex_mode === :local && _copy_katex(outdir)   # vendor math assets for offline viewing
     merged_ids = merge(base_ids, ids_eq)
     mkpath(outdir)
+    # `:default` asset mode → write the shared style.css / app.js once (the files every page links),
+    # instead of inlining the same CSS/JS into each emitted file.
+    if doc.meta.assets === :default
+        write(joinpath(outdir, "style.css"), _combined_css(doc, interactive))
+        _has_js(doc, interactive) &&
+            write(joinpath(outdir, "app.js"), _combined_js(doc, interactive))
+    end
     title = isempty(doc.meta.title) ? "Pinax gallery" : doc.meta.title
     mkctx(io) = EmitCtx(
         String(outdir),
@@ -895,7 +950,7 @@ function emit_document(
         # One page (or none): a single self-contained file.
         io = IOBuffer()
         ctx = mkctx(io)
-        _emit_head(io, title, doc, katex_mode, interactive, rdiag)
+        emit_head(theme, io, title, doc, katex_mode, interactive, rdiag)
         println(io, "<h1>", _esc(title), "</h1>")
         ntotal = _total_figures(doc)
         println(
@@ -918,29 +973,30 @@ function emit_document(
                 println(
                     io,
                     "<div class=\"desc\">",
-                    _render_text(pg.desc.source, pg.anchor, ctx),
+                    emit_text(theme, pg.desc.source, pg.anchor, ctx),
                     "</div>",
                 )
             end
             for panel in pg.panels
                 println(io, panel)
             end
-            isempty(pg.figures) || _emit_figures(
-                pg.figures,
-                pg.layout,
-                joinpath(ctx.outdir, "assets", "figures", pg.anchor),
+            isempty(pg.figures) || emit_view(
                 theme,
+                Val(:grid),
+                pg.figures,
+                joinpath(ctx.outdir, "assets", "figures", pg.anchor),
+                pg.layout,
                 ctx,
             )
             for sec in pg.sections
-                _emit_section(theme, sec, pg, ctx)
+                emit_section(theme, sec, pg, ctx)
             end
-            _emit_comments(pg.anchor, ctx)
+            emit_comments(theme, pg.anchor, ctx)
             println(io, "</section>")
         end
         _emit_bibliography(bib, citeorder, io)
         _emit_diagnostics(doc, rdiag, io)
-        _emit_foot(io, doc, katex_mode, interactive, rdiag)
+        emit_foot(theme, io, doc, katex_mode, interactive, rdiag)
         path = joinpath(outdir, "index.html")
         write(path, String(take!(io)))
         return path
@@ -950,7 +1006,9 @@ function emit_document(
     for pg in doc.pages
         io = IOBuffer()
         ctx = mkctx(io)
-        _emit_head(io, string(pg.title, " · ", title), doc, katex_mode, interactive, rdiag)
+        emit_head(
+            theme, io, string(pg.title, " · ", title), doc, katex_mode, interactive, rdiag
+        )
         println(
             io,
             "<nav class=\"pinax-top\"><a href=\"index.html\">← ",
@@ -966,15 +1024,15 @@ function emit_document(
         )
         interactive && _emit_committed_json(io, comments, bookmarks, features)
         println(io, "<section class=\"page\" id=\"", pg.anchor, "\">")
-        _emit_page_body(theme, pg, ctx)
+        emit_page(theme, pg, ctx)
         println(io, "</section>")
         _emit_bibliography(bib, citeorder, io)
-        _emit_foot(io, doc, katex_mode, interactive, rdiag)
+        emit_foot(theme, io, doc, katex_mode, interactive, rdiag)
         write(joinpath(outdir, pg.anchor * ".html"), String(take!(io)))
     end
 
     io = IOBuffer()
-    _emit_head(io, title, doc, katex_mode, false, rdiag)
+    emit_head(theme, io, title, doc, katex_mode, false, rdiag)
     println(io, "<h1>", _esc(title), "</h1>")
     ntotal = _total_figures(doc)
     npg = length(doc.pages)
@@ -987,9 +1045,9 @@ function emit_document(
         ntotal == 1 ? " figure" : " figures",
         "</div>",
     )
-    _emit_index(theme, doc, io, outdir, bookmarks)
+    emit_index(theme, doc, io, outdir, bookmarks)
     _emit_diagnostics(doc, rdiag, io)
-    _emit_foot(io, doc, katex_mode, false, rdiag)
+    emit_foot(theme, io, doc, katex_mode, false, rdiag)
     path = joinpath(outdir, "index.html")
     write(path, String(take!(io)))
     return path
@@ -1000,7 +1058,7 @@ function _total_figures(doc::Document)
     return sum(_page_nfigs(pg) for pg in doc.pages; init=0)
 end
 
-function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
+function emit_section(theme::GalleryBase, sec, pg, ctx)
     io = ctx.io
     bookmarked = (:bookmarks in ctx.features) && (Symbol(sec.anchor) in ctx.bookmarks)
     num = get(ctx.nums, sec.anchor, "")
@@ -1016,7 +1074,7 @@ function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
         println(
             io,
             "<div class=\"desc\">",
-            _render_text(sec.desc.source, sec.anchor, ctx),
+            emit_text(theme, sec.desc.source, sec.anchor, ctx),
             "</div>",
         )
     end
@@ -1032,19 +1090,19 @@ function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
                 string(sec.facet, " = ", val)
             end
             println(io, "<h3 class=\"facet\">", _esc(label), "</h3>")
-            _emit_figures(figs, sec.layout, assetdir, theme, ctx)
+            emit_view(theme, Val(:grid), figs, assetdir, sec.layout, ctx)
         end
     else
-        _emit_figures(sec.figures, sec.layout, assetdir, theme, ctx)
+        emit_view(theme, Val(:grid), sec.figures, assetdir, sec.layout, ctx)
     end
-    _emit_comments(sec.anchor, ctx)
+    emit_comments(theme, sec.anchor, ctx)
     return println(io, "</section>")
 end
 
 # Render the id-keyed comment turns for a node (a figure or a section) inline, co-located with their
 # target so the binding is visually unambiguous (notes 01 §4): the communication layer over the
 # figures (me / advisor / LLM). Author + markdown body, rendered server-side (raw HTML escaped).
-function _emit_comments(anchor::String, ctx::EmitCtx)
+function emit_comments(theme::GalleryBase, anchor, ctx)
     (:comments in ctx.features) || return nothing
     turns = get(ctx.comments, Symbol(anchor), Comment[])
     isempty(turns) && return nothing
@@ -1075,9 +1133,10 @@ function _figgrid_class(layout)
     return "figgrid"
 end
 
-# Emit one grid of figures (materialize each: streaming + cache). `assetdir` is the directory the
-# figure assets are written under (`…/assets/figures/<page>[/<section>]`); `layout` is the grid hint.
-function _emit_figures(figs, layout, assetdir, theme, ctx::EmitCtx)
+# The default `:grid` view: one figure grid (materialize each: streaming + cache). `assetdir` is the
+# directory the figure assets go under (`…/assets/figures/<page>[/<section>]`); `layout` is the grid hint.
+# A new presentation (graph/table) is just another `emit_view(theme, ::Val{:name}, …)` method.
+function emit_view(theme::GalleryBase, ::Val{:grid}, figs, assetdir, layout, ctx)
     io = ctx.io
     println(io, "<div class=\"", _figgrid_class(layout), "\">")
     fmts = figure_formats(theme)
@@ -1096,7 +1155,7 @@ function _emit_figures(figs, layout, assetdir, theme, ctx::EmitCtx)
             _emit_placeholder(fig, "no assets", io)
             continue
         end
-        _emit_figure(fig, ctx)
+        emit_figure(theme, fig, ctx)
     end
     return println(io, "</div>")
 end
@@ -1145,7 +1204,7 @@ function _emit_placeholder(fig::Figure, why, io)
     )
 end
 
-function _emit_figure(fig::Figure, ctx::EmitCtx)
+function emit_figure(theme::GalleryBase, fig, ctx)
     io = ctx.io
     println(io, "<figure id=\"", fig.anchor, "\">")
     for a in fig.assets
@@ -1179,8 +1238,11 @@ function _emit_figure(fig::Figure, ctx::EmitCtx)
         end
     end
     num = get(ctx.nums, fig.anchor, "")
-    cap =
-        isempty(fig.caption) ? "" : _render_text(fig.caption, fig.anchor, ctx; block=false)
+    cap = if isempty(fig.caption)
+        ""
+    else
+        emit_text(theme, fig.caption, fig.anchor, ctx; block=false)
+    end
     caphtml = if isempty(num)
         cap
     elseif isempty(cap)
@@ -1189,7 +1251,7 @@ function _emit_figure(fig::Figure, ctx::EmitCtx)
         string("<b>", _esc(num), ".</b> ", cap)
     end
     isempty(caphtml) || println(io, "<figcaption>", caphtml, "</figcaption>")
-    _emit_comments(fig.anchor, ctx)   # co-located: a figure's comments live in its card
+    emit_comments(theme, fig.anchor, ctx)   # co-located: a figure's comments live in its card
     return println(io, "</figure>")
 end
 

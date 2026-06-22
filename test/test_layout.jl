@@ -11,7 +11,7 @@ using Test
     site(n) = joinpath(tmp, n)
 
     @testset "layout maps to a figgrid modifier class" begin
-        Pinax.reset!()
+        Pinax.reset!(; assets=:inline)   # asserts the modifier CSS rules, which are inlined in this mode
         @page :p "P" begin
             @section :g "Grid" begin            # no layout → default grid
                 @figure svg
