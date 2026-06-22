@@ -93,11 +93,10 @@ function _latex_render(source::AbstractString, ids, rdiag)
     return out
 end
 
-function _latex_section(io, sec::Section, pg::Page, ids, comments, cache, rdiag, outdir)
-    println(io, "\\subsection{", _texesc(sec.title), "}\\label{", sec.anchor, "}")
-    sec.desc === nothing || println(io, _latex_render(sec.desc.source, ids, rdiag))
-    for fig in sec.figures
-        base = joinpath(outdir, "figures", pg.anchor, sec.anchor, fig.anchor)
+# Emit a list of figures (each materialized as PDF, \includegraphics'd) into the LaTeX stream.
+function _latex_figs!(io, figs, assetdir, ids, cache, rdiag, outdir)
+    for fig in figs
+        base = joinpath(assetdir, fig.anchor)
         try
             materialize!(fig, base, Symbol[:pdf], cache)
         catch e
@@ -113,16 +112,43 @@ function _latex_section(io, sec::Section, pg::Page, ids, comments, cache, rdiag,
         isempty(cap) || println(io, "\\caption{", cap, "}")
         println(io, "\\label{", fig.anchor, "}\\end{figure}")
     end
-    turns = get(comments, Symbol(sec.anchor), Comment[])
-    if !isempty(turns)
-        println(io, "\\par\\noindent\\textbf{Notes.}\\begin{itemize}")
-        for c in turns
-            who = isempty(c.author) ? "" : string("\\textbf{", _texesc(c.author), "} ")
-            println(io, "\\item ", who, _latex_render(c.text, ids, rdiag))
-        end
-        println(io, "\\end{itemize}")
-    end
     return nothing
+end
+
+# Emit a node's co-located comments as a "Notes" itemize.
+function _latex_comments!(io, anchor, comments, ids, rdiag)
+    turns = get(comments, Symbol(anchor), Comment[])
+    isempty(turns) && return nothing
+    println(io, "\\par\\noindent\\textbf{Notes.}\\begin{itemize}")
+    for c in turns
+        who = isempty(c.author) ? "" : string("\\textbf{", _texesc(c.author), "} ")
+        println(io, "\\item ", who, _latex_render(c.text, ids, rdiag))
+    end
+    println(io, "\\end{itemize}")
+    return nothing
+end
+
+function _latex_section(io, sec::Section, pg::Page, ids, comments, cache, rdiag, outdir)
+    println(io, "\\subsection{", _texesc(sec.title), "}\\label{", sec.anchor, "}")
+    sec.desc === nothing || println(io, _latex_render(sec.desc.source, ids, rdiag))
+    _latex_figs!(
+        io,
+        sec.figures,
+        joinpath(outdir, "figures", pg.anchor, sec.anchor),
+        ids,
+        cache,
+        rdiag,
+        outdir,
+    )
+    _latex_comments!(io, sec.anchor, comments, ids, rdiag)
+    return nothing
+end
+
+function _part_title(doc::Document, pid)
+    return (
+        i=findfirst(p -> first(p) === pid, doc.parts);
+        i === nothing ? string(pid) : last(doc.parts[i])
+    )
 end
 
 function emit_document(
@@ -151,8 +177,25 @@ function emit_document(
     end
     println(io, "\\title{", _texesc(title), "}\\date{}")
     println(io, "\\begin{document}\\maketitle")
+    prev_part = :__start__
     for pg in doc.pages
+        if pg.part !== prev_part && pg.part !== nothing
+            println(io, "\\part{", _texesc(_part_title(doc, pg.part)), "}")
+        end
+        prev_part = pg.part
+        # a page = one \section; its page-level (page-as-leaf) desc + figures, then its subsections
         println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
+        pg.desc === nothing || println(io, _latex_render(pg.desc.source, ids, rdiag))
+        _latex_figs!(
+            io,
+            pg.figures,
+            joinpath(outdir, "figures", pg.anchor),
+            ids,
+            cache,
+            rdiag,
+            outdir,
+        )
+        _latex_comments!(io, pg.anchor, comments, ids, rdiag)
         for sec in pg.sections
             _latex_section(io, sec, pg, ids, comments, cache, rdiag, outdir)
         end

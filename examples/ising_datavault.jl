@@ -68,7 +68,9 @@ for key in DataVault.keys(vault; status=:pending)
     mark_running!(vault, key)
     @printf("  T = %.3f … ", T)
     res = run_ising(T; N=N, sweeps=sweeps)
-    DataVault.save!(vault, key, Dict{String,Any}("T" => T, "M" => res.M, "frames" => res.frames))
+    DataVault.save!(
+        vault, key, Dict{String,Any}("T" => T, "M" => res.M, "frames" => res.frames)
+    )
     mark_done!(vault, key; tag_value=res.M)
     @printf("M = %.3f\n", res.M)
 end
