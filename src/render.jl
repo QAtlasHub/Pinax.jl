@@ -13,6 +13,9 @@ function resolve!(doc::Document)
     empty!(doc.refs)
     for pg in doc.pages
         doc.refs[pg.id] = pg
+        for f in pg.figures            # page-level figures (page-as-leaf)
+            doc.refs[f.id] = f
+        end
         for sec in pg.sections
             doc.refs[sec.id] = sec
             for f in sec.figures

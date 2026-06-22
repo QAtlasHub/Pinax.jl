@@ -99,6 +99,7 @@ const _GALLERY_CSS = """
   .pinax-eq{display:block}
   h3.facet{color:#555;margin:1rem 0 .3rem;font-size:1.05rem;font-weight:600}
   .pinax-meta{color:#666;margin:-.4rem 0 1rem;font-size:.95rem}
+  .pinax-subtitle{color:#57606a;font-size:.95rem;margin:-.2rem 0 .8rem;font-weight:500}
   .nfig{color:#888;font-weight:normal;font-size:.85em}
   nav .nfig{color:#888}
   .bibliography li{margin:.3rem 0;font-size:.92rem}
@@ -116,6 +117,7 @@ const _GALLERY_CSS = """
   .card-thumb{aspect-ratio:4/3;background:#f6f8fa;display:flex;align-items:center;justify-content:center;overflow:hidden}
   .card-thumb img{width:100%;height:100%;object-fit:contain}
   .card-thumb-empty{min-height:150px}
+  .card-thumb-pdf{width:100%;height:100%;border:0;background:#fff;pointer-events:none}
   .card-body{padding:.7rem .9rem}
   .card-title{font-weight:600;font-size:1.05rem}
   .card-summary{color:#555;font-size:.9rem;margin-top:.2rem}
@@ -128,6 +130,14 @@ const _GALLERY_CSS = """
   .pinax-toc a{font-weight:600;color:#0366d6;text-decoration:none}
   .pinax-toc .toc-summary{color:#555;font-weight:400}
   .pinax-toc .toc-meta{color:#8b949e;font-size:.85rem}
+  details.pinax-group{margin:1rem 0;border:1px solid #e2e5e9;border-radius:8px;background:#fff;padding:.2rem .6rem}
+  details.pinax-group>summary{font-weight:700;font-size:1.1rem;cursor:pointer;padding:.5rem .2rem;list-style-position:inside}
+  details.pinax-group[open]>summary{border-bottom:1px solid #eee;margin-bottom:.4rem}
+  details.pinax-group .grp-count{color:#8b949e;font-weight:400;font-size:.85rem}
+  .part-desc{color:#444;font-size:.93rem;line-height:1.55;margin:.1rem .2rem .7rem;max-width:70ch}
+  .part-desc p{margin:.3rem 0}
+  nav details.pinax-group{margin:.3rem 0;padding:.1rem .5rem;background:#fafafa}
+  nav details.pinax-group>summary{font-size:.98rem;padding:.25rem .2rem}
 </style>
 """
 
@@ -224,13 +234,16 @@ const _REF_RE = r"\[([^\]]*)\]\(@ref\s+:(\w+)\)|@ref\(:(\w+)\)"
 # Resolve @cite forms: `@cite(:key)` and `[text](@cite key)` (colon optional in the link form).
 const _CITE_RE = r"\[([^\]]*)\]\(@cite\s+:?(\w+)\)|@cite\(:(\w+)\)"
 
-# Build the counters NamedTuple handed to the numberer. `page` is the 1-based page index and
-# `page_id` the page's id (Symbol) — so a numberer can prefix section numbers per "part" (e.g.
-# `c.page_id === :eq ? "EQ$(c.section)" : "GQ$(c.section)"`), typically with numbering=:page.
-function _counters(pagen, pageid, secn, fign, subfig, eqn)
+# Build the counters NamedTuple handed to the numberer. `page` is the 1-based page index, `page_id`
+# the page's id; `part`/`part_id` the 1-based @part index and its id (0/`nothing` if ungrouped) — so a
+# numberer can prefix per part (e.g. `c.part_id === :eq ? "EQ$(c.page)" : "GQ$(c.page)"`), typically
+# with numbering=:part (counters reset at each part). `:page` numbers the page itself (page badge).
+function _counters(pagen, pageid, partn, partid, secn, fign, subfig, eqn)
     return (;
         page=pagen,
         page_id=pageid,
+        part=partn,
+        part_id=partid,
         section=secn,
         figure=fign,
         subfigure=subfig,
@@ -238,37 +251,74 @@ function _counters(pagen, pageid, secn, fign, subfig, eqn)
     )
 end
 
-# Theme-side numbering (notes 03/06). Assigns Sec./Fig./Eq. numbers in document order (continuous,
-# or reset per page when numbering=:page), scanning desc/caption sources for display equations.
+# 1-based index of a part id in the document's @part registry (0 = ungrouped).
+function _part_index(doc::Document, pid)
+    return pid === nothing ? 0 : something(findfirst(p -> first(p) === pid, doc.parts), 0)
+end
+
+# Theme-side numbering (notes 03/06). Assigns Page/Sec./Fig./Eq. numbers in document order — continuous,
+# or reset per page (numbering=:page) or per part (numbering=:part) — scanning desc/caption sources for
+# display equations. Page-level figures (page-as-leaf) are numbered before the page's sections.
 # Returns (nums, ids_eq, eqseq).
 function _gallery_numbers(doc::Document)
     nums = Dict{String,String}()
     ids_eq = Dict{Symbol,String}()
     eqseq = Dict{String,Vector{Tuple{String,Int}}}()
     perpage = doc.meta.numbering === :page
+    perpart = doc.meta.numbering === :part
     numberer = doc.meta.numberer
-    secn = fign = eqn = 0
-    pagen = 0
+    secn = fign = eqn = pagen = 0
+    prev_part = :__start__
     for pg in doc.pages
+        partn = _part_index(doc, pg.part)
+        if perpart && pg.part !== prev_part
+            pagen = secn = fign = eqn = 0
+        end
+        prev_part = pg.part
         pagen += 1
+        perpage && (secn = fign = eqn = 0)
         pid = pg.id
-        if perpage
-            secn = fign = eqn = 0
+        # the page badge itself (e.g. EQ3 / GQ7), then page-level desc + figures (page-as-leaf)
+        nums[pg.anchor] = string(
+            numberer(:page, _counters(pagen, pid, partn, pg.part, secn, fign, 0, eqn))
+        )
+        mkctr(e) = _counters(pagen, pid, partn, pg.part, secn, fign, 0, e)
+        eqn = _scan_eqs!(
+            _descsrc(pg.desc), pg.anchor, mkctr, nums, ids_eq, eqseq, numberer, eqn
+        )
+        subfig = 0
+        for fig in pg.figures
+            fign += 1
+            subfig += 1
+            nums[fig.anchor] = string(
+                numberer(
+                    :figure, _counters(pagen, pid, partn, pg.part, secn, fign, subfig, eqn)
+                ),
+            )
+            sf = subfig
+            eqn = _scan_eqs!(
+                fig.caption,
+                fig.anchor,
+                e -> _counters(pagen, pid, partn, pg.part, secn, fign, sf, e),
+                nums,
+                ids_eq,
+                eqseq,
+                numberer,
+                eqn,
+            )
         end
         for sec in pg.sections
             secn += 1
             subfig = 0
             nums[sec.anchor] = string(
-                numberer(:section, _counters(pagen, pid, secn, fign, subfig, eqn))
+                numberer(
+                    :section, _counters(pagen, pid, partn, pg.part, secn, fign, subfig, eqn)
+                ),
             )
             eqn = _scan_eqs!(
                 _descsrc(sec.desc),
                 sec.anchor,
-                pagen,
-                pid,
-                secn,
-                fign,
-                subfig,
+                e -> _counters(pagen, pid, partn, pg.part, secn, fign, 0, e),
                 nums,
                 ids_eq,
                 eqseq,
@@ -279,16 +329,16 @@ function _gallery_numbers(doc::Document)
                 fign += 1
                 subfig += 1
                 nums[fig.anchor] = string(
-                    numberer(:figure, _counters(pagen, pid, secn, fign, subfig, eqn))
+                    numberer(
+                        :figure,
+                        _counters(pagen, pid, partn, pg.part, secn, fign, subfig, eqn),
+                    ),
                 )
+                sf = subfig
                 eqn = _scan_eqs!(
                     fig.caption,
                     fig.anchor,
-                    pagen,
-                    pid,
-                    secn,
-                    fign,
-                    subfig,
+                    e -> _counters(pagen, pid, partn, pg.part, secn, fign, sf, e),
                     nums,
                     ids_eq,
                     eqseq,
@@ -303,11 +353,9 @@ end
 
 _descsrc(d) = d === nothing ? "" : d.source
 
-# Scan one source for `$$…$$` blocks: number each equation (numberer gets the live section/figure
-# counters), register `@label(:id)` ids, record the per-node ordered (anchor, number) list.
-function _scan_eqs!(
-    source, node_anchor, pagen, pid, secn, fign, subfig, nums, ids_eq, eqseq, numberer, eqn
-)
+# Scan one source for `$$…$$` blocks: number each equation (numberer gets the live counters via the
+# `mkctr(eqn)` closure), register `@label(:id)` ids, record the per-node ordered (anchor, number) list.
+function _scan_eqs!(source, node_anchor, mkctr, nums, ids_eq, eqseq, numberer, eqn)
     isempty(source) && return eqn
     lst = Tuple{String,Int}[]
     k = 0
@@ -316,9 +364,7 @@ function _scan_eqs!(
         k += 1
         label = m.captures[1]
         anchor = label !== nothing ? _anchor(Symbol(label)) : string(node_anchor, "_eq", k)
-        nums[anchor] = string(
-            numberer(:equation, _counters(pagen, pid, secn, fign, subfig, eqn))
-        )
+        nums[anchor] = string(numberer(:equation, mkctr(eqn)))
         label !== nothing && (ids_eq[Symbol(label)] = anchor)
         push!(lst, (anchor, eqn))
     end
@@ -454,16 +500,23 @@ end
 function _gallery_citations(doc::Document, bib::Dict{Symbol,BibEntry})
     citenums = Dict{Symbol,Int}()
     order = Symbol[]
-    for pg in doc.pages, sec in pg.sections
-        srcs = String[_descsrc(sec.desc)]
-        for f in sec.figures
-            push!(srcs, f.caption)
-        end
-        for src in srcs, m in eachmatch(_CITE_RE, src)
+    seen(src) =
+        for m in eachmatch(_CITE_RE, src)
             key = Symbol(m.captures[2] !== nothing ? m.captures[2] : m.captures[3])
             if haskey(bib, key) && !haskey(citenums, key)
                 push!(order, key)
                 citenums[key] = length(order)
+            end
+        end
+    for pg in doc.pages
+        seen(_descsrc(pg.desc))                 # page-level desc (page-as-leaf)
+        for f in pg.figures
+            seen(f.caption)
+        end
+        for sec in pg.sections
+            seen(_descsrc(sec.desc))
+            for f in sec.figures
+                seen(f.caption)
             end
         end
     end
@@ -472,22 +525,75 @@ end
 
 # ---------- emit (the theme-dispatched entry point) ----------
 
-# Resolve a page's thumbnail figure for the index cards (the model picks the FigRef:
-# explicit @thumbnail > a thumbnail=true @figure > the page's first figure > none).
-function _page_thumb(pg::Page)
-    ref = resolved_thumbnail(pg)
-    ref === nothing && return nothing
-    for sec in pg.sections, f in sec.figures
-        f.id === ref.id && return f
+# Figure count of one page = its page-level figures plus every section's figures.
+function _page_nfigs(pg::Page)
+    return length(pg.figures) + sum(length(s.figures) for s in pg.sections; init=0)
+end
+
+# Every figure of a page in display order: page-level (page-as-leaf) first, then each section's.
+function _page_figs(pg::Page)
+    figs = copy(pg.figures)
+    for sec in pg.sections
+        append!(figs, sec.figures)
+    end
+    return figs
+end
+
+# The figure shown on a page's index card. Author intent first (@thumbnail / a thumbnail=true marker),
+# then a bookmarked figure (the reader's "important" signal), then the first figure; `nothing` if the
+# page has no figures (the card shows the plain "no figure" state) or `@no_thumbnail` opted out.
+function _card_thumb_fig(pg::Page, bookmarks)
+    pg.no_thumbnail && return nothing
+    figs = _page_figs(pg)
+    isempty(figs) && return nothing
+    if pg.thumbnail !== nothing
+        i = findfirst(f -> f.id === pg.thumbnail.id, figs)
+        i === nothing || return figs[i]
+    end
+    for f in figs
+        f.thumbnail && return f
+    end
+    if !isempty(bookmarks)
+        for f in figs
+            Symbol(f.anchor) in bookmarks && return f
+        end
+    end
+    return figs[1]
+end
+
+# Pick a card-thumbnail asset for a figure: a raster/vector image if it has one (drawn as <img>),
+# else a PDF (a lazy mini-preview of the actual page), else nothing. Returns (:img|:pdf, rel).
+function _thumb_asset(fig::Figure, outdir)
+    rel(a) = replace(relpath(a, outdir), '\\' => '/')
+    for a in fig.assets
+        _ext(a) in ("svg", "png", "jpg", "jpeg", "gif", "webp", "apng", "avif") &&
+            return (:img, rel(a))
+    end
+    for a in fig.assets
+        _ext(a) == "pdf" && return (:pdf, rel(a))
     end
     return nothing
 end
 
-# A thumbnail <img> source: a figure's first raster/vector asset, relative to `outdir`.
-function _thumb_src(fig::Figure, outdir)
-    for a in fig.assets
-        _ext(a) in ("svg", "png", "jpg", "jpeg") &&
-            return replace(relpath(a, outdir), '\\' => '/')
+# Emit a card's thumbnail: the resolved figure as a preview (raster <img> / PDF mini-preview), or the
+# plain "no figure" state when the page has no figures (or `@no_thumbnail`, or no previewable asset).
+function _card_thumb!(io, pg::Page, outdir, bookmarks)
+    tf = _card_thumb_fig(pg, bookmarks)
+    ta = tf === nothing ? nothing : _thumb_asset(tf, outdir)
+    if ta === nothing
+        print(io, "<div class=\"card-thumb card-thumb-empty\"></div>")   # no figure
+    elseif ta[1] === :img
+        print(
+            io, "<div class=\"card-thumb\"><img src=\"", _esc(ta[2]), "\" alt=\"\"></div>"
+        )
+    else
+        # the resolved figure, previewed: lazy (only visible cards load), click-through to the card
+        print(
+            io,
+            "<div class=\"card-thumb\"><iframe class=\"card-thumb-pdf\" loading=\"lazy\" tabindex=\"-1\" title=\"\" src=\"",
+            _esc(ta[2]),
+            "#toolbar=0&navpanes=0&view=Fit\"></iframe></div>",
+        )
     end
     return nothing
 end
@@ -510,9 +616,27 @@ function _emit_foot(io, doc, katex_mode, interactive, rdiag)
     return println(io, "</body></html>")
 end
 
-# A page's own Contents nav (its sections) followed by the sections themselves.
+# A page's body: its own (page-as-leaf) description / raw panels / figures, then — if it has any
+# in-page subsections — a Contents nav and the sections, then the page's own co-located comments.
 function _emit_page_body(theme, pg::Page, ctx::EmitCtx)
     io = ctx.io
+    pg.summary === nothing ||
+        println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
+    if pg.desc !== nothing
+        println(
+            io,
+            "<div class=\"desc\">",
+            _render_text(pg.desc.source, pg.anchor, ctx),
+            "</div>",
+        )
+    end
+    for panel in pg.panels        # @raw blocks under @page, emitted verbatim
+        println(io, panel)
+    end
+    if !isempty(pg.figures)
+        assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor)
+        _emit_figures(pg.figures, pg.layout, assetdir, theme, ctx)
+    end
     if !isempty(pg.sections)
         println(io, "<nav><strong>Contents</strong>")
         for sec in pg.sections
@@ -521,30 +645,86 @@ function _emit_page_body(theme, pg::Page, ctx::EmitCtx)
             println(io, "<a href=\"#", sec.anchor, "\">", _esc(sec.title), cnt, "</a>")
         end
         println(io, "</nav>")
+        for sec in pg.sections
+            _emit_section(theme, sec, pg, ctx)
+        end
     end
-    for sec in pg.sections
-        _emit_section(theme, sec, pg, ctx)
-    end
+    _emit_comments(pg.anchor, ctx)   # the page (file node) can carry its own comments
     return nothing
 end
 
-# Single-page table-of-contents nav: page links + indented section links.
+# Group pages by their @part (in @part declaration order); ungrouped pages (part === nothing) form a
+# trailing untitled group. Returns [(part_id_or_nothing, title_or_nothing, pages)].
+function _grouped_pages(doc::Document)
+    bypart = Dict{Union{Symbol,Nothing},Vector{Page}}()
+    for pg in doc.pages
+        push!(get!(bypart, pg.part, Page[]), pg)
+    end
+    groups = Tuple{Union{Symbol,Nothing},Union{String,Nothing},Vector{Page}}[]
+    for (id, title) in doc.parts
+        haskey(bypart, id) && push!(groups, (id, title, bypart[id]))
+    end
+    haskey(bypart, nothing) && push!(groups, (nothing, nothing, bypart[nothing]))
+    return groups
+end
+
+# "N section(s) · M figure(s)" (or just figures when a page has no subsections).
+function _count_meta(nsec, nfig)
+    figs = string(nfig, nfig == 1 ? " figure" : " figures")
+    nsec == 0 && return figs
+    return string(nsec, nsec == 1 ? " section · " : " sections · ", figs)
+end
+
+# A part's overview description (markdown → HTML), shown beneath its index group heading; "" if none.
+# Math ($…$) renders client-side via KaTeX (the index loads it); a parse failure falls back to text.
+function _part_desc_html(doc::Document, pid)
+    pid === nothing && return ""
+    d = get(doc.part_descs, pid, nothing)
+    d === nothing && return ""
+    body = try
+        _markdown(d.source)
+    catch e
+        e isa InterruptException && rethrow()
+        _esc(d.source)
+    end
+    return string("<div class=\"part-desc\">", body, "</div>")
+end
+
+# Single-page table-of-contents nav: pages (grouped under their @part) + indented section links.
 function _emit_toc_nav(doc::Document, io; has_bib::Bool=false)
     println(io, "<nav><strong>Contents</strong>")
-    for pg in doc.pages
-        println(io, "<a href=\"#", pg.anchor, "\">", _esc(pg.title), "</a>")
+    pagelink(pg) = begin
+        n = _page_nfigs(pg)
+        cnt = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
+        println(io, "<a href=\"#", pg.anchor, "\">", _esc(pg.title), cnt, "</a>")
         for sec in pg.sections
-            n = length(sec.figures)
-            cnt = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
+            sn = length(sec.figures)
+            scnt = sn > 0 ? string(" <span class=\"nfig\">(", sn, ")</span>") : ""
             println(
                 io,
                 "<a href=\"#",
                 sec.anchor,
                 "\" style=\"margin-left:1.2rem\">",
                 _esc(sec.title),
-                cnt,
+                scnt,
                 "</a>",
             )
+        end
+    end
+    if isempty(doc.parts)
+        for pg in doc.pages
+            pagelink(pg)
+        end
+    else
+        for (_pid, title, pages) in _grouped_pages(doc)
+            ttl = title === nothing ? "Other" : title
+            println(
+                io, "<details class=\"pinax-group\" open><summary>", _esc(ttl), "</summary>"
+            )
+            for pg in pages
+                pagelink(pg)
+            end
+            println(io, "</details>")
         end
     end
     has_bib && println(io, "<a href=\"#bibliography\">References</a>")
@@ -553,21 +733,12 @@ end
 
 # The index: one card per page (thumbnail + title + summary + counts) linking to `<page>.html`.
 # `rich=true` (index level :rich) additionally lists each page's sections beneath its summary.
-function _emit_cards(doc::Document, io, outdir; rich::Bool=false)
-    println(io, "<div class=\"pinax-cards\">")
-    for pg in doc.pages
-        nfig = sum(length(s.figures) for s in pg.sections; init=0)
+function _emit_cards(doc::Document, io, outdir, bookmarks; rich::Bool=false)
+    card(pg) = begin
+        nfig = _page_nfigs(pg)
         nsec = length(pg.sections)
-        tf = _page_thumb(pg)
-        src = tf === nothing ? nothing : _thumb_src(tf, outdir)
         print(io, "<a class=\"pinax-card\" href=\"", pg.anchor, ".html\">")
-        if src === nothing
-            print(io, "<div class=\"card-thumb card-thumb-empty\"></div>")
-        else
-            print(
-                io, "<div class=\"card-thumb\"><img src=\"", _esc(src), "\" alt=\"\"></div>"
-            )
-        end
+        _card_thumb!(io, pg, outdir, bookmarks)
         print(
             io,
             "<div class=\"card-body\"><div class=\"card-title\">",
@@ -590,49 +761,82 @@ function _emit_cards(doc::Document, io, outdir; rich::Bool=false)
             end
             print(io, "</div>")
         end
-        print(
-            io,
-            "<div class=\"card-meta\">",
-            nsec,
-            nsec == 1 ? " section · " : " sections · ",
-            nfig,
-            nfig == 1 ? " figure" : " figures",
-            "</div></div></a>",
-        )
+        print(io, "<div class=\"card-meta\">", _count_meta(nsec, nfig), "</div></div></a>")
     end
-    return println(io, "</div>")
+    if isempty(doc.parts)
+        println(io, "<div class=\"pinax-cards\">")
+        for pg in doc.pages
+            card(pg)
+        end
+        println(io, "</div>")
+    else
+        for (_pid, title, pages) in _grouped_pages(doc)
+            ttl = title === nothing ? "Other" : title
+            println(
+                io,
+                "<details class=\"pinax-group\" open><summary>",
+                _esc(ttl),
+                " <span class=\"grp-count\">(",
+                length(pages),
+                ")</span></summary>",
+                _part_desc_html(doc, _pid),
+                "<div class=\"pinax-cards\">",
+            )
+            for pg in pages
+                card(pg)
+            end
+            println(io, "</div></details>")
+        end
+    end
+    return nothing
 end
 
 # A compact alternative index (level :toc): a link list with one-line summaries, no thumbnails.
 function _emit_toc_index(doc::Document, io)
-    println(io, "<ul class=\"pinax-toc\">")
-    for pg in doc.pages
-        nfig = sum(length(s.figures) for s in pg.sections; init=0)
+    item(pg) = begin
+        nfig = _page_nfigs(pg)
         nsec = length(pg.sections)
         print(io, "<li><a href=\"", pg.anchor, ".html\">", _esc(pg.title), "</a>")
         pg.summary === nothing ||
             print(io, " <span class=\"toc-summary\">— ", _esc(pg.summary), "</span>")
-        print(
-            io,
-            " <span class=\"toc-meta\">(",
-            nsec,
-            nsec == 1 ? " section, " : " sections, ",
-            nfig,
-            nfig == 1 ? " figure)" : " figures)",
-            "</span></li>",
-        )
+        print(io, " <span class=\"toc-meta\">(", _count_meta(nsec, nfig), ")</span></li>")
     end
-    return println(io, "</ul>")
+    if isempty(doc.parts)
+        println(io, "<ul class=\"pinax-toc\">")
+        for pg in doc.pages
+            item(pg)
+        end
+        println(io, "</ul>")
+    else
+        for (_pid, title, pages) in _grouped_pages(doc)
+            ttl = title === nothing ? "Other" : title
+            println(
+                io,
+                "<details class=\"pinax-group\" open><summary>",
+                _esc(ttl),
+                " <span class=\"grp-count\">(",
+                length(pages),
+                ")</span></summary>",
+                _part_desc_html(doc, _pid),
+                "<ul class=\"pinax-toc\">",
+            )
+            for pg in pages
+                item(pg)
+            end
+            println(io, "</ul></details>")
+        end
+    end
+    return nothing
 end
 
 # Emit the multi-page index at the resolved verbosity. `@pinaxsetup index=…` (meta.index) overrides
 # the theme's `index_level`: :toc (link list) | :cards (thumbnail cards, default) | :rich (cards + sections).
-function _emit_index(theme::GalleryTheme, doc::Document, io, outdir)
+function _emit_index(theme::GalleryTheme, doc::Document, io, outdir, bookmarks)
     level = something(doc.meta.index, index_level(theme))
     if level === :toc
         _emit_toc_index(doc, io)
     else
-        _emit_cards(doc, io, outdir; rich=(level === :rich))
+        _emit_cards(doc, io, outdir, bookmarks; rich=(level === :rich))
     end
     return nothing
 end
@@ -704,17 +908,34 @@ function emit_document(
         interactive && _emit_committed_json(io, comments, bookmarks, features)
         _emit_toc_nav(doc, io; has_bib=(!isempty(citeorder)))
         for pg in doc.pages
-            println(
-                io,
-                "<section class=\"page\" id=\"",
-                pg.anchor,
-                "\"><h1>",
-                _esc(pg.title),
-                "</h1>",
+            pnum = get(nums, pg.anchor, "")
+            h1 = isempty(pnum) ? _esc(pg.title) : string(_esc(pnum), ". ", _esc(pg.title))
+            println(io, "<section class=\"page\" id=\"", pg.anchor, "\"><h1>", h1, "</h1>")
+            pg.summary === nothing ||
+                println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
+            # page-as-leaf content (the global TOC nav above already lists the sections)
+            if pg.desc !== nothing
+                println(
+                    io,
+                    "<div class=\"desc\">",
+                    _render_text(pg.desc.source, pg.anchor, ctx),
+                    "</div>",
+                )
+            end
+            for panel in pg.panels
+                println(io, panel)
+            end
+            isempty(pg.figures) || _emit_figures(
+                pg.figures,
+                pg.layout,
+                joinpath(ctx.outdir, "assets", "figures", pg.anchor),
+                theme,
+                ctx,
             )
             for sec in pg.sections
                 _emit_section(theme, sec, pg, ctx)
             end
+            _emit_comments(pg.anchor, ctx)
             println(io, "</section>")
         end
         _emit_bibliography(bib, citeorder, io)
@@ -736,8 +957,10 @@ function emit_document(
             _esc(title),
             "</a></nav>",
         )
-        println(io, "<h1>", _esc(pg.title), "</h1>")
-        n = sum(length(s.figures) for s in pg.sections; init=0)
+        pnum = get(nums, pg.anchor, "")
+        h1 = isempty(pnum) ? _esc(pg.title) : string(_esc(pnum), ". ", _esc(pg.title))
+        println(io, "<h1>", h1, "</h1>")
+        n = _page_nfigs(pg)
         println(
             io, "<div class=\"pinax-meta\">", n, n == 1 ? " figure" : " figures", "</div>"
         )
@@ -764,7 +987,7 @@ function emit_document(
         ntotal == 1 ? " figure" : " figures",
         "</div>",
     )
-    _emit_index(theme, doc, io, outdir)
+    _emit_index(theme, doc, io, outdir, bookmarks)
     _emit_diagnostics(doc, rdiag, io)
     _emit_foot(io, doc, katex_mode, false, rdiag)
     path = joinpath(outdir, "index.html")
@@ -774,7 +997,7 @@ end
 
 # Total figure count across the document (shown in the header, e.g. "547 figures").
 function _total_figures(doc::Document)
-    return sum(length(sec.figures) for pg in doc.pages for sec in pg.sections; init=0)
+    return sum(_page_nfigs(pg) for pg in doc.pages; init=0)
 end
 
 function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
@@ -800,6 +1023,7 @@ function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
     for panel in sec.panels        # @raw blocks, emitted verbatim (notes 06 §6)
         println(io, panel)
     end
+    assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
     if sec.facet isa AbstractString
         for (val, figs) in _facet_groups(sec.figures, sec.facet)
             label = if val === missing
@@ -808,10 +1032,10 @@ function _emit_section(theme, sec::Section, pg::Page, ctx::EmitCtx)
                 string(sec.facet, " = ", val)
             end
             println(io, "<h3 class=\"facet\">", _esc(label), "</h3>")
-            _emit_figures(figs, sec, pg, theme, ctx)
+            _emit_figures(figs, sec.layout, assetdir, theme, ctx)
         end
     else
-        _emit_figures(sec.figures, sec, pg, theme, ctx)
+        _emit_figures(sec.figures, sec.layout, assetdir, theme, ctx)
     end
     _emit_comments(sec.anchor, ctx)
     return println(io, "</section>")
@@ -851,13 +1075,14 @@ function _figgrid_class(layout)
     return "figgrid"
 end
 
-# Emit one grid of figures (materialize each: streaming + cache).
-function _emit_figures(figs, sec::Section, pg::Page, theme, ctx::EmitCtx)
+# Emit one grid of figures (materialize each: streaming + cache). `assetdir` is the directory the
+# figure assets are written under (`…/assets/figures/<page>[/<section>]`); `layout` is the grid hint.
+function _emit_figures(figs, layout, assetdir, theme, ctx::EmitCtx)
     io = ctx.io
-    println(io, "<div class=\"", _figgrid_class(sec.layout), "\">")
+    println(io, "<div class=\"", _figgrid_class(layout), "\">")
     fmts = figure_formats(theme)
     for fig in figs
-        base = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor, fig.anchor)
+        base = joinpath(assetdir, fig.anchor)
         try
             materialize!(fig, base, fmts, ctx.cache)   # cache hit skips gen (notes 10)
         catch e

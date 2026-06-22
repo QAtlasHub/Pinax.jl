@@ -93,7 +93,7 @@ using Test
         @test !occursin("<div class=\"pinax-cards\">", html)   # cards replaced by the list
         @test occursin("<span class=\"toc-summary\">— alpha blurb</span>", html)
         @test occursin("<a href=\"a.html\">Alpha</a>", html)
-        @test occursin("<span class=\"toc-meta\">(1 section, 1 figure)</span>", html)
+        @test occursin("<span class=\"toc-meta\">(1 section · 1 figure)</span>", html)
     end
 
     @testset "index=:rich with a section-less page emits no card-sections for it" begin

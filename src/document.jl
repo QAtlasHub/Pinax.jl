@@ -43,6 +43,7 @@ the figure's index within its section (for hierarchical schemes like `Fig. 2.3`)
 the document-wide equation count.
 """
 function _default_numberer(kind::Symbol, c)
+    kind === :page && return ""   # pages are titled, not numbered, by default (override for EQ/GQ-style badges)
     kind === :section && return "Sec. $(c.section)"
     kind === :figure && return "Fig. $(c.figure)"
     return "($(c.equation))"   # :equation — paper-style "(n)"
@@ -122,7 +123,11 @@ mutable struct Section
     panels::Vector{String}           # @raw HTML blocks (project-specific UI escape hatch, notes 06 §6)
 end
 
-"A page (standalone HTML + shared nav)."
+"""
+A page = one standalone HTML file (the unit of pagination). It groups in-page `Section`s and/or
+carries its own figures directly (page-as-leaf: a `@page` with figures and no `@section`). Pages are
+optionally grouped into a `@part` (a navigation grouping, not a file) named by `part`.
+"""
 mutable struct Page
     id::Symbol
     title::String
@@ -131,12 +136,19 @@ mutable struct Page
     thumbnail::Union{FigRef,Nothing} # explicit @thumbnail
     no_thumbnail::Bool
     sections::Vector{Section}
+    part::Union{Symbol,Nothing}      # the @part this page belongs to (navigation grouping), or nothing
+    desc::Union{Desc,Nothing}        # page-level description (page-as-leaf: @desc directly under @page)
+    figures::Vector{Figure}          # page-level figures (page-as-leaf: @figure with no enclosing @section)
+    panels::Vector{String}           # page-level @raw blocks
+    layout::Union{Symbol,Nothing}    # :grid|:single|:wide hint for the page-level figure grid
 end
 
 "Implicit top level (the catalogue). Order = tree position; numbers are not stored (numbering is the theme's job)."
 mutable struct Document
     meta::DocMeta
     pages::Vector{Page}
+    parts::Vector{Pair{Symbol,String}}   # ordered @part registry: id => title (navigation groups)
+    part_descs::Dict{Symbol,Desc}        # @part id => overview description (markdown), shown on the index
     refs::Dict{Symbol,Any}        # label -> node (filled in by resolve)
     bib::Dict{Symbol,Any}         # @cite resolution table (later)
     diag::Diagnostics
@@ -146,6 +158,8 @@ function Document(meta::DocMeta=DocMeta())
     return Document(
         meta,
         Page[],
+        Pair{Symbol,String}[],
+        Dict{Symbol,Desc}(),
         Dict{Symbol,Any}(),
         Dict{Symbol,Any}(),
         Diagnostics(),
@@ -155,13 +169,14 @@ end
 
 # ============================================================ build context
 
-"Build state of the implicit global document (current page/section)."
+"Build state of the implicit global document (current part/page/section)."
 mutable struct BuildContext
     document::Union{Document,Nothing}
+    part::Union{Symbol,Nothing}      # the @part currently open (pages inherit it), or nothing
     page::Union{Page,Nothing}
     section::Union{Section,Nothing}
 end
-const CTX = BuildContext(nothing, nothing, nothing)
+const CTX = BuildContext(nothing, nothing, nothing, nothing)
 
 current_document() = CTX.document
 current_page() = CTX.page
@@ -191,6 +206,7 @@ function reset!(; kwargs...)
         katex=get(kw, :katex, :cdn),
     )
     CTX.document = Document(meta)
+    CTX.part = nothing
     CTX.page = nothing
     CTX.section = nothing
     return CTX.document
@@ -200,8 +216,9 @@ _ensure_document!() = (CTX.document === nothing && reset!(); CTX.document)
 
 "Build a scoped document: `doc = document() do … end` (for test isolation)."
 function document(f)
-    saved = (CTX.document, CTX.page, CTX.section)
+    saved = (CTX.document, CTX.part, CTX.page, CTX.section)
     CTX.document = Document()
+    CTX.part = nothing
     CTX.page = nothing
     CTX.section = nothing
     local doc
@@ -209,7 +226,7 @@ function document(f)
         f()
         doc = CTX.document        # capture after f, so a @pinaxsetup reset! inside f is still picked up
     finally
-        CTX.document, CTX.page, CTX.section = saved
+        CTX.document, CTX.part, CTX.page, CTX.section = saved
     end
     return doc
 end
@@ -218,7 +235,8 @@ end
 
 # Anchor used both in HTML attributes and as a filesystem path component, so restrict it to a safe charset.
 _anchor(id::Symbol) = replace(string(id), r"[^A-Za-z0-9_-]" => "_")
-_auto_fig_id(sec::Section) = Symbol(string(sec.id), "_fig", length(sec.figures) + 1)
+# Container = a Section or a page-as-leaf Page; both have `.id` and `.figures`.
+_auto_fig_id(c) = Symbol(string(c.id), "_fig", length(c.figures) + 1)
 
 # Stringify the @figure expression for change detection, stripping source line numbers so that
 # moving a figure to a different line does not spuriously invalidate its cache entry (notes 10).
@@ -230,11 +248,12 @@ _code_str(expr) = string(expr isa Expr ? Base.remove_linenums!(deepcopy(expr)) :
 _param_tag(params) = nothing
 
 # Figure id: an explicit `id` wins; else a param-derived tag (via the extension); else positional.
-function _fig_id(sec::Section, id, params)
+# `c` is the enclosing container (a Section, or a page-as-leaf Page).
+function _fig_id(c, id, params)
     id === nothing || return id
     tag = _param_tag(params)
-    tag === nothing && return _auto_fig_id(sec)
-    return Symbol(string(sec.id), "_", tag)
+    tag === nothing && return _auto_fig_id(c)
+    return Symbol(string(c.id), "_", tag)
 end
 
 function _diag!(sev::Severity, item, msg)
@@ -319,7 +338,12 @@ macro page(args...)
     end
 end
 
-function _enter_page!(id::Symbol, title; summary=nothing)
+function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing)
+    layout === nothing ||
+        layout in (:grid, :single, :wide) ||
+        error(
+            "Pinax: @page layout= must be :grid, :single, or :wide (got $(repr(layout)))."
+        )
     doc = _ensure_document!()
     pg = Page(
         id,
@@ -329,6 +353,11 @@ function _enter_page!(id::Symbol, title; summary=nothing)
         nothing,
         false,
         Section[],
+        CTX.part,          # inherit the open @part, if any
+        nothing,
+        Figure[],
+        String[],
+        layout,
     )
     push!(doc.pages, pg)
     CTX.page = pg
@@ -336,6 +365,39 @@ function _enter_page!(id::Symbol, title; summary=nothing)
     return pg
 end
 _exit_page!() = (CTX.page=nothing; CTX.section=nothing)
+
+"""
+A navigation group of pages (LaTeX `\\part`). `@part :id \"Title\" [desc=md\"…\"] begin … end` — the
+pages declared inside belong to this part and are grouped (collapsibly) under it in the index and nav.
+`desc=` is an overview shown beneath the part heading on the index (what this whole group covers).
+A part is NOT a file; each `@page` (or top-level `@section`) inside it is still its own HTML page.
+"""
+macro part(args...)
+    length(args) >= 3 || error("@part needs :id, \"title\", and a begin…end body")
+    id, title, body = args[1], args[2], args[end]
+    enter = _call(:_enter_part!, (esc(id), esc(title)), _kwspecs(args[3:(end - 1)]))
+    return quote
+        $enter
+        try
+            $(esc(body))
+        finally
+            _exit_part!()
+        end
+        nothing
+    end
+end
+
+function _enter_part!(id::Symbol, title; desc=nothing)
+    doc = _ensure_document!()
+    # register (id => title) once, in declaration order, for the grouped navigation
+    any(p -> first(p) === id, doc.parts) || push!(doc.parts, id => string(title))
+    desc === nothing || (doc.part_descs[id] = Desc(string(desc)))
+    CTX.part = id
+    CTX.page = nothing
+    CTX.section = nothing
+    return id
+end
+_exit_part!() = (CTX.part=nothing; CTX.page=nothing; CTX.section=nothing)
 
 "A section. `@section :id \"Title\" [by=…] [summary=…] [layout=…] begin … end`"
 macro section(args...)
@@ -405,12 +467,16 @@ macro figure(args...)
     return _call(:_push_figure!, (), allk)
 end
 
+# The container the content macros write into: the open @section, else the open @page (page-as-leaf).
+# Returns `nothing` if neither is open.
+_current_container() = CTX.section !== nothing ? CTX.section : CTX.page
+
 function _push_figure!(; gen, code, params=nothing, caption="", id=nothing, thumbnail=false)
-    sec = CTX.section
-    sec === nothing && error("@figure outside of a @section")
-    fid = _fig_id(sec, id, params)
+    c = _current_container()
+    c === nothing && error("@figure outside of a @section or @page")
+    fid = _fig_id(c, id, params)
     fig = Figure(fid, _anchor(fid), string(caption), params, gen, code, thumbnail, String[])
-    push!(sec.figures, fig)
+    push!(c.figures, fig)
     return fig
 end
 
@@ -421,15 +487,13 @@ macro caption(x)
     end
 end
 function _set_caption!(s)
-    sec = CTX.section
-    if sec === nothing || isempty(sec.figures)
+    c = _current_container()
+    if c === nothing || isempty(c.figures)
         _diag!(
-            WARNING,
-            sec === nothing ? "?" : sec.anchor,
-            "@caption with no preceding @figure",
+            WARNING, c === nothing ? "?" : c.anchor, "@caption with no preceding @figure"
         )
     else
-        sec.figures[end].caption = string(s)
+        c.figures[end].caption = string(s)
     end
     return nothing
 end
@@ -441,9 +505,9 @@ macro desc(x)
     end
 end
 function _set_desc!(s)
-    sec = CTX.section
-    sec === nothing && error("@desc outside of a @section")
-    sec.desc = Desc(string(s))
+    c = _current_container()
+    c === nothing && error("@desc outside of a @section or @page")
+    c.desc = Desc(string(s))
     return nothing
 end
 
@@ -459,9 +523,9 @@ macro raw(x)
     end
 end
 function _push_panel!(s)
-    sec = CTX.section
-    sec === nothing && error("@raw outside of a @section")
-    push!(sec.panels, string(s))
+    c = _current_container()
+    c === nothing && error("@raw outside of a @section or @page")
+    push!(c.panels, string(s))
     return nothing
 end
 
@@ -507,9 +571,15 @@ end
 function resolved_thumbnail(pg::Page)
     pg.no_thumbnail && return nothing
     pg.thumbnail === nothing || return pg.thumbnail
+    # a thumbnail=true marker anywhere (page-level figures first, then sections)
+    for f in pg.figures
+        f.thumbnail && return FigRef(f.id)
+    end
     for sec in pg.sections, f in sec.figures
         f.thumbnail && return FigRef(f.id)
     end
+    # else the first figure (page-level, then the first section's)
+    isempty(pg.figures) || return FigRef(pg.figures[1].id)
     for sec in pg.sections
         isempty(sec.figures) || return FigRef(sec.figures[1].id)
     end
