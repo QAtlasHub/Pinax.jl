@@ -178,4 +178,19 @@ end
         t2 = Pinax._read_csv_table(csv; maxrows=10)
         @test t2.total == 100 && length(t2.rows) <= 10
     end
+
+    @testset "csv round-trip edge cases (review fix)" begin
+        @test Pinax._split_csv_line("a,b,") == ["a", "b", ""]                       # trailing empty field
+        @test Pinax._split_csv_line("a,,c") == ["a", "", "c"]                       # empty middle field
+        @test Pinax._split_csv_line("\"x,y\",z") == ["x,y", "z"]                    # quoted comma
+        @test Pinax._split_csv_line("\"say \"\"hi\"\"\",z") == ["say \"hi\"", "z"]  # escaped quote
+
+        csv = joinpath(tmp, "edge.csv")
+        write(csv, "series,x,y\n8,0.0,\n8,1.0,2.5\n")   # numeric-looking label + a blank (NaN) y cell
+        t = Pinax._read_csv_table(csv)
+        @test t.rows[1][1] === "8"        # the series LABEL stays a String (not 8.0)
+        @test t.rows[1][3] === missing    # a blank y (a dropped NaN) -> missing, not ""
+        @test t.rows[2][3] === 2.5        # a real number is still re-typed
+        @test !occursin('\n', Pinax._csv_field("a\nb"))   # writer flattens newlines (no line-spanning field)
+    end
 end

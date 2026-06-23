@@ -63,8 +63,9 @@ end
 # ---- data-table emit: the agent backend's text view of a figure's plotted data ----
 
 function _csv_field(v)
-    s = string(v)
-    needs = occursin(',', s) || occursin('"', s) || occursin('\n', s)
+    # flatten newlines so a value never spans CSV lines (the reader splits on raw newlines)
+    s = replace(string(v), '\n' => ' ', '\r' => ' ')
+    needs = occursin(',', s) || occursin('"', s)
     return needs ? string('"', replace(s, '"' => "\"\""), '"') : s
 end
 _csv_num(v::Real) = isfinite(v) ? string(v) : ""   # NaN/Inf -> blank cell
@@ -146,12 +147,16 @@ function _read_csv_table(path; maxrows::Int=20)
     isfile(path) || return nothing
     lines = [l for l in readlines(path) if !isempty(l) && !startswith(l, "#")]
     isempty(lines) && return nothing
-    retype(s) = something(tryparse(Float64, s), s)
+    # col 1 is the (categorical) series label — keep it a String; numeric columns are re-typed, and a
+    # blank cell (a NaN/Inf the writer dropped) becomes `missing` (-> JSON null), not the string "".
+    cell(j, s) = j == 1 ? s : (isempty(s) ? missing : something(tryparse(Float64, s), s))
     header = _split_csv_line(lines[1])
     body = @view lines[2:end]
     total = length(body)
     sel = total > maxrows ? body[1:cld(total, maxrows):total] : body
-    rows = Vector{Any}[Any[retype(c) for c in _split_csv_line(l)] for l in sel]
+    rows = Vector{Any}[
+        (f=_split_csv_line(l); Any[cell(j, f[j]) for j in eachindex(f)]) for l in sel
+    ]
     return (header=header, rows=rows, total=total)
 end
 
