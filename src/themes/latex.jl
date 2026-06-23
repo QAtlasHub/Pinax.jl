@@ -147,29 +147,61 @@ function emit_figure(theme::LaTeXBase, fig, ctx)
     return nothing
 end
 
-# Materialize each figure to `assetdir`, then emit it (the LaTeX analogue of the gallery's emit_view).
-function _latex_emit_figs!(theme::LaTeXBase, figs, assetdir, ctx)
-    for fig in figs
-        try
-            materialize!(
-                fig, joinpath(assetdir, fig.anchor), figure_formats(theme), ctx.cache
-            )
-        catch e
-            e isa InterruptException && rethrow()
-            push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
-            continue
+# Materialize one figure to `assetdir`, then emit it.
+function _latex_emit_fig!(theme::LaTeXBase, fig, assetdir, ctx)
+    try
+        materialize!(fig, joinpath(assetdir, fig.anchor), figure_formats(theme), ctx.cache)
+    catch e
+        e isa InterruptException && rethrow()
+        push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+        return nothing
+    end
+    emit_figure(theme, fig, ctx)
+    return nothing
+end
+
+# Emit a container's figures + tables in declaration order (@raw panels are HTML, skipped in LaTeX).
+function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx)
+    for (kind, item) in _content_items(c)
+        if kind === :figure
+            _latex_emit_fig!(theme, item, assetdir, ctx)
+        elseif kind === :table
+            emit_table(theme, item, ctx)
         end
-        emit_figure(theme, fig, ctx)
     end
     return nothing
+end
+
+# A @table artifact -> a LaTeX `table`/`tabular` (cells escaped as text).
+function emit_table(theme::LaTeXBase, tbl, ctx)
+    io = ctx.io
+    ncol = if isempty(tbl.header)
+        (isempty(tbl.rows) ? 0 : length(tbl.rows[1]))
+    else
+        length(tbl.header)
+    end
+    ncol == 0 && return nothing
+    rowend = "\\\\"
+    println(io, "\\begin{table}[htbp]\\centering")
+    isempty(tbl.caption) ||
+        println(io, "\\caption{", emit_text(theme, tbl.caption, tbl.anchor, ctx), "}")
+    println(io, "\\label{", tbl.anchor, "}")
+    println(io, "\\begin{tabular}{", repeat("l", ncol), "}\\hline")
+    isempty(tbl.header) ||
+        println(io, join((_texesc(h) for h in tbl.header), " & "), " ", rowend, "\\hline")
+    for row in tbl.rows
+        println(io, join((_texesc(_cellstr(c)) for c in row), " & "), " ", rowend)
+    end
+    println(io, "\\hline\\end{tabular}")
+    return println(io, "\\end{table}")
 end
 
 function emit_section(theme::LaTeXBase, sec, pg, ctx)
     io = ctx.io
     println(io, "\\subsection{", _texesc(sec.title), "}\\label{", sec.anchor, "}")
     sec.desc === nothing || println(io, emit_text(theme, sec.desc.source, sec.anchor, ctx))
-    _latex_emit_figs!(
-        theme, sec.figures, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx
+    _latex_emit_content!(
+        theme, sec, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx
     )
     emit_comments(theme, sec.anchor, ctx)
     return nothing
@@ -180,7 +212,7 @@ function emit_page(theme::LaTeXBase, pg, ctx)
     # a page = one \section; its page-level (page-as-leaf) desc + figures, then its subsections
     println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
     pg.desc === nothing || println(io, emit_text(theme, pg.desc.source, pg.anchor, ctx))
-    _latex_emit_figs!(theme, pg.figures, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
+    _latex_emit_content!(theme, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
     emit_comments(theme, pg.anchor, ctx)
     for sec in pg.sections
         emit_section(theme, sec, pg, ctx)

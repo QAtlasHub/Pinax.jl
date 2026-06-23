@@ -112,6 +112,23 @@ mutable struct Figure
     assets::Vector{String}
 end
 
+"""
+A table artifact — structured tabular data, a sibling to `Figure`. Renders as an HTML/LaTeX table for
+humans and as structured rows for the agent backend. Inherently LLM-legible (it is already data).
+"""
+mutable struct Table
+    id::Symbol
+    anchor::String
+    caption::String
+    header::Vector{String}
+    rows::Vector{Vector{Any}}
+    code::String          # @table data-expression source (provenance)
+    params::Any
+end
+
+# A table cell as display text (HTML/LaTeX backends; the agent backend keeps native JSON types).
+_cellstr(x) = x === missing ? "" : string(x)
+
 "A section (a group of figures + a description)."
 mutable struct Section
     id::Symbol
@@ -124,6 +141,8 @@ mutable struct Section
     layout::Union{Symbol,Nothing}    # :wide|:grid|:single (theme hint)
     figures::Vector{Figure}
     panels::Vector{String}           # @raw HTML blocks (project-specific UI escape hatch, notes 06 §6)
+    tables::Vector{Table}            # @table artifacts
+    content::Vector{Pair{Symbol,Int}}  # declaration order: (:figure|:table|:panel) => index into the list above
 end
 
 """
@@ -144,6 +163,8 @@ mutable struct Page
     figures::Vector{Figure}          # page-level figures (page-as-leaf: @figure with no enclosing @section)
     panels::Vector{String}           # page-level @raw blocks
     layout::Union{Symbol,Nothing}    # :grid|:single|:wide hint for the page-level figure grid
+    tables::Vector{Table}            # page-level @table artifacts (page-as-leaf)
+    content::Vector{Pair{Symbol,Int}}  # declaration order of figures/tables/panels
 end
 
 "Implicit top level (the catalogue). Order = tree position; numbers are not stored (numbering is the theme's job)."
@@ -244,6 +265,7 @@ end
 _anchor(id::Symbol) = replace(string(id), r"[^A-Za-z0-9_-]" => "_")
 # Container = a Section or a page-as-leaf Page; both have `.id` and `.figures`.
 _auto_fig_id(c) = Symbol(string(c.id), "_fig", length(c.figures) + 1)
+_auto_table_id(c) = Symbol(string(c.id), "_tbl", length(c.tables) + 1)
 
 # Stringify the @figure expression for change detection, stripping source line numbers so that
 # moving a figure to a different line does not spuriously invalidate its cache entry (notes 10).
@@ -376,6 +398,8 @@ function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing)
         Figure[],
         String[],
         layout,
+        Table[],
+        Pair{Symbol,Int}[],
     )
     push!(doc.pages, pg)
     CTX.page = pg
@@ -452,6 +476,8 @@ function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=
         layout,
         Figure[],
         String[],
+        Table[],
+        Pair{Symbol,Int}[],
     )
     push!(pg.sections, sec)
     CTX.section = sec
@@ -495,7 +521,101 @@ function _push_figure!(; gen, code, params=nothing, caption="", id=nothing, thum
     fid = _fig_id(c, id, params)
     fig = Figure(fid, _anchor(fid), string(caption), params, gen, code, thumbnail, String[])
     push!(c.figures, fig)
+    push!(c.content, :figure => length(c.figures))
     return fig
+end
+
+"""
+Register a table artifact — first-class tabular data (sibling to `@figure`). `data` may be a
+NamedTuple of columns `(T=…, M=…)`, a `Matrix` (with `header=`), a `Vector` of NamedTuple rows, or a
+`Vector` of row-vectors/tuples (with `header=`). `@table data [caption=…] [id=…] [header=…] [params=…]`.
+"""
+macro table(args...)
+    isempty(args) && error("@table needs a data expression")
+    data = nothing
+    kws = Expr[]
+    for a in args
+        if a isa Expr &&
+            a.head === :(=) &&
+            a.args[1] isa Symbol &&
+            a.args[1] in (:caption, :id, :header, :params)
+            push!(kws, a)
+        elseif data === nothing
+            data = a
+        else
+            error("@table takes a single data expression (plus kwargs)")
+        end
+    end
+    data === nothing && error("@table needs a data expression")
+    allk = vcat(
+        Expr(:kw, :data, esc(data)), Expr(:kw, :code, _code_str(data)), _kwspecs(kws)
+    )
+    return _call(:_push_table!, (), allk)
+end
+
+function _push_table!(; data, code, caption="", id=nothing, header=nothing, params=nothing)
+    c = _current_container()
+    c === nothing && error("@table outside of a @section or @page")
+    hdr, rows = _normalize_table(data, header)
+    if !isempty(hdr)   # every row must be header-wide (catches a wrong-length header= or ragged rows)
+        bad = findfirst(r -> length(r) != length(hdr), rows)
+        bad === nothing || error(
+            "Pinax: @table row $(bad) has $(length(rows[bad])) cells but the header has " *
+            "$(length(hdr)) columns — check `header=` length or ragged rows",
+        )
+    end
+    tid = id === nothing ? _auto_table_id(c) : id
+    tbl = Table(tid, _anchor(tid), string(caption), hdr, rows, code, params)
+    push!(c.tables, tbl)
+    push!(c.content, :table => length(c.tables))
+    return tbl
+end
+
+# The container's content (figures / tables / @raw panels) in declaration order, as (kind, item) pairs.
+function _content_items(c)
+    return [(
+        k,
+        if k === :figure
+            c.figures[i]
+        elseif k === :table
+            c.tables[i]
+        else
+            c.panels[i]
+        end,
+    ) for (k, i) in c.content]
+end
+
+# Normalize the accepted @table inputs into (header::Vector{String}, rows::Vector{Vector{Any}}).
+function _normalize_table(data, header)
+    if data isa NamedTuple                          # columnar: (a=[…], b=[…])
+        cols = collect(values(data))
+        hdr = header === nothing ? collect(string.(keys(data))) : collect(string.(header))
+        n = isempty(cols) ? 0 : maximum(length, cols)
+        rows = [Any[i <= length(c) ? c[i] : missing for c in cols] for i in 1:n]
+        return hdr, rows
+    elseif data isa AbstractMatrix
+        nc = size(data, 2)
+        hdr = header === nothing ? [string(j) for j in 1:nc] : collect(string.(header))
+        rows = [Any[data[i, j] for j in 1:nc] for i in 1:size(data, 1)]
+        return hdr, rows
+    elseif data isa AbstractVector
+        if !isempty(data) && first(data) isa NamedTuple   # row records: [(a=…,b=…), …]
+            ks = keys(first(data))
+            hdr = header === nothing ? collect(string.(ks)) : collect(string.(header))
+            rows = [Any[getfield(r, k) for k in ks] for r in data]
+            return hdr, rows
+        else                                              # vector of row-vectors/tuples
+            rows = [Any[x for x in r] for r in data]
+            width = isempty(rows) ? 0 : length(rows[1])
+            hdr =
+                header === nothing ? [string(j) for j in 1:width] : collect(string.(header))
+            return hdr, rows
+        end
+    end
+    return error(
+        "Pinax: @table data must be a NamedTuple of columns, a Matrix, or a Vector of " *
+        "NamedTuple/Vector rows (got $(typeof(data)))",
+    )
 end
 
 "Attach a caption to the preceding `@figure` (like `\\caption`); it overwrites any `caption=` set there, since it runs afterward."
@@ -544,6 +664,7 @@ function _push_panel!(s)
     c = _current_container()
     c === nothing && error("@raw outside of a @section or @page")
     push!(c.panels, string(s))
+    push!(c.content, :panel => length(c.panels))
     return nothing
 end
 

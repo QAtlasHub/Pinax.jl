@@ -98,6 +98,11 @@ const _GALLERY_CSS = """
   .figgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem}
   .figgrid-single{grid-template-columns:minmax(0,560px);justify-content:center}
   .figgrid-wide{grid-template-columns:1fr}
+  figure.pinax-table{overflow-x:auto}
+  .pinax-table table{border-collapse:collapse;width:100%;font-size:.9em}
+  .pinax-table th,.pinax-table td{border:1px solid #e2e5e9;padding:.25rem .5rem;text-align:left}
+  .pinax-table thead th{background:#f4f6f8;font-weight:600}
+  .pinax-table tbody tr:nth-child(even){background:#fafbfc}
   figure{margin:0;border:1px solid #e2e5e9;border-radius:8px;padding:.5rem;background:#fdfdfe}
   figure img{width:100%;height:auto}
   figure iframe.pinax-pdf{width:100%;height:460px;border:1px solid #eee;border-radius:4px;background:#fff}
@@ -678,13 +683,9 @@ function emit_page(theme::GalleryBase, pg, ctx)
             "</div>",
         )
     end
-    for panel in pg.panels        # @raw blocks under @page, emitted verbatim
-        println(io, panel)
-    end
-    if !isempty(pg.figures)
-        assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor)
-        emit_view(theme, Val(:grid), pg.figures, assetdir, pg.layout, ctx)
-    end
+    _emit_content(
+        theme, pg, joinpath(ctx.outdir, "assets", "figures", pg.anchor), pg.layout, ctx
+    )
     if !isempty(pg.sections)
         println(io, "<nav><strong>Contents</strong>")
         for sec in pg.sections
@@ -977,13 +978,9 @@ function emit_document(
                     "</div>",
                 )
             end
-            for panel in pg.panels
-                println(io, panel)
-            end
-            isempty(pg.figures) || emit_view(
+            _emit_content(
                 theme,
-                Val(:grid),
-                pg.figures,
+                pg,
                 joinpath(ctx.outdir, "assets", "figures", pg.anchor),
                 pg.layout,
                 ctx,
@@ -1078,11 +1075,10 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
             "</div>",
         )
     end
-    for panel in sec.panels        # @raw blocks, emitted verbatim (notes 06 §6)
-        println(io, panel)
-    end
     assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
     if sec.facet isa AbstractString
+        # faceting regroups figures by a param axis, so declaration order does not apply; @raw panels
+        # and tables follow the facet groups.
         for (val, figs) in _facet_groups(sec.figures, sec.facet)
             label = if val === missing
                 string(sec.facet, ": (unset)")
@@ -1092,8 +1088,12 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
             println(io, "<h3 class=\"facet\">", _esc(label), "</h3>")
             emit_view(theme, Val(:grid), figs, assetdir, sec.layout, ctx)
         end
+        for panel in sec.panels
+            println(io, panel)
+        end
+        isempty(sec.tables) || _emit_tables(theme, sec.tables, ctx)
     else
-        emit_view(theme, Val(:grid), sec.figures, assetdir, sec.layout, ctx)
+        _emit_content(theme, sec, assetdir, sec.layout, ctx)
     end
     emit_comments(theme, sec.anchor, ctx)
     return println(io, "</section>")
@@ -1202,6 +1202,66 @@ function _emit_placeholder(fig::Figure, why, io)
         _esc(string(fig.id)),
         ") — see <a href=\"#diagnostics\">diagnostics</a></div></figure>",
     )
+end
+
+# A @table artifact -> an HTML table inside a figure card (reusing the figure/figcaption styling).
+function emit_table(theme::GalleryBase, tbl, ctx)
+    io = ctx.io
+    println(io, "<figure class=\"pinax-table\" id=\"", tbl.anchor, "\"><table>")
+    if !isempty(tbl.header)
+        print(io, "<thead><tr>")
+        for h in tbl.header
+            print(io, "<th>", _esc(h), "</th>")
+        end
+        println(io, "</tr></thead>")
+    end
+    println(io, "<tbody>")
+    for row in tbl.rows
+        print(io, "<tr>")
+        for cell in row
+            print(io, "<td>", _esc(_cellstr(cell)), "</td>")
+        end
+        println(io, "</tr>")
+    end
+    println(io, "</tbody></table>")
+    isempty(tbl.caption) || println(
+        io,
+        "<figcaption>",
+        emit_text(theme, tbl.caption, tbl.anchor, ctx; block=false),
+        "</figcaption>",
+    )
+    return println(io, "</figure>")
+end
+
+function _emit_tables(theme::GalleryBase, tables, ctx)
+    for tbl in tables
+        emit_table(theme, tbl, ctx)
+    end
+    return nothing
+end
+
+# Emit a container's content (figures / tables / @raw panels) in DECLARATION order. Consecutive
+# figures are grouped into one figure grid; a table or @raw panel between them flushes the grid.
+function _emit_content(theme::GalleryBase, c, assetdir, layout, ctx)
+    figbuf = Figure[]
+    flush_figs() =
+        if !isempty(figbuf)
+            emit_view(theme, Val(:grid), copy(figbuf), assetdir, layout, ctx)
+            empty!(figbuf)
+        end
+    for (kind, item) in _content_items(c)
+        if kind === :figure
+            push!(figbuf, item)
+        elseif kind === :table
+            flush_figs()
+            emit_table(theme, item, ctx)
+        else                       # :panel — @raw HTML, verbatim
+            flush_figs()
+            println(ctx.io, item)
+        end
+    end
+    flush_figs()
+    return nothing
 end
 
 function emit_figure(theme::GalleryBase, fig, ctx)
