@@ -150,6 +150,29 @@ function _agent_tables!(theme::AgentBase, tables, ctx)
     return nothing
 end
 
+# A page/section's content in declaration order as {kind,id} — lets a consumer reconstruct the
+# interleave of figures and tables (the typed `figures`/`tables` arrays preserve within-type order).
+function _agent_content!(c, ctx)
+    io = ctx.io
+    print(io, "[")
+    started = false
+    for (kind, item) in _content_items(c)
+        kind === :panel && continue   # @raw HTML has no structured identity
+        started && print(io, ",")
+        started = true
+        print(
+            io,
+            "{\"kind\":",
+            _jsonstr(string(kind)),
+            ",\"id\":",
+            _jsonstr(string(item.id)),
+            "}",
+        )
+    end
+    print(io, "]")
+    return nothing
+end
+
 # Materialize each figure (the asset is the verifiable artifact), then emit them as a JSON array.
 # Inlined rather than a shared helper so formats come straight from `figure_formats(theme)` — keeps
 # the materialize-all-then-emit-all two-phase shape and mirrors `_latex_emit_figs!`.
@@ -193,6 +216,8 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
     )
     print(io, ",\"tables\":")
     _agent_tables!(theme, sec.tables, ctx)
+    print(io, ",\"content\":")
+    _agent_content!(sec, ctx)
     print(io, "}")
     return nothing
 end
@@ -218,6 +243,8 @@ function emit_page(theme::AgentBase, pg, ctx)
     )
     print(io, ",\"tables\":")
     _agent_tables!(theme, pg.tables, ctx)
+    print(io, ",\"content\":")
+    _agent_content!(pg, ctx)
     print(io, ",\"sections\":[")
     for (j, sec) in enumerate(pg.sections)
         j == 1 || print(io, ",")
@@ -263,36 +290,44 @@ function _params_inline(params)
     return join(("$k=$v" for (k, v) in desc), ", ")
 end
 
-function _agent_md_figs(io, figs, outdir, comments)
-    for fig in figs
-        println(io, "- [fig: ", fig.id, "] ", fig.caption)
-        isempty(fig.code) || println(io, "  - code: `", fig.code, "`")
-        fig.params === nothing || println(io, "  - data: ", _params_inline(fig.params))
-        imgs = filter(a -> !endswith(lowercase(a), ".csv"), fig.assets)
-        isempty(imgs) ||
-            println(io, "  - asset: ", replace(relpath(imgs[1], outdir), '\\' => '/'))
-        for a in fig.assets
-            endswith(lowercase(a), ".csv") &&
-                println(io, "  - data table: ", replace(relpath(a, outdir), '\\' => '/'))
-        end
-        for c in get(comments, Symbol(fig.anchor), Comment[])
-            println(io, "  - note (", c.author, "): ", c.text)
-        end
+function _agent_md_fig(io, fig, outdir, comments)
+    println(io, "- [fig: ", fig.id, "] ", fig.caption)
+    isempty(fig.code) || println(io, "  - code: `", fig.code, "`")
+    fig.params === nothing || println(io, "  - data: ", _params_inline(fig.params))
+    imgs = filter(a -> !endswith(lowercase(a), ".csv"), fig.assets)
+    isempty(imgs) ||
+        println(io, "  - asset: ", replace(relpath(imgs[1], outdir), '\\' => '/'))
+    for a in fig.assets
+        endswith(lowercase(a), ".csv") &&
+            println(io, "  - data table: ", replace(relpath(a, outdir), '\\' => '/'))
+    end
+    for c in get(comments, Symbol(fig.anchor), Comment[])
+        println(io, "  - note (", c.author, "): ", c.text)
     end
     return nothing
 end
 
-# @table artifacts as markdown tables (the LLM read view).
-function _agent_md_tables(io, tables)
-    for tbl in tables
-        println(io)
-        isempty(tbl.caption) || println(io, "_", tbl.caption, "_  [table: ", tbl.id, "]")
-        if !isempty(tbl.header)
-            println(io, "| ", join(tbl.header, " | "), " |")
-            println(io, "|", repeat(" --- |", length(tbl.header)))
-        end
-        for row in tbl.rows
-            println(io, "| ", join((_cellstr(c) for c in row), " | "), " |")
+# A @table as a markdown table (the LLM read view).
+function _agent_md_table(io, tbl)
+    println(io)
+    isempty(tbl.caption) || println(io, "_", tbl.caption, "_  [table: ", tbl.id, "]")
+    if !isempty(tbl.header)
+        println(io, "| ", join(tbl.header, " | "), " |")
+        println(io, "|", repeat(" --- |", length(tbl.header)))
+    end
+    for row in tbl.rows
+        println(io, "| ", join((_cellstr(c) for c in row), " | "), " |")
+    end
+    return nothing
+end
+
+# A container's figures + tables in declaration order (@raw panels are HTML, skipped in the md view).
+function _agent_md_content(io, c, outdir, comments)
+    for (kind, item) in _content_items(c)
+        if kind === :figure
+            _agent_md_fig(io, item, outdir, comments)
+        elseif kind === :table
+            _agent_md_table(io, item)
         end
     end
     return nothing
@@ -315,13 +350,11 @@ function _agent_markdown(doc::Document, outdir, comments)
         println(io, "\n### ", pg.title, "  [id: ", pg.id, "]")
         pg.summary === nothing || println(io, "_", pg.summary, "_")
         pg.desc === nothing || println(io, pg.desc.source)
-        _agent_md_figs(io, pg.figures, outdir, comments)
-        _agent_md_tables(io, pg.tables)
+        _agent_md_content(io, pg, outdir, comments)
         for sec in pg.sections
             println(io, "\n#### ", sec.title, "  [id: ", sec.id, "]")
             sec.desc === nothing || println(io, sec.desc.source)
-            _agent_md_figs(io, sec.figures, outdir, comments)
-            _agent_md_tables(io, sec.tables)
+            _agent_md_content(io, sec, outdir, comments)
         end
     end
     return String(take!(io))

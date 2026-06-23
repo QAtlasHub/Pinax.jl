@@ -147,19 +147,27 @@ function emit_figure(theme::LaTeXBase, fig, ctx)
     return nothing
 end
 
-# Materialize each figure to `assetdir`, then emit it (the LaTeX analogue of the gallery's emit_view).
-function _latex_emit_figs!(theme::LaTeXBase, figs, assetdir, ctx)
-    for fig in figs
-        try
-            materialize!(
-                fig, joinpath(assetdir, fig.anchor), figure_formats(theme), ctx.cache
-            )
-        catch e
-            e isa InterruptException && rethrow()
-            push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
-            continue
+# Materialize one figure to `assetdir`, then emit it.
+function _latex_emit_fig!(theme::LaTeXBase, fig, assetdir, ctx)
+    try
+        materialize!(fig, joinpath(assetdir, fig.anchor), figure_formats(theme), ctx.cache)
+    catch e
+        e isa InterruptException && rethrow()
+        push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+        return nothing
+    end
+    emit_figure(theme, fig, ctx)
+    return nothing
+end
+
+# Emit a container's figures + tables in declaration order (@raw panels are HTML, skipped in LaTeX).
+function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx)
+    for (kind, item) in _content_items(c)
+        if kind === :figure
+            _latex_emit_fig!(theme, item, assetdir, ctx)
+        elseif kind === :table
+            emit_table(theme, item, ctx)
         end
-        emit_figure(theme, fig, ctx)
     end
     return nothing
 end
@@ -192,12 +200,9 @@ function emit_section(theme::LaTeXBase, sec, pg, ctx)
     io = ctx.io
     println(io, "\\subsection{", _texesc(sec.title), "}\\label{", sec.anchor, "}")
     sec.desc === nothing || println(io, emit_text(theme, sec.desc.source, sec.anchor, ctx))
-    _latex_emit_figs!(
-        theme, sec.figures, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx
+    _latex_emit_content!(
+        theme, sec, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx
     )
-    for tbl in sec.tables
-        emit_table(theme, tbl, ctx)
-    end
     emit_comments(theme, sec.anchor, ctx)
     return nothing
 end
@@ -207,10 +212,7 @@ function emit_page(theme::LaTeXBase, pg, ctx)
     # a page = one \section; its page-level (page-as-leaf) desc + figures, then its subsections
     println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
     pg.desc === nothing || println(io, emit_text(theme, pg.desc.source, pg.anchor, ctx))
-    _latex_emit_figs!(theme, pg.figures, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
-    for tbl in pg.tables
-        emit_table(theme, tbl, ctx)
-    end
+    _latex_emit_content!(theme, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
     emit_comments(theme, pg.anchor, ctx)
     for sec in pg.sections
         emit_section(theme, sec, pg, ctx)

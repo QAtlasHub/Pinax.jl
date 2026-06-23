@@ -683,14 +683,9 @@ function emit_page(theme::GalleryBase, pg, ctx)
             "</div>",
         )
     end
-    for panel in pg.panels        # @raw blocks under @page, emitted verbatim
-        println(io, panel)
-    end
-    if !isempty(pg.figures)
-        assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor)
-        emit_view(theme, Val(:grid), pg.figures, assetdir, pg.layout, ctx)
-    end
-    isempty(pg.tables) || _emit_tables(theme, pg.tables, ctx)
+    _emit_content(
+        theme, pg, joinpath(ctx.outdir, "assets", "figures", pg.anchor), pg.layout, ctx
+    )
     if !isempty(pg.sections)
         println(io, "<nav><strong>Contents</strong>")
         for sec in pg.sections
@@ -983,18 +978,13 @@ function emit_document(
                     "</div>",
                 )
             end
-            for panel in pg.panels
-                println(io, panel)
-            end
-            isempty(pg.figures) || emit_view(
+            _emit_content(
                 theme,
-                Val(:grid),
-                pg.figures,
+                pg,
                 joinpath(ctx.outdir, "assets", "figures", pg.anchor),
                 pg.layout,
                 ctx,
             )
-            isempty(pg.tables) || _emit_tables(theme, pg.tables, ctx)
             for sec in pg.sections
                 emit_section(theme, sec, pg, ctx)
             end
@@ -1085,11 +1075,10 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
             "</div>",
         )
     end
-    for panel in sec.panels        # @raw blocks, emitted verbatim (notes 06 §6)
-        println(io, panel)
-    end
     assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
     if sec.facet isa AbstractString
+        # faceting regroups figures by a param axis, so declaration order does not apply; @raw panels
+        # and tables follow the facet groups.
         for (val, figs) in _facet_groups(sec.figures, sec.facet)
             label = if val === missing
                 string(sec.facet, ": (unset)")
@@ -1099,10 +1088,13 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
             println(io, "<h3 class=\"facet\">", _esc(label), "</h3>")
             emit_view(theme, Val(:grid), figs, assetdir, sec.layout, ctx)
         end
+        for panel in sec.panels
+            println(io, panel)
+        end
+        isempty(sec.tables) || _emit_tables(theme, sec.tables, ctx)
     else
-        emit_view(theme, Val(:grid), sec.figures, assetdir, sec.layout, ctx)
+        _emit_content(theme, sec, assetdir, sec.layout, ctx)
     end
-    isempty(sec.tables) || _emit_tables(theme, sec.tables, ctx)
     emit_comments(theme, sec.anchor, ctx)
     return println(io, "</section>")
 end
@@ -1245,6 +1237,30 @@ function _emit_tables(theme::GalleryBase, tables, ctx)
     for tbl in tables
         emit_table(theme, tbl, ctx)
     end
+    return nothing
+end
+
+# Emit a container's content (figures / tables / @raw panels) in DECLARATION order. Consecutive
+# figures are grouped into one figure grid; a table or @raw panel between them flushes the grid.
+function _emit_content(theme::GalleryBase, c, assetdir, layout, ctx)
+    figbuf = Figure[]
+    flush_figs() =
+        if !isempty(figbuf)
+            emit_view(theme, Val(:grid), copy(figbuf), assetdir, layout, ctx)
+            empty!(figbuf)
+        end
+    for (kind, item) in _content_items(c)
+        if kind === :figure
+            push!(figbuf, item)
+        elseif kind === :table
+            flush_figs()
+            emit_table(theme, item, ctx)
+        else                       # :panel — @raw HTML, verbatim
+            flush_figs()
+            println(ctx.io, item)
+        end
+    end
+    flush_figs()
     return nothing
 end
 

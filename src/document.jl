@@ -142,6 +142,7 @@ mutable struct Section
     figures::Vector{Figure}
     panels::Vector{String}           # @raw HTML blocks (project-specific UI escape hatch, notes 06 §6)
     tables::Vector{Table}            # @table artifacts
+    content::Vector{Pair{Symbol,Int}}  # declaration order: (:figure|:table|:panel) => index into the list above
 end
 
 """
@@ -163,6 +164,7 @@ mutable struct Page
     panels::Vector{String}           # page-level @raw blocks
     layout::Union{Symbol,Nothing}    # :grid|:single|:wide hint for the page-level figure grid
     tables::Vector{Table}            # page-level @table artifacts (page-as-leaf)
+    content::Vector{Pair{Symbol,Int}}  # declaration order of figures/tables/panels
 end
 
 "Implicit top level (the catalogue). Order = tree position; numbers are not stored (numbering is the theme's job)."
@@ -397,6 +399,7 @@ function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing)
         String[],
         layout,
         Table[],
+        Pair{Symbol,Int}[],
     )
     push!(doc.pages, pg)
     CTX.page = pg
@@ -474,6 +477,7 @@ function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=
         Figure[],
         String[],
         Table[],
+        Pair{Symbol,Int}[],
     )
     push!(pg.sections, sec)
     CTX.section = sec
@@ -517,6 +521,7 @@ function _push_figure!(; gen, code, params=nothing, caption="", id=nothing, thum
     fid = _fig_id(c, id, params)
     fig = Figure(fid, _anchor(fid), string(caption), params, gen, code, thumbnail, String[])
     push!(c.figures, fig)
+    push!(c.content, :figure => length(c.figures))
     return fig
 end
 
@@ -562,7 +567,22 @@ function _push_table!(; data, code, caption="", id=nothing, header=nothing, para
     tid = id === nothing ? _auto_table_id(c) : id
     tbl = Table(tid, _anchor(tid), string(caption), hdr, rows, code, params)
     push!(c.tables, tbl)
+    push!(c.content, :table => length(c.tables))
     return tbl
+end
+
+# The container's content (figures / tables / @raw panels) in declaration order, as (kind, item) pairs.
+function _content_items(c)
+    return [(
+        k,
+        if k === :figure
+            c.figures[i]
+        elseif k === :table
+            c.tables[i]
+        else
+            c.panels[i]
+        end,
+    ) for (k, i) in c.content]
 end
 
 # Normalize the accepted @table inputs into (header::Vector{String}, rows::Vector{Vector{Any}}).
@@ -644,6 +664,7 @@ function _push_panel!(s)
     c = _current_container()
     c === nothing && error("@raw outside of a @section or @page")
     push!(c.panels, string(s))
+    push!(c.content, :panel => length(c.panels))
     return nothing
 end
 

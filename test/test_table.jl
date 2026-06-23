@@ -119,4 +119,36 @@ end
         @test occursin("\"custom_tbl\":\"p_tbl1\"", j)   # override fired via _agent_tables! dispatch
         @test !occursin("\"header\"", j)                  # default emit_table did NOT run
     end
+
+    @testset "interleaved figure/table render in declaration order" begin
+        tmp = mktempdir()
+        svg = joinpath(tmp, "o.svg")
+        write(svg, "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>")
+        Pinax.reset!(; title="T")
+        @page :p "P" begin
+            @figure svg
+            @caption "FIGONE"
+            @table (a=[1], b=[2]) caption = "TBLONE"
+            @figure svg
+            @caption "FIGTWO"
+        end
+        ord(s) =
+            first(findfirst("FIGONE", s)) <
+            first(findfirst("TBLONE", s)) <
+            first(findfirst("FIGTWO", s))
+
+        g = read(Pinax.render(; out=joinpath(tmp, "g"), theme=:gallery), String)
+        @test ord(g)                              # gallery preserves order
+        @test count("class=\"figgrid", g) == 2    # fig1 grid | table | fig2 grid (table flushes the grid)
+
+        Pinax.render(; out=joinpath(tmp, "a"), theme=:agent)
+        @test ord(read(joinpath(tmp, "a", "agent.md"), String))   # agent.md is linear, in order
+        aj = read(joinpath(tmp, "a", "agent.json"), String)
+        @test occursin(
+            "\"content\":[{\"kind\":\"figure\",\"id\":\"p_fig1\"},{\"kind\":\"table\",\"id\":\"p_tbl1\"},{\"kind\":\"figure\",\"id\":\"p_fig2\"}]",
+            aj,
+        )   # the order index in agent.json
+
+        @test ord(read(Pinax.render(; out=joinpath(tmp, "l"), theme=:latex), String))   # latex order
+    end
 end
