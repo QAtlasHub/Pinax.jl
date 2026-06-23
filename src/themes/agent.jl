@@ -37,6 +37,29 @@ struct AgentCtx
     rdiag::Vector{DiagEntry}
 end
 
+# A JSON scalar for a param value: numbers/bools stay native (a tool reads 16, not "16"); NaN/Inf are
+# not valid JSON numbers so they're quoted; anything else is stringified.
+_agent_jsonval(v::Bool) = v ? "true" : "false"
+_agent_jsonval(v::Integer) = string(v)
+_agent_jsonval(v::Real) = isfinite(v) ? string(v) : _jsonstr(string(v))
+_agent_jsonval(v::AbstractString) = _jsonstr(v)
+_agent_jsonval(v) = _jsonstr(string(v))
+
+# A figure's `params` binding as JSON: null, a structured {axis: value} object when the params object
+# is introspectable (a NamedTuple/Dict, or a ParamIO.DataKey via the extension's `_params_describe`),
+# else a string fallback (an opaque params value is still recorded for provenance).
+function _agent_params_json(io, params)
+    params === nothing && return print(io, "null")
+    desc = _params_describe(params)
+    desc === nothing && return print(io, _jsonstr(string(params)))
+    print(io, "{")
+    for (i, (k, v)) in enumerate(desc)
+        i == 1 || print(io, ",")
+        print(io, _jsonstr(k), ":", _agent_jsonval(v))
+    end
+    return print(io, "}")
+end
+
 # One figure → its JSON object (the verification substrate: caption/code/params/assets/comments).
 function emit_figure(::AgentBase, fig, ctx)
     io = ctx.io
@@ -49,9 +72,9 @@ function emit_figure(::AgentBase, fig, ctx)
         ",\"code\":",
         _jsonstr(fig.code),
         ",\"params\":",
-        fig.params === nothing ? "null" : _jsonstr(string(fig.params)),
-        ",\"assets\":[",
     )
+    _agent_params_json(io, fig.params)
+    print(io, ",\"assets\":[")
     for (i, a) in enumerate(fig.assets)
         i == 1 || print(io, ",")
         print(io, _jsonstr(replace(relpath(a, ctx.outdir), '\\' => '/')))
@@ -167,11 +190,18 @@ end
 
 # ---------- token-lean Markdown companion (the "paste to an LLM" view) ----------
 
+# Compact one-line param view for agent.md: "system.N=16, system.g=0.5" (structured) or a repr.
+function _params_inline(params)
+    desc = _params_describe(params)
+    desc === nothing && return string(params)
+    return join(("$k=$v" for (k, v) in desc), ", ")
+end
+
 function _agent_md_figs(io, figs, outdir, comments)
     for fig in figs
         println(io, "- [fig: ", fig.id, "] ", fig.caption)
         isempty(fig.code) || println(io, "  - code: `", fig.code, "`")
-        fig.params === nothing || println(io, "  - data: ", string(fig.params))
+        fig.params === nothing || println(io, "  - data: ", _params_inline(fig.params))
         isempty(fig.assets) ||
             println(io, "  - asset: ", replace(relpath(fig.assets[1], outdir), '\\' => '/'))
         for c in get(comments, Symbol(fig.anchor), Comment[])

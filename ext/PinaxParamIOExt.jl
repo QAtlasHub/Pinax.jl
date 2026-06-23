@@ -32,4 +32,8 @@ function Pinax._facet_value(p::ParamIO.DataKey, facet)
     return haskey(p.params, facet) ? p.params[facet] : missing
 end
 
+# Structured param axes (dotted key → value) for the agent backend's data-reconciliation substrate;
+# delegates to the core Dict handler so a key's axes are emitted sorted (e.g. {"system.N": 16, …}).
+Pinax._params_describe(p::ParamIO.DataKey) = Pinax._params_describe(p.params)
+
 end # module PinaxParamIOExt

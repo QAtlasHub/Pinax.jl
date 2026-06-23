@@ -254,6 +254,17 @@ _code_str(expr) = string(expr isa Expr ? Base.remove_linenums!(deepcopy(expr)) :
 # core has no param scheme and returns `nothing`.
 _param_tag(params) = nothing
 
+# Structured description of a figure's `params` binding — an ordered `Vector{Pair{String,Any}}` of
+# axis => value — for the agent backend's data-reconciliation view (an LLM sees the bound axes, not a
+# repr blob). `nothing` means "no introspectable scheme" (the agent then falls back to a string).
+# A NamedTuple keeps its declared order; a Dict is sorted for determinism; the PinaxParamIOExt
+# extension specializes this on a ParamIO.DataKey (delegating to its dotted-key param Dict).
+_params_describe(params) = nothing
+_params_describe(nt::NamedTuple) = Pair{String,Any}[string(k) => v for (k, v) in pairs(nt)]
+function _params_describe(d::AbstractDict)
+    return Pair{String,Any}[string(k) => d[k] for k in sort!(collect(keys(d)); by=string)]
+end
+
 # Figure id: an explicit `id` wins; else a param-derived tag (via the extension); else positional.
 # `c` is the enclosing container (a Section, or a page-as-leaf Page).
 function _fig_id(c, id, params)
