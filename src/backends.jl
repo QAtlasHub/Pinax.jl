@@ -106,6 +106,55 @@ function _write_table(x, base; maxrows::Int=2000)
     return dest
 end
 
+# Split one CSV line into fields, honoring "quoted" fields and "" escapes (inverse of `_csv_field`).
+function _split_csv_line(line)
+    fields = String[]
+    buf = IOBuffer()
+    inq = false
+    chars = collect(line)
+    i = 1
+    while i <= length(chars)
+        ch = chars[i]
+        if inq
+            if ch == '"'
+                if i < length(chars) && chars[i + 1] == '"'
+                    print(buf, '"')
+                    i += 1
+                else
+                    inq = false
+                end
+            else
+                print(buf, ch)
+            end
+        elseif ch == '"'
+            inq = true
+        elseif ch == ','
+            push!(fields, String(take!(buf)))
+        else
+            print(buf, ch)
+        end
+        i += 1
+    end
+    push!(fields, String(take!(buf)))
+    return fields
+end
+
+# Read a Pinax figure-data CSV back into (header, rows, total) for the agent backend's "figure as a
+# table" view — the plot object is gone after materialize, but this CSV asset persists across the
+# cache. Numeric cells are re-typed; `rows` is downsampled to <= `maxrows` (a cheap inline preview).
+function _read_csv_table(path; maxrows::Int=20)
+    isfile(path) || return nothing
+    lines = [l for l in readlines(path) if !isempty(l) && !startswith(l, "#")]
+    isempty(lines) && return nothing
+    retype(s) = something(tryparse(Float64, s), s)
+    header = _split_csv_line(lines[1])
+    body = @view lines[2:end]
+    total = length(body)
+    sel = total > maxrows ? body[1:cld(total, maxrows):total] : body
+    rows = Vector{Any}[Any[retype(c) for c in _split_csv_line(l)] for l in sel]
+    return (header=header, rows=rows, total=total)
+end
+
 """
     _materialize(fig, base, fmts) -> Vector{String}
 
