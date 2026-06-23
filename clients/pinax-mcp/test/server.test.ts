@@ -47,6 +47,9 @@ test("tools list and run end-to-end over MCP (figures + tables)", { timeout: 200
 
     // get_figure_data returns the full CSV behind the plot
     assert.match(text(await client.callTool({ name: "get_figure_data", arguments: { id: "p1_fig1" } })), /series,x,y/);
+    // error path: a unit with no figure data (a @table) -> isError
+    const noData = await client.callTool({ name: "get_figure_data", arguments: { id: "p1_tbl1" } });
+    assert.equal(noData.isError, true);
 
     // search reaches table cells
     assert.match(text(await client.callTool({ name: "search", arguments: { query: "critical" } })), /p1_tbl1/);

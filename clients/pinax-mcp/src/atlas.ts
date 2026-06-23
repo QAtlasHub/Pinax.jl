@@ -98,7 +98,8 @@ export class Atlas {
       if (content && content.length) {
         for (const { kind, id } of content) {
           const u = this.unit(id);
-          if (u) out.push(`- [${kind} ${id}] ${u.label}`);
+          // emit even an unresolvable id (stale agent.json) so it is visible, not silently dropped
+          out.push(`- [${kind} ${id}] ${u ? u.label : "(missing)"}`);
         }
       } else {
         for (const f of node.figures ?? []) out.push(`- [figure ${f.id}] ${f.caption}`);
@@ -150,7 +151,8 @@ export class Atlas {
         if (typeof n.params === "string") consider(u, "params", n.params);
         for (const c of n.comments ?? []) consider(u, "comment", `${c.author}: ${c.text}`);
       } else if (u.kind === "table") {
-        consider(u, "cells", (n.rows ?? []).map((r: unknown[]) => r.join(" ")).join(" | "));
+        const cellStr = (c: unknown) => (c == null ? "" : String(c)); // avoid [object Object] / nested-array join
+        consider(u, "cells", (n.rows ?? []).map((r: unknown[]) => r.map(cellStr).join(" ")).join(" | "));
       } else {
         consider(u, "desc", n.desc);
         if (u.kind === "page") consider(u, "summary", n.summary);
