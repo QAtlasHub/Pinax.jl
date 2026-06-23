@@ -40,6 +40,7 @@ end
 
 # A JSON scalar for a param value: numbers/bools stay native (a tool reads 16, not "16"); NaN/Inf are
 # not valid JSON numbers so they're quoted; anything else is stringified.
+_agent_jsonval(::Missing) = "null"
 _agent_jsonval(v::Bool) = v ? "true" : "false"
 _agent_jsonval(v::Integer) = string(v)
 _agent_jsonval(v::Real) = isfinite(v) ? string(v) : _jsonstr(string(v))
@@ -105,6 +106,48 @@ function emit_figure(::AgentBase, fig, ctx)
     return nothing
 end
 
+# One @table -> a JSON object (header + native-typed rows). A table is already the LLM-native form.
+function emit_table(::AgentBase, tbl, ctx)
+    io = ctx.io
+    print(
+        io,
+        "{\"id\":",
+        _jsonstr(string(tbl.id)),
+        ",\"caption\":",
+        _jsonstr(tbl.caption),
+        ",\"code\":",
+        _jsonstr(tbl.code),
+        ",\"header\":[",
+    )
+    for (i, h) in enumerate(tbl.header)
+        i == 1 || print(io, ",")
+        print(io, _jsonstr(h))
+    end
+    print(io, "],\"rows\":[")
+    for (i, row) in enumerate(tbl.rows)
+        i == 1 || print(io, ",")
+        print(io, "[")
+        for (j, cell) in enumerate(row)
+            j == 1 || print(io, ",")
+            print(io, _agent_jsonval(cell))
+        end
+        print(io, "]")
+    end
+    print(io, "]}")
+    return nothing
+end
+
+function _agent_tables!(theme::AgentBase, tables, ctx)
+    io = ctx.io
+    print(io, "[")
+    for (i, tbl) in enumerate(tables)
+        i == 1 || print(io, ",")
+        emit_table(theme, tbl, ctx)
+    end
+    print(io, "]")
+    return nothing
+end
+
 # Materialize each figure (the asset is the verifiable artifact), then emit them as a JSON array.
 # Inlined rather than a shared helper so formats come straight from `figure_formats(theme)` — keeps
 # the materialize-all-then-emit-all two-phase shape and mirrors `_latex_emit_figs!`.
@@ -146,6 +189,8 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
         joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor),
         ctx,
     )
+    print(io, ",\"tables\":")
+    _agent_tables!(theme, sec.tables, ctx)
     print(io, "}")
     return nothing
 end
@@ -169,6 +214,8 @@ function emit_page(theme::AgentBase, pg, ctx)
     _agent_figs!(
         theme, pg.figures, joinpath(ctx.outdir, "assets", "figures", pg.anchor), ctx
     )
+    print(io, ",\"tables\":")
+    _agent_tables!(theme, pg.tables, ctx)
     print(io, ",\"sections\":[")
     for (j, sec) in enumerate(pg.sections)
         j == 1 || print(io, ",")
@@ -233,6 +280,22 @@ function _agent_md_figs(io, figs, outdir, comments)
     return nothing
 end
 
+# @table artifacts as markdown tables (the LLM read view).
+function _agent_md_tables(io, tables)
+    for tbl in tables
+        println(io)
+        isempty(tbl.caption) || println(io, "_", tbl.caption, "_  [table: ", tbl.id, "]")
+        if !isempty(tbl.header)
+            println(io, "| ", join(tbl.header, " | "), " |")
+            println(io, "|", repeat(" --- |", length(tbl.header)))
+        end
+        for row in tbl.rows
+            println(io, "| ", join((_cellstr(c) for c in row), " | "), " |")
+        end
+    end
+    return nothing
+end
+
 function _agent_markdown(doc::Document, outdir, comments)
     io = IOBuffer()
     isempty(doc.meta.title) || println(io, "# ", doc.meta.title)
@@ -251,10 +314,12 @@ function _agent_markdown(doc::Document, outdir, comments)
         pg.summary === nothing || println(io, "_", pg.summary, "_")
         pg.desc === nothing || println(io, pg.desc.source)
         _agent_md_figs(io, pg.figures, outdir, comments)
+        _agent_md_tables(io, pg.tables)
         for sec in pg.sections
             println(io, "\n#### ", sec.title, "  [id: ", sec.id, "]")
             sec.desc === nothing || println(io, sec.desc.source)
             _agent_md_figs(io, sec.figures, outdir, comments)
+            _agent_md_tables(io, sec.tables)
         end
     end
     return String(take!(io))

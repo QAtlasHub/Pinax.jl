@@ -98,6 +98,11 @@ const _GALLERY_CSS = """
   .figgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem}
   .figgrid-single{grid-template-columns:minmax(0,560px);justify-content:center}
   .figgrid-wide{grid-template-columns:1fr}
+  figure.pinax-table{overflow-x:auto}
+  .pinax-table table{border-collapse:collapse;width:100%;font-size:.9em}
+  .pinax-table th,.pinax-table td{border:1px solid #e2e5e9;padding:.25rem .5rem;text-align:left}
+  .pinax-table thead th{background:#f4f6f8;font-weight:600}
+  .pinax-table tbody tr:nth-child(even){background:#fafbfc}
   figure{margin:0;border:1px solid #e2e5e9;border-radius:8px;padding:.5rem;background:#fdfdfe}
   figure img{width:100%;height:auto}
   figure iframe.pinax-pdf{width:100%;height:460px;border:1px solid #eee;border-radius:4px;background:#fff}
@@ -685,6 +690,7 @@ function emit_page(theme::GalleryBase, pg, ctx)
         assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor)
         emit_view(theme, Val(:grid), pg.figures, assetdir, pg.layout, ctx)
     end
+    isempty(pg.tables) || _emit_tables(theme, pg.tables, ctx)
     if !isempty(pg.sections)
         println(io, "<nav><strong>Contents</strong>")
         for sec in pg.sections
@@ -988,6 +994,7 @@ function emit_document(
                 pg.layout,
                 ctx,
             )
+            isempty(pg.tables) || _emit_tables(theme, pg.tables, ctx)
             for sec in pg.sections
                 emit_section(theme, sec, pg, ctx)
             end
@@ -1095,6 +1102,7 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     else
         emit_view(theme, Val(:grid), sec.figures, assetdir, sec.layout, ctx)
     end
+    isempty(sec.tables) || _emit_tables(theme, sec.tables, ctx)
     emit_comments(theme, sec.anchor, ctx)
     return println(io, "</section>")
 end
@@ -1202,6 +1210,42 @@ function _emit_placeholder(fig::Figure, why, io)
         _esc(string(fig.id)),
         ") — see <a href=\"#diagnostics\">diagnostics</a></div></figure>",
     )
+end
+
+# A @table artifact -> an HTML table inside a figure card (reusing the figure/figcaption styling).
+function emit_table(theme::GalleryBase, tbl, ctx)
+    io = ctx.io
+    println(io, "<figure class=\"pinax-table\" id=\"", tbl.anchor, "\"><table>")
+    if !isempty(tbl.header)
+        print(io, "<thead><tr>")
+        for h in tbl.header
+            print(io, "<th>", _esc(h), "</th>")
+        end
+        println(io, "</tr></thead>")
+    end
+    println(io, "<tbody>")
+    for row in tbl.rows
+        print(io, "<tr>")
+        for cell in row
+            print(io, "<td>", _esc(_cellstr(cell)), "</td>")
+        end
+        println(io, "</tr>")
+    end
+    println(io, "</tbody></table>")
+    isempty(tbl.caption) || println(
+        io,
+        "<figcaption>",
+        emit_text(theme, tbl.caption, tbl.anchor, ctx; block=false),
+        "</figcaption>",
+    )
+    return println(io, "</figure>")
+end
+
+function _emit_tables(theme::GalleryBase, tables, ctx)
+    for tbl in tables
+        emit_table(theme, tbl, ctx)
+    end
+    return nothing
 end
 
 function emit_figure(theme::GalleryBase, fig, ctx)

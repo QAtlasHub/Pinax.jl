@@ -164,6 +164,30 @@ function _latex_emit_figs!(theme::LaTeXBase, figs, assetdir, ctx)
     return nothing
 end
 
+# A @table artifact -> a LaTeX `table`/`tabular` (cells escaped as text).
+function emit_table(theme::LaTeXBase, tbl, ctx)
+    io = ctx.io
+    ncol = if isempty(tbl.header)
+        (isempty(tbl.rows) ? 0 : length(tbl.rows[1]))
+    else
+        length(tbl.header)
+    end
+    ncol == 0 && return nothing
+    rowend = "\\\\"
+    println(io, "\\begin{table}[htbp]\\centering")
+    isempty(tbl.caption) ||
+        println(io, "\\caption{", emit_text(theme, tbl.caption, tbl.anchor, ctx), "}")
+    println(io, "\\label{", tbl.anchor, "}")
+    println(io, "\\begin{tabular}{", repeat("l", ncol), "}\\hline")
+    isempty(tbl.header) ||
+        println(io, join((_texesc(h) for h in tbl.header), " & "), " ", rowend, "\\hline")
+    for row in tbl.rows
+        println(io, join((_texesc(_cellstr(c)) for c in row), " & "), " ", rowend)
+    end
+    println(io, "\\hline\\end{tabular}")
+    return println(io, "\\end{table}")
+end
+
 function emit_section(theme::LaTeXBase, sec, pg, ctx)
     io = ctx.io
     println(io, "\\subsection{", _texesc(sec.title), "}\\label{", sec.anchor, "}")
@@ -171,6 +195,9 @@ function emit_section(theme::LaTeXBase, sec, pg, ctx)
     _latex_emit_figs!(
         theme, sec.figures, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx
     )
+    for tbl in sec.tables
+        emit_table(theme, tbl, ctx)
+    end
     emit_comments(theme, sec.anchor, ctx)
     return nothing
 end
@@ -181,6 +208,9 @@ function emit_page(theme::LaTeXBase, pg, ctx)
     println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
     pg.desc === nothing || println(io, emit_text(theme, pg.desc.source, pg.anchor, ctx))
     _latex_emit_figs!(theme, pg.figures, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
+    for tbl in pg.tables
+        emit_table(theme, tbl, ctx)
+    end
     emit_comments(theme, pg.anchor, ctx)
     for sec in pg.sections
         emit_section(theme, sec, pg, ctx)

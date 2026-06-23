@@ -49,6 +49,9 @@ function emit_view end
 "Render one figure — its assets, caption and co-located comments. `emit_figure(theme, figure, ctx)`."
 function emit_figure end
 
+"Render one table artifact (an HTML/LaTeX table, or structured rows). `emit_table(theme, table, ctx)`."
+function emit_table end
+
 "Render a markdown+math source (a `@desc`/`@caption`). `emit_text(theme, source, item, ctx; block)`."
 function emit_text end
 
