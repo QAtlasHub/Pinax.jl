@@ -1,0 +1,16 @@
+# The examples environment — a self-contained report-side env (Pinax + DataVault + ParamIO + Plots),
+# the way a login-node / orchestrator reads a finished vault. Run from the Pinax.jl root:
+#   julia --project=examples examples/ising_datavault.jl
+[deps]
+DataVault = "23f5f8f6-b4da-40ee-8c72-c53b6c5de94f"
+ParamIO = "938a3ac2-d340-473c-bcf1-88af577e4ccf"
+Pinax = "e782a80a-1ac9-479e-ba2b-0f3433ef5b4f"
+Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
+Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Statistics = "10745b16-79ce-11e8-11f9-7d13ad32a3b2"
+
+[sources]
+DataVault = {rev = "main", url = "https://github.com/sotashimozono/DataVault.jl.git"}
+ParamIO = {rev = "main", url = "https://github.com/sotashimozono/ParamIO.jl.git"}
+Pinax = {path = ".."}
