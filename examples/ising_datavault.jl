@@ -7,13 +7,15 @@
 # PinaxDataVaultExt extension). Re-running skips keys already marked `:done`, so the heavy Monte Carlo
 # runs once; the figures are rebuilt from the stored data.
 #
-#     julia --project=docs examples/ising_datavault.jl
+#     julia --project=examples examples/ising_datavault.jl
 #
-# Any environment with Pinax + DataVault + ParamIO + Plots works. Outputs (the vault + the gallery)
-# land under examples/out/ by default (override with DATAVAULT_OUTDIR / PINAX_OUT).
+# Any environment with Pinax + DataVault + ParamIO + Plots works (examples/Project.toml is one).
+# Outputs land under examples/out/ by default (override with DATAVAULT_OUTDIR / PINAX_OUT):
+# the gallery (human face), agent.json (LLM face), and a @benchmark verdict (the trust gate).
 
 using Pinax, DataVault, ParamIO, Plots, Random, Statistics, Printf
 
+ENV["GKSwstype"] = get(ENV, "GKSwstype", "100")   # headless GR (renders without a display)
 gr()
 
 # ---- the model: 2D Ising, Metropolis single-spin flips, periodic boundaries ----
@@ -131,8 +133,27 @@ Pinax.reset!()
     end
 end
 
-out = get(ENV, "PINAX_OUT", joinpath(OUTDIR, "gallery"))
-path = render(; out=out, vault=vault, study="mc")
+# A second page — the TEST SET (the trust gate). The same MC numbers, checked against the textbook
+# Ising limits: this renders as a green/red test-report for a human AND a machine-checkable verdict in
+# agent.json for an LLM, so "the MC looks right" becomes a checked PASS/FAIL instead of a guess.
+@benchmark :validation "Ising sanity — M(T) vs known limits" begin
+    @desc md"The Monte Carlo must reproduce the textbook limits: ordered (\$|m|\to 1\$) well below \$T_c\$, disordered (finite-size residual) well above."
+    @expect "M_ordered" "low-T |m| (ordered phase)" got = Ms[1] want = 1.0 tol = 0.2
+    @expect "M_disordered" "high-T |m| (finite-size residual)" got = Ms[end] want = 0.0 tol = 0.3
+    @expect "transition" "order parameter drops through Tc" got = Ms[1] - Ms[end] want = 0.8 tol = 0.45
+end
 
-println("\nGallery: ", path)
-println("Vault:   ", vault.outdir)
+# Render the TWO faces of the SAME doc — pixels for a human, data (+ the verdict) for an LLM.
+out = get(ENV, "PINAX_OUT", joinpath(OUTDIR, "gallery"))
+gallery = render(; out=out, vault=vault, study="mc")                                     # human face
+agentp = render(; out=joinpath(OUTDIR, "agent"), vault=vault, study="mc", theme=:agent)  # LLM face
+
+println("\n— the two faces of the same result —")
+println("  human (gallery): ", gallery)
+println("  LLM   (agent):   ", agentp)
+ajfile = endswith(agentp, ".json") ? agentp : joinpath(agentp, "agent.json")
+if isfile(ajfile)
+    v = match(r"\"verdict\":\"([A-Z]+)\"", read(ajfile, String))
+    v === nothing || println("  benchmark verdict (what the LLM reads, not a println): ", v.captures[1])
+end
+println("  vault:           ", vault.outdir)
