@@ -11,28 +11,94 @@
 [![Aqua QA](https://raw.githubusercontent.com/JuliaTesting/Aqua.jl/main/badge.svg)](https://github.com/JuliaTesting/Aqua.jl)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-this repository is made for template folder for developing julia project.  
-some of convenient features are available, but you need to fix to your current calculations.
+> *A board of figures that is also a catalogue.*
 
-## MCP server — `clients/pinax-mcp`
+**Pinax** turns the figures and tables your analysis scripts produce into a **structured,
+self-contained catalogue** of a computational study — described once and rendered three ways:
 
-`render(theme=:agent)` emits an `agent.json` an LLM can read. **[`clients/pinax-mcp`](clients/pinax-mcp)** is a Node MCP server over that artifact: it serves every unit (figure / table / section / …) by id, presents a figure as its data table, and runs in any MCP client (`npx pinax-mcp --agent <render-out>`). See its [README](clients/pinax-mcp/README.md).
+- **HTML gallery** — sections as cards, a responsive figure grid, markdown + KaTeX math,
+  cross-references, citations, and an interactive comment layer;
+- **LaTeX → PDF** — the same manuscript as a typeset document;
+- **`agent.json`** — a machine-readable view (figures *as data tables*, sections, captions) that an
+  LLM or downstream tool can read.
 
-## TODO LIST
+It generalizes the hand-written `build_report` page an analysis pipeline grows over time: you
+describe the manuscript once with a small DSL, point each figure at the value (or data key) it
+plots, and `render` writes the artifact.
 
-1. **GitHub Repository Settings**
-   - [ ] **Actions Permissions**: Go to `Settings > Actions > General` and change **Workflow permissions** to **"Read and write permissions"**. This is required for `Documenter.jl` (docs) and `TagBot` to function.
-   - [ ] **Allow Auto-merge**: (Recommended) Enable **"Allow auto-merge"** in `Settings > General` to streamline the PR process.
-2. **Testing & Code Quality**
-   - [ ] **Codecov Setup**:
-     1. Register your repository at [Codecov](https://app.codecov.io/) to obtain an upload token.
-     2. Add the token to `Settings > Secrets and variables > Actions` as a repository secret named `CODECOV_TOKEN`.
-     3. Replace the **[Codecov Badge](#badge-top)** link at the top of this README with the one provided in your Codecov dashboard.
-3. **Documentation (Optional)**
-   - [ ] **Enable Workflow**: Rename `.github/workflows/Documentation.yml.disabled` to `.github/workflows/Documentation.yml` to enable automatic document building.
-   - [ ] **GitHub Pages**: After the first successful documentation build, go to `Settings > Pages` and set the source to the `gh-pages` branch.
-4. **Personalization**
-   - [ ] **LICENSE**: Update the year and name in the `LICENSE` file.
-   - [ ] **Badges**: Ensure all badge URLs at the top of this README point to your new repository path instead of the template.
+> *πίναξ* (Ancient Greek) — "tablet / catalogue / register"; the *Pinakes* were the catalogue of the
+> Library of Alexandria.
 
-## IF YOU HAD SOME TROUBLES PLEASE MAKE `ISSUES` [HERE](https://github.com/sotashimozono/template.jl/issues)
+## Installation
+
+```julia
+pkg> add Pinax
+```
+
+Requires Julia v1.12+.
+
+## Quickstart
+
+```julia
+using Pinax
+
+@page :results "Results" begin
+    @section :energy "Energy" begin
+        @desc md"Energy density $E/N$ versus inverse temperature $\beta$."
+        @figure plot_energy()      # any Plots/Makie figure — captured lazily
+        @caption "χ-convergence"
+    end
+end
+
+render(out = "site")               # -> site/index.html    (self-contained HTML gallery)
+serve("site")                      # preview over HTTP
+
+# render(theme = :latex, out = "pdf")     # -> pdf/document.tex  -> PDF
+# render(theme = :agent, out = "agent")   # -> agent/agent.json  (machine-readable)
+```
+
+`@figure` captures its expression lazily, so figures are computed (and cached) only when you
+`render`. Sections become cards; figures lay out in a responsive grid; `$…$` math is rendered by
+KaTeX.
+
+## Three faces of one report
+
+| `theme` | output | for |
+| --- | --- | --- |
+| `:gallery` *(default)* | self-contained HTML | humans browsing results |
+| `:latex` | LaTeX → PDF | manuscripts / sharing |
+| `:agent` | `agent.json` | LLMs / downstream tooling |
+
+The same source — sections, `@desc`/`@caption`, `@table`, citations, a `@benchmark`'s PASS/FAIL
+verdict — flows to every face. Themes are pluggable: `render(; theme = MyTheme())`,
+`register_theme!(:mine, MyTheme())`, or `theme = "path/to/mytheme.jl"`.
+
+## Bridging a parameter sweep
+
+`report(vault, recipe; title, out)` discovers a finished sweep's results, hands each `(key, dict)`
+pair to a project-specific `recipe` that builds the doc, and renders both the gallery and
+`agent.json` — so the same results become a human notebook and an LLM-readable artifact in one call.
+
+## MCP server
+
+`render(theme = :agent)` emits an `agent.json` an LLM can read. **[`clients/pinax-mcp`](clients/pinax-mcp)**
+is a Node MCP server over that artifact: it serves every unit (figure / table / section) by id and
+presents a figure as its underlying data table — `npx pinax-mcp --agent <render-out>`. See its
+[README](clients/pinax-mcp/README.md).
+
+## Documentation
+
+- **[Stable docs](https://codes.sota-shimozono.com/Pinax.jl/stable/)** ·
+  **[Dev docs](https://codes.sota-shimozono.com/Pinax.jl/dev/)**
+- **[Examples](https://codes.sota-shimozono.com/Pinax.jl/stable/examples/)** — galleries built live
+  from real analysis scripts
+- **[API reference](https://codes.sota-shimozono.com/Pinax.jl/stable/api/)**
+
+## Contributing
+
+Issues and pull requests are welcome at
+[github.com/sotashimozono/Pinax.jl](https://github.com/sotashimozono/Pinax.jl/issues).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
