@@ -1,5 +1,5 @@
 using Pinax
-using Pinax: _approx_numbers, _margin_svg, Check
+using Pinax: _approx_numbers, _check_from, _margin_svg, Check, TestNode
 using Test
 
 # The AbstractTestSet subtype lives in the extension — `Test` is a weakdep, because Pinax is a
@@ -8,7 +8,7 @@ using Test
 const Ext = Base.get_extension(Pinax, :PinaxTestExt)
 const PinaxTestSet = Ext.PinaxTestSet
 const _result_data_expr = Ext._result_data_expr
-const _check_for = Ext._check_for
+_check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.Pass, i)
 
 # The real entry point is `@testset PinaxTestSet … begin … end` at the ROOT of a runtests.jl, and a
 # root PinaxTestSet deliberately `error`s when the suite is red. That cannot run *inside* this
@@ -97,6 +97,54 @@ const _check_for = Ext._check_for
         @test occursin("#d9534f", s)          # the failing bar is red
         @test occursin("44×", s)              # …and labelled with its real overshoot
         @test occursin("</svg>", s)
+    end
+
+    @testset "dump → merge → one gallery (how sharded CI works)" begin
+        dir = mktempdir()
+        # Two shards, each holding a DISJOINT set of test files — which is exactly what the fleet's
+        # 8-way shard split produces. Rendering per shard would give N disconnected galleries; the
+        # shards dump their trees instead, and one later job merges and renders once.
+        shard(desc, files) = TestNode("MyPkg"; elapsed=1.0, children=files)
+        file(name, checks; nbroken=0) =
+            TestNode(name; elapsed=0.5, checks=checks, nbroken=nbroken)
+        c(label, got, want, tol, pass) =
+            Check(:t0, label, got, want, abs(got - want) / abs(want), tol, :rel, pass)
+
+        d1 = Pinax.dump_test_report(
+            shard("MyPkg", [file("test_a.jl", [c("close", 1.0, 1.0098, 0.01, true)])]),
+            joinpath(dir, "shard-1.toml"),
+        )
+        d2 = Pinax.dump_test_report(
+            shard("MyPkg", [file("test_b.jl", [c("broken", 0.5, 0.9, 0.01, false)])]),
+            joinpath(dir, "shard-2.toml"),
+        )
+
+        # round-trip: TOML keeps Float64 exactly, which is the only reason a dump is honest
+        back = Pinax.load_test_dump(d1)
+        @test back.children[1].description == "test_a.jl"
+        @test back.children[1].checks[1].want === 1.0098
+
+        Pinax.render_test_report([d1, d2]; out=joinpath(dir, "m"), title="Merged")
+        md = read(joinpath(dir, "m_agent", "agent.md"), String)
+        # ONE gallery, one page per test FILE — the shard boundary is invisible in the output…
+        @test occursin("test_a.jl", md) && occursin("test_b.jl", md)
+        @test !occursin("shard", lowercase(md))
+        # …and the check ids are renumbered across the merge rather than colliding at t1
+        @test occursin("t1 —", md) && occursin("t2 —", md)
+    end
+
+    @testset "a broken test is counted, never painted red" begin
+        # Test.Broken is not a Pass, so encoding it as a Check would give pass=false — a red bar and
+        # a FAIL verdict for a test the runner is perfectly happy about.
+        n = TestNode(
+            "test_x.jl";
+            checks=[Check(:t0, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+            nbroken=1,
+        )
+        @test Pinax._ntests(n) == 2
+        @test Pinax._nfail(n) == 0
+        @test occursin("1 broken", Pinax._summary_line(n))
+        @test occursin("1/2 passed", Pinax._summary_line(n))
     end
 
     @testset "end-to-end: env-driven, and a red suite still fails the process" begin

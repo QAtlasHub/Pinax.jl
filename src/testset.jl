@@ -200,6 +200,77 @@ function _push_check_raw!(chk::Check)
     return chk
 end
 
+# ── the tree (Test-free) ─────────────────────────────────────────────
+#
+# `TestNode` is the whole point of this file's shape: it is the testset tree with `Test` factored
+# OUT. The extension's only job is to turn a `PinaxTestSet` into one of these. Everything downstream
+# — summaries, the margin figure, the document, the TOML dump, and the merge of several dumps back
+# into ONE document — is then plain Julia over `TestNode`, testable with no `Test` in sight.
+#
+# It is also what makes sharded CI work. Eight shards each run a disjoint set of test FILES, so eight
+# reports would be eight disconnected galleries. Instead each shard dumps its tree (no rendering at
+# all), and one later job merges the trees and renders the single coherent gallery the design always
+# implied: one page per test file.
+struct TestNode
+    description::String
+    elapsed::Float64
+    ignore::Bool                # @pinaxignore: ran and counted, but kept out of the document
+    checks::Vector{Check}       # one per Pass / Fail / Error recorded directly here
+    nbroken::Int                # @test_broken / skipped: counted, never a Check — see below
+    nerror::Int                 # how many of the failing checks were ERRORS rather than plain fails
+    children::Vector{TestNode}
+end
+
+function TestNode(
+    description::AbstractString;
+    elapsed::Real=NaN,
+    ignore::Bool=false,
+    checks::Vector{Check}=Check[],
+    nbroken::Integer=0,
+    nerror::Integer=0,
+    children::Vector{TestNode}=TestNode[],
+)
+    return TestNode(
+        String(description), Float64(elapsed), ignore, checks, nbroken, nerror, children
+    )
+end
+
+# A broken/skipped test is deliberately NOT a Check. It has no verdict to show: it did not pass, but
+# it did not fail either, and encoding it as `pass=false` would paint the page red and flip the
+# benchmark verdict to FAIL — for a test the runner is perfectly happy about.
+_ntests(n::TestNode) = length(n.checks) + n.nbroken + sum(_ntests, n.children; init=0)
+_nerror(n::TestNode) = n.nerror + sum(_nerror, n.children; init=0)
+_nbroken(n::TestNode) = n.nbroken + sum(_nbroken, n.children; init=0)
+function _nfail(n::TestNode)
+    here = count(c -> !c.pass, n.checks) - n.nerror
+    return here + sum(_nfail, n.children; init=0)
+end
+
+function _summary_line(n::TestNode)
+    total, f, e, b = _ntests(n), _nfail(n), _nerror(n), _nbroken(n)
+    t = isnan(n.elapsed) ? "" : " · $(round(n.elapsed; digits=2))s"
+    return "$(total - f - e - b)/$(total) passed" *
+           (f > 0 ? " · $(f) failed" : "") *
+           (e > 0 ? " · $(e) errored" : "") *
+           (b > 0 ? " · $(b) broken" : "") *
+           t
+end
+
+# The largest delta/tol among this subtree's NUMERIC checks — how close the file came to red.
+function _worst_margin(n::TestNode)
+    worst = nothing
+    for c in n.checks
+        c.kind === :abs && c.tol == 0.5 && c.want == 1.0 && continue   # the 1/0 indicator, not a margin
+        m = _margin(c)
+        worst = worst === nothing ? m : max(worst, m)
+    end
+    for ch in n.children
+        m = _worst_margin(ch)
+        m === nothing || (worst = worst === nothing ? m : max(worst, m))
+    end
+    return worst
+end
+
 # ── the margin profile figure ────────────────────────────────────────
 #
 # A hand-written SVG, on purpose. `@figure`'s `gen` may return a FILE PATH (backends.jl) — a
@@ -287,3 +358,219 @@ function _push_margin_figure!(page_id::Symbol, checks::Vector{Check})
     )
     return nothing
 end
+
+# ── the document ─────────────────────────────────────────────────────
+
+# `acc` collects every Check pushed anywhere in this subtree, in emission order. A page's checks are
+# spread across its @sections (that is the whole nesting), so the page-level margin figure cannot be
+# rebuilt from the page container alone — it has to be accumulated on the way down.
+function _emit_node!(
+    n::TestNode, counter::Ref{Int}, page_when::Function, acc::Vector{Check}=Check[]
+)
+    for c in n.checks
+        counter[] += 1
+        c.id = Symbol("t", counter[])   # ids are assigned at RENDER time, so a merge renumbers cleanly
+        _push_check_raw!(c)
+        push!(acc, c)
+    end
+    # Nested testsets become pages (a file) or sections (a group). @pinaxignore'd ones are skipped
+    # HERE only — never in the counts, so an ignored subtree still fails the suite if it is red.
+    for ch in n.children
+        ch.ignore && continue
+        if page_when(ch.description)
+            pid = _slug(ch.description)
+            _enter_page!(pid, ch.description; status=:benchmark, summary=_summary_line(ch))
+            try
+                page_checks = Check[]
+                _emit_node!(ch, counter, page_when, page_checks)
+                append!(acc, page_checks)
+                # Back at page level (every section closed), so the figure lands on the page.
+                _push_margin_figure!(pid, page_checks)
+            finally
+                _exit_page!()
+            end
+        else
+            _enter_section!(
+                _slug(ch.description), ch.description; summary=_summary_line(ch)
+            )
+            try
+                _emit_node!(ch, counter, page_when, acc)
+            finally
+                _exit_section!()
+            end
+        end
+    end
+    return acc
+end
+
+function _collect_rows!(rows::Vector{NamedTuple}, n::TestNode, page_when::Function)
+    for ch in n.children
+        ch.ignore && continue
+        if page_when(ch.description)
+            m = _worst_margin(ch)
+            push!(
+                rows,
+                (
+                    file=ch.description,
+                    tests=_ntests(ch),
+                    passed=_ntests(ch) - _nfail(ch) - _nerror(ch) - _nbroken(ch),
+                    failed=_nfail(ch),
+                    errored=_nerror(ch),
+                    seconds=isnan(ch.elapsed) ? missing : round(ch.elapsed; digits=2),
+                    worst_margin=m === nothing ? missing : round(m; digits=3),
+                ),
+            )
+        else
+            _collect_rows!(rows, ch, page_when)
+        end
+    end
+    return rows
+end
+
+"""
+    render_test_report(root::TestNode; out, title="Test report", page_when=…) -> (; gallery, agent)
+    render_test_report(dumps::AbstractVector{<:AbstractString}; out, …)       -> (; gallery, agent)
+
+Render a testset tree as a Pinax document: an overview page (one row per test file, ranked by
+`worst margin`), then one `status=:benchmark` page per file whose sections mirror the nested
+testsets, each with its margin figure.
+
+Given a list of TOML dumps (see [`dump_test_report`](@ref)) their trees are **merged** under one root
+first — which is how a sharded CI run becomes a single coherent gallery instead of N disconnected
+ones.
+
+Writes `<out>_html` (the human gallery) and `<out>_agent` (`agent.json`), following the same
+convention as [`report`](@ref).
+"""
+function render_test_report(
+    root::TestNode;
+    out::AbstractString,
+    title::AbstractString="Test report",
+    page_when::Function=_looks_like_a_file,
+)
+    reset!(; title=title)
+    counter = Ref(0)
+    # An overview page first: one row per file, so the whole suite is one glance — and the SAME rows
+    # land in agent.json as data, so an LLM reads the suite without scraping a log.
+    _enter_page!(:overview, title; layout=:wide, summary=_summary_line(root))
+    try
+        rows = NamedTuple[]
+        _collect_rows!(rows, root, page_when)
+        isempty(rows) || _push_table!(;
+            data=rows,
+            code="",
+            caption="Per-file result profile. `worst margin` is the largest `delta/tol` seen in " *
+                    "that file: 1.0 means a check landed exactly on its tolerance.",
+            id=:per_file,
+        )
+    finally
+        _exit_page!()
+    end
+    _emit_node!(root, counter, page_when)
+    doc = current_document()
+    gallery = render(doc; out="$(out)_html", theme=:gallery)
+    agent = render(doc; out="$(out)_agent", theme=:agent)
+    return (; gallery, agent)
+end
+
+function render_test_report(
+    dumps::AbstractVector{<:AbstractString}; title::AbstractString="Test report", kwargs...
+)
+    isempty(dumps) && error("Pinax.render_test_report: no dumps given.")
+    roots = [load_test_dump(d) for d in dumps]
+    # The shards partition the test FILES, so their children are disjoint and concatenating them is
+    # the whole merge. Elapsed time is summed, not maxed: it is CPU time spent, not wall clock.
+    merged = TestNode(
+        title;
+        elapsed=sum(r -> isnan(r.elapsed) ? 0.0 : r.elapsed, roots; init=0.0),
+        children=reduce(vcat, (r.children for r in roots)),
+        checks=reduce(vcat, (r.checks for r in roots)),
+        nbroken=sum(r -> r.nbroken, roots; init=0),
+        nerror=sum(r -> r.nerror, roots; init=0),
+    )
+    return render_test_report(merged; title=title, kwargs...)
+end
+
+# ── the dump (how a sharded run gets merged) ─────────────────────────
+#
+# TOML, because Pinax already depends on it and it round-trips Float64 exactly. A shard writes its
+# tree and renders NOTHING; one later job (the docs build) merges every shard's tree and renders once.
+
+"""
+    dump_test_report(root::TestNode, path) -> path
+
+Write a testset tree to `path` as TOML, to be merged and rendered later by
+[`render_test_report`](@ref). This is what a CI shard emits instead of rendering its own partial
+gallery.
+"""
+function dump_test_report(root::TestNode, path::AbstractString)
+    dir = dirname(path)
+    isempty(dir) || mkpath(dir)
+    open(path, "w") do io
+        return TOML.print(io, Dict("root" => _node_to_dict(root)))
+    end
+    return path
+end
+
+"""
+    load_test_dump(path) -> TestNode
+
+Read back a tree written by [`dump_test_report`](@ref).
+"""
+load_test_dump(path::AbstractString) = _dict_to_node(TOML.parsefile(path)["root"])
+
+function _node_to_dict(n::TestNode)
+    d = Dict{String,Any}(
+        "description" => n.description,
+        "ignore" => n.ignore,
+        "nbroken" => n.nbroken,
+        "nerror" => n.nerror,
+    )
+    # TOML has no NaN, so an unmeasured elapsed is simply absent.
+    isnan(n.elapsed) || (d["elapsed"] = n.elapsed)
+    isempty(n.checks) || (d["check"] = [_check_to_dict(c) for c in n.checks])
+    isempty(n.children) || (d["child"] = [_node_to_dict(c) for c in n.children])
+    return d
+end
+
+# `id` is deliberately NOT dumped: it is assigned at render time (t1, t2, …) so that merging several
+# shards produces one clean numbering rather than N colliding ones.
+function _check_to_dict(c::Check)
+    return Dict{String,Any}(
+        "label" => c.label,
+        "got" => c.got,
+        "want" => c.want,
+        "delta" => c.delta,
+        "tol" => c.tol,
+        "kind" => String(c.kind),
+        "pass" => c.pass,
+    )
+end
+
+function _dict_to_node(d::AbstractDict)
+    return TestNode(
+        d["description"];
+        elapsed=get(d, "elapsed", NaN),
+        ignore=get(d, "ignore", false),
+        nbroken=get(d, "nbroken", 0),
+        nerror=get(d, "nerror", 0),
+        checks=Check[_dict_to_check(c) for c in get(d, "check", Any[])],
+        children=TestNode[_dict_to_node(c) for c in get(d, "child", Any[])],
+    )
+end
+
+function _dict_to_check(d::AbstractDict)
+    return Check(
+        :t0,                        # renumbered on render
+        d["label"],
+        Float64(d["got"]),
+        Float64(d["want"]),
+        Float64(d["delta"]),
+        Float64(d["tol"]),
+        Symbol(d["kind"]),
+        d["pass"],
+    )
+end
+
+"Where a shard writes its tree instead of rendering (`PINAX_TEST_DUMP`); empty = render directly."
+report_dump() = get(ENV, "PINAX_TEST_DUMP", "")
