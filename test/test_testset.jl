@@ -5,8 +5,8 @@ using Test
 # The AbstractTestSet subtype lives in the extension — `Test` is a weakdep, because Pinax is a
 # rendering package and `using Pinax` must not drag Test into every user's session. Loading `Test`
 # (which you necessarily did, to write `@testset`) loads the extension.
-const PinaxTestSet = Pinax.testset_type()
 const Ext = Base.get_extension(Pinax, :PinaxTestExt)
+const PinaxTestSet = Ext.PinaxTestSet
 const _result_data_expr = Ext._result_data_expr
 const _check_for = Ext._check_for
 
@@ -15,16 +15,30 @@ const _check_for = Ext._check_for
 # suite, so the end-to-end case runs in a subprocess — which also pins down the contract that
 # matters most: a failing suite still fails the process, report or no report.
 @testset "PinaxTestSet" begin
-    @testset "the extension is what defines the testset" begin
+    @testset "off by default — the suite is stock Test" begin
         # Test is a WEAKDEP: `using Pinax` alone must not drag in Test (and Random/Logging/
         # Serialization/InteractiveUtils with it) for the majority who never render a suite.
         @test Ext !== nothing                       # `using Test` above loaded the extension
-        @test Pinax.testset_type() === Ext.PinaxTestSet
-        @test Pinax.testset_type() <: Test.AbstractTestSet
-        # …and it has to BE a type: `@testset T` accepts only a bare identifier naming a real
-        # AbstractTestSet subtype (parse_testset_args rejects any other expression; _check_testset
-        # rejects any other value). Hence the one-line `const` bind, not a clever callable.
-        @test PinaxTestSet("x") isa Ext.PinaxTestSet
+        @test PinaxTestSet <: Test.AbstractTestSet
+
+        # THE load-bearing claim: with PINAX_TEST_REPORT unset, `testset_type()` is *literally*
+        # DefaultTestSet — not a Pinax set that skips rendering. So switching the bridge on cannot
+        # regress a passing suite: with it off there is no new code in the test path at all.
+        withenv("PINAX_TEST_REPORT" => nothing) do
+            @test !Pinax.report_enabled()
+            @test Pinax.testset_type() === Test.DefaultTestSet
+        end
+        for on in ("1", "true", "YES", "on")
+            withenv("PINAX_TEST_REPORT" => on) do
+                @test Pinax.testset_type() === PinaxTestSet
+            end
+        end
+        withenv("PINAX_TEST_REPORT" => "0") do
+            @test Pinax.testset_type() === Test.DefaultTestSet
+        end
+        withenv("PINAX_TEST_OUT" => "somewhere") do
+            @test Pinax.report_out() == "somewhere"
+        end
     end
 
     @testset "numbers survive both verdicts" begin
@@ -85,7 +99,7 @@ const _check_for = Ext._check_for
         @test occursin("</svg>", s)
     end
 
-    @testset "end-to-end: a red suite renders AND fails the process" begin
+    @testset "end-to-end: env-driven, and a red suite still fails the process" begin
         dir = mktempdir()
         write(
             joinpath(dir, "test_demo.jl"),
@@ -98,29 +112,51 @@ const _check_for = Ext._check_for
             end
             """,
         )
+        # Exactly what a real runtests.jl looks like: ONE line, and not one Pinax-specific option —
+        # `out` and the on/off switch are the CI's business, not the test code's.
         script = joinpath(dir, "run.jl")
         write(
             script,
             """
             using Pinax, Test
-            const PinaxTestSet = Pinax.testset_type()
-            @testset PinaxTestSet "demo" out=$(repr(joinpath(dir, "rep"))) begin
+            const TS = Pinax.testset_type()
+            @testset TS "demo" begin
                 @testset "test_demo.jl" begin
                     include($(repr(joinpath(dir, "test_demo.jl"))))
+                end
+                @testset "noisy fixture" begin
+                    @pinaxignore
+                    @test true
                 end
             end
             """,
         )
-        p = run(
-            pipeline(
-                `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(@__DIR__)) $script`;
-                stdout=devnull,
-                stderr=devnull,
-            );
-            wait=false,
-        )
-        wait(p)
-        @test !success(p)   # a red suite must still fail CI
+        # `addenv`, never `setenv`: setenv REPLACES the environment, which would strip
+        # JULIA_DEPOT_PATH/PATH and make the child fail for a reason that has nothing to do with the
+        # test — and the OFF assertions below would then pass for entirely the wrong reason.
+        function run_suite(env...)
+            log = tempname()
+            cmd = addenv(
+                `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(@__DIR__)) $script`,
+                "PINAX_TEST_OUT" => joinpath(dir, "rep"),
+                "PINAX_TEST_REPORT" => nothing,
+                env...,
+            )
+            p = run(pipeline(ignorestatus(cmd); stdout=log, stderr=log))
+            return (; ok=success(p), log=read(log, String))
+        end
+
+        # ---- report OFF: stock Test, nothing written, and the red suite still fails ----
+        r = run_suite()
+        @test !r.ok
+        @test occursin("Test Summary", r.log)          # it really ran, as a DefaultTestSet…
+        @test !occursin("Pinax test report", r.log)    # …and Pinax stayed out of it entirely
+        @test !isdir(joinpath(dir, "rep_agent"))
+
+        # ---- report ON ----
+        r = run_suite("PINAX_TEST_REPORT" => "1")
+        @test !r.ok   # a red suite must still fail CI — a report never turns it green
+        @test occursin("Pinax test report", r.log)
 
         # Pinax writes agent.json/agent.md by hand (no JSON dep), so assert on the text — which is
         # also exactly what a reviewing agent reads.
@@ -136,5 +172,7 @@ const _check_for = Ext._check_for
             "\"verdict\"", read(joinpath(dir, "rep_agent", "agent.json"), String)
         )
         @test isfile(joinpath(dir, "rep_html", "test_demo_jl.html"))
+        # @pinaxignore: gone from the document, but it still RAN (and would still fail the suite)
+        @test !occursin("noisy fixture", md)
     end
 end

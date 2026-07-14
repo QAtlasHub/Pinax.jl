@@ -16,11 +16,24 @@ using Pinax:
     _exit_section!,
     _looks_like_a_file,
     _margin,
+    _ignore_current_testset!,
+    report_enabled,
+    report_out,
     _push_check_raw!,
     _push_margin_figure!,
     _push_table!,
     _slug
 using Test: Test, AbstractTestSet
+
+"""
+    _testset_type() -> Type
+
+`Test.DefaultTestSet` unless the report is switched on — see `Pinax.testset_type`. Falling back to
+the STOCK type (rather than to a Pinax set that merely skips rendering) is the point: with the env
+var unset there is no new code in the test path at all, so turning the bridge on cannot regress a
+suite that was passing.
+"""
+_testset_type() = report_enabled() ? PinaxTestSet : Test.DefaultTestSet
 
 mutable struct PinaxTestSet <: AbstractTestSet
     description::String
@@ -30,19 +43,29 @@ mutable struct PinaxTestSet <: AbstractTestSet
     out::Union{Nothing,String}    # root only: where to render
     page_when::Function           # root only: which testsets become pages
     title::String
+    ignore::Bool                  # set by @pinaxignore: run, count, but do not render
 end
 
 # Both entry points land here: `@testset PinaxTestSet "…" out=…` (options only ever on the ROOT), and
 # a NESTED @testset, which Julia constructs from the parent's TYPE as `T(desc)` — no options.
 function PinaxTestSet(
     description::AbstractString;
-    out=nothing,
+    out=report_out(),
     page_when::Function=_looks_like_a_file,
     title::AbstractString="Test report",
 )
     return PinaxTestSet(
-        String(description), Any[], time(), NaN, out, page_when, String(title)
+        String(description), Any[], time(), NaN, out, page_when, String(title), false
     )
+end
+
+# @pinaxignore, from inside the testset body. A no-op unless the innermost set is one of ours — so it
+# is safe to leave in the code with the report switched off (where the set is a DefaultTestSet).
+function Pinax._ignore_current_testset!()
+    Test.get_testset_depth() == 0 && return nothing
+    ts = Test.get_testset()
+    ts isa PinaxTestSet && (ts.ignore = true)
+    return nothing
 end
 
 Test.record(ts::PinaxTestSet, res) = (push!(ts.results, res); res)
@@ -54,7 +77,7 @@ function Test.finish(ts::PinaxTestSet)
         return ts
     end
     # ── ROOT ─────────────────────────────────────────────────────────
-    ts.out === nothing || _render_test_report(ts)
+    (ts.out === nothing || ts.ignore) || _render_test_report(ts)
     _print_summary(ts)
     n_fail, n_err = _count(ts, Test.Fail), _count(ts, Test.Error)
     if n_fail + n_err > 0
@@ -124,9 +147,11 @@ function _emit(
         _push_check_raw!(chk)
         push!(acc, chk)
     end
-    # Nested testsets become pages (a file) or sections (a group).
+    # Nested testsets become pages (a file) or sections (a group). @pinaxignore'd ones are skipped
+    # HERE only — never in `_count`, so an ignored subtree still fails the suite if it is red.
     for r in ts.results
         r isa PinaxTestSet || continue
+        r.ignore && continue
         if page_when(r.description)
             pid = _slug(r.description)
             _enter_page!(
@@ -201,6 +226,7 @@ end
 function _collect_rows!(rows::Vector{NamedTuple}, ts::PinaxTestSet, page_when::Function)
     for r in ts.results
         r isa PinaxTestSet || continue
+        r.ignore && continue
         if page_when(r.description)
             n = _ntests(r)
             f = _count(r, Test.Fail)

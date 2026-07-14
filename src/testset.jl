@@ -24,35 +24,38 @@
 """
     testset_type() -> Type
 
-The `Test.AbstractTestSet` subtype that renders a whole testset tree as a Pinax document. It lives
-in the `PinaxTestExt` extension, so it needs `using Test` — which you necessarily have, since
-`@testset` is Test's own macro.
+The testset type to hand `@testset`. **`Test.DefaultTestSet` unless `PINAX_TEST_REPORT` is set** —
+otherwise the `PinaxTestExt` type that renders the whole suite as a Pinax document.
 
-Julia does not let an extension add a name to its parent's namespace, and `@testset T …` insists that
-`T` be a bare identifier naming a real `AbstractTestSet` subtype (`Test.parse_testset_args` rejects
-any other expression, and `Test._check_testset` rejects any other value). So the type is fetched and
-bound once, in the `runtests.jl` that uses it:
+That is the entire adoption cost, and it is deliberately a no-op by default:
 
     using Pinax, Test
-    const PinaxTestSet = Pinax.testset_type()
+    const TS = Pinax.testset_type()
 
-    @testset PinaxTestSet "MyPkg" out="test-report" begin
-        include("test_a.jl")     # a test FILE       → @page (status = :benchmark)
-    end                          # a nested @testset → @section
-                                 # each @test        → a Check
+    @testset TS "MyPkg" begin
+        for f in files
+            @testset "\$f" begin include(f) end   # a test FILE       → @page (status = :benchmark)
+        end                                       # a nested @testset → @section
+    end                                           # each @test        → a Check
 
-That is the whole adoption cost: one line, and not a single test changes. Julia gives a nested
-`@testset` the *parent's* type, so every nested testset is captured automatically — nothing to
-annotate. The set still fails the process when the suite is red: a report must never turn a failing
-suite green.
+With the env var unset, `TS === Test.DefaultTestSet` and the suite behaves **exactly** as stock
+`Pkg.test()` — same output, no rendering, nothing to regress. CI turns the report on with
 
-Renders `<out>_html` (the human gallery) and `<out>_agent` (`agent.json` — the same verdict as data,
-so a reviewing agent reads the margins instead of scraping a CI log). With `out=nothing` nothing is
-written and the set behaves like a plain recorder.
+    PINAX_TEST_REPORT=1  PINAX_TEST_OUT=test-report   # out defaults to "test-report"
 
-`page_when(description)::Bool` decides which testsets become their own `@page` rather than a
-`@section`. The default treats a testset whose description looks like a test file (ends in `.jl`) as
-a page — exactly the `@testset "\$f" begin include(f) end` idiom.
+so *whether* to render is a CI decision, not something baked into the test code. No Pinax-specific
+option ever appears at the call site — which is also what makes the fallback safe, since
+`DefaultTestSet` would reject one.
+
+Why a `const` and not just `@testset Pinax.testset_type() …`: `@testset T` demands that `T` be a bare
+identifier naming a real `AbstractTestSet` subtype — `Test.parse_testset_args` errors "Unexpected
+argument" on any other expression, and `Test._check_testset` errors on any other value. And Julia
+does not let an extension add a name to its parent's namespace, so Pinax cannot export the type
+itself. One `const` resolves both.
+
+Julia gives a nested `@testset` the *parent's* type, so the whole tree is captured with nothing to
+annotate. Exclude a subtree with [`@pinaxignore`](@ref). The set still fails the process when the
+suite is red: a report must never turn a failing suite green.
 """
 function testset_type()
     ext = Base.get_extension(@__MODULE__, :PinaxTestExt)
@@ -60,8 +63,45 @@ function testset_type()
         "Pinax: the test bridge needs the Test stdlib loaded (`using Test`) — the testset type " *
         "lives in the PinaxTestExt extension.",
     )
-    return ext.PinaxTestSet
+    return ext._testset_type()
 end
+
+"Is the test report switched on? (`PINAX_TEST_REPORT` = 1 / true / yes / on, case-insensitive.)"
+function report_enabled()
+    return lowercase(get(ENV, "PINAX_TEST_REPORT", "")) in ("1", "true", "yes", "on")
+end
+
+"Where the test report is written (`PINAX_TEST_OUT`, default `test-report`) → `<out>_html` + `<out>_agent`."
+report_out() = get(ENV, "PINAX_TEST_OUT", "test-report")
+
+"""
+    @pinaxignore
+
+Drop the enclosing `@testset` — and everything under it — from the rendered document. The tests still
+RUN and still count toward pass/fail; they simply do not become a page or a section. For the noise
+you do not want in a report (a smoke check, an Aqua block, a slow fixture):
+
+    @testset "Aqua tests" begin
+        @pinaxignore
+        Aqua.test_all(MyPkg)
+    end
+
+A no-op when the report is off, so it is safe to leave in the code permanently.
+"""
+macro pinaxignore()
+    return :($(_ignore_current_testset!)())
+end
+
+"""
+    _ignore_current_testset!()
+
+Mark the innermost enclosing testset as excluded from the document. Declared with no methods on
+purpose: the only method lives in `PinaxTestExt`, and it cannot be missing where it matters, since
+`@pinaxignore` is only ever reachable from inside a `@testset` — which means `Test` is loaded, which
+means the extension is too. (A fallback method HERE would be overwritten by the extension's, and
+method overwriting during precompilation is an error.)
+"""
+function _ignore_current_testset! end
 
 _looks_like_a_file(desc::AbstractString) = endswith(desc, ".jl")
 
