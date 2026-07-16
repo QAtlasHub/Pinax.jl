@@ -147,12 +147,104 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         @test occursin("1/2 passed", Pinax._summary_line(n))
     end
 
+    @testset "the seam: content macros route into the open testset (A)" begin
+        # A PinaxTestSet on the stack IS the container — @figure/@desc land in it, in declaration
+        # order, through the one seam Pinax._current_container(). No @page/@section, no CTX; the
+        # gens are deferred, so nothing is plotted here.
+        root = PinaxTestSet("cap-root")
+        captured = nothing
+        Test.push_testset(root)
+        try
+            captured = Pinax._current_container()
+            @figure "plotA"
+            @desc md"a description"
+            @figure "plotB"
+        finally
+            Test.pop_testset()
+        end
+        @test captured === root
+        @test length(root.figures) == 2
+        @test root.desc !== nothing && occursin("a description", root.desc.source)
+        @test root.content == [:figure => 1, :figure => 2]   # @desc sets desc, not content order
+    end
+
+    @testset "the seam is inert inside a stock testset, report off (invariant V)" begin
+        # A DefaultTestSet is the innermost and no manuscript is open → :inert → @figure no-ops, and
+        # its argument (a deferred gen) is never evaluated. It must neither error nor capture.
+        @testset "stock inner" begin
+            @test Pinax._current_container() === :inert
+            ## every content macro is inert here — none stores anything, none errors
+            @figure error("this gen must never run")   # gen deferred + inert → never evaluated
+            @table (; N=[1, 2], E=[3, 4])
+            @raw "<b>x</b>"
+            @desc md"d"
+            @caption "c"
+        end
+    end
+
+    @testset "fold places captured tables / panels / figures; dump warns on a figure" begin
+        # Drive the fold over a node carrying every content kind (a live PinaxTestSet and a merged
+        # TestNode share this duck-typed shape), so the :table / :panel / :figure branches all run and
+        # land on the page in declaration order.
+        fig = Pinax.Figure(
+            :f,
+            "f",
+            "cap",
+            nothing,
+            () -> (p=tempname() * ".svg"; write(p, "<svg/>"); p),
+            "code",
+            false,
+            String[],
+            nothing,
+        )
+        tbl = Pinax.Table(
+            :tb,
+            "tb",
+            "a table caption",
+            ["N", "E"],
+            [Any[10, -0.1], Any[20, -0.11]],
+            "tc",
+            nothing,
+        )
+        node = TestNode(
+            "test_x.jl";
+            elapsed=0.1,
+            checks=[Check(:t0, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+            figures=[fig],
+            tables=[tbl],
+            panels=["<p>hand built</p>"],
+            content=[:panel => 1, :table => 1, :figure => 1, :check => 1],
+        )
+        root = TestNode("Pkg"; children=[node])
+        dir = mktempdir()
+        Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
+        html = read(joinpath(dir, "r_html", "test_x_jl.html"), String)
+        @test occursin("a table caption", html)   # the @table folded onto the page
+        @test occursin("hand built", html)         # the @raw panel folded onto the page
+        # the dump carries checks + structure and WARNS (never silently drops) a test's figure
+        @test isfile(Pinax.dump_test_report(root, joinpath(dir, "d.toml")))
+    end
+
+    @testset "a manuscript built inside a test still writes to CTX, not :inert (A)" begin
+        # Pinax's own suite builds manuscripts inside @testset. An open CTX container must win over
+        # the enclosing stock testset — otherwise every manuscript test would silently go inert.
+        doc = Pinax.document() do
+            @page :p "P" begin
+                @section :s "S" begin
+                    @figure "fig-in-manuscript"
+                end
+            end
+        end
+        @test length(doc.pages[1].sections[1].figures) == 1
+    end
+
     @testset "end-to-end: env-driven, and a red suite still fails the process" begin
         dir = mktempdir()
         write(
             joinpath(dir, "test_demo.jl"),
             """
             @testset "converges" begin
+                @desc md"convergence of E against the oracle"
                 @test isapprox(-0.10203402715213993, -0.10242223073749557; rtol=0.01)
             end
             @testset "does not" begin
@@ -215,11 +307,58 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         @test occursin("tol 0.01 rel", md)
         # …and the passing one reports how much of its budget it spent, not just "green"
         @test occursin("got -0.10203402715213993, want -0.10242223073749557", md)
+        # a @desc written INSIDE a test now appears in the report — the whole point of A
+        @test occursin("convergence of E against the oracle", md)
         @test occursin(
             "\"verdict\"", read(joinpath(dir, "rep_agent", "agent.json"), String)
         )
         @test isfile(joinpath(dir, "rep_html", "test_demo_jl.html"))
         # @pinaxignore: gone from the document, but it still RAN (and would still fail the suite)
         @test !occursin("noisy fixture", md)
+    end
+
+    @testset "Pinax.test renders a plain @testset suite (the interface, G)" begin
+        # The featured entry point: a suite with NO Pinax token — plain `@testset`/`@test` (it may
+        # also `@desc`) — rendered by calling `Pinax.test` instead of `include`. Runs at depth 0 in a
+        # subprocess so the root actually renders (and, for a red suite, re-throws).
+        dir = mktempdir()
+        write(
+            joinpath(dir, "suite.jl"),
+            """
+            using Pinax, Test
+            @testset "ok.jl" begin
+                @desc md"a description written inside a plain @testset"
+                @test isapprox(1.0, 1.0009; rtol=0.01)
+            end
+            """,
+        )
+        write(
+            joinpath(dir, "bad.jl"),
+            """
+            using Pinax, Test
+            @testset "bad.jl" begin
+                @test isapprox(0.5, 0.9; rtol=0.01)
+            end
+            """,
+        )
+        run_it = function (suite, out)
+            script = joinpath(dir, "run_" * basename(out) * ".jl")
+            write(
+                script,
+                "using Pinax, Test\nPinax.test($(repr(suite)); out=$(repr(out)), title=\"demo\")\n",
+            )
+            cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(@__DIR__)) $script`
+            return success(run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=devnull)))
+        end
+
+        # green suite → Pinax.test succeeds and renders, from a suite with no @pinaxtestset in sight
+        out = joinpath(dir, "rep")
+        @test run_it(joinpath(dir, "suite.jl"), out)
+        @test isfile(joinpath(out * "_html", "ok_jl.html"))
+        md = read(joinpath(out * "_agent", "agent.md"), String)
+        @test occursin("a description written inside a plain @testset", md)
+
+        # red suite → Pinax.test re-throws (process fails): a report never turns a red suite green
+        @test !run_it(joinpath(dir, "bad.jl"), joinpath(dir, "badrep"))
     end
 end
