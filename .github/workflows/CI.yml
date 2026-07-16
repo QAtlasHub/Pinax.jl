@@ -75,7 +75,7 @@ jobs:
             Pkg.add("TestEnv")
             using TestEnv
             TestEnv.activate("Pinax")
-            using Pinax
+            using Pinax, Test          # Test loads PinaxTestExt, where the in-process test(runtests) lives
             Pinax.test("test/runtests.jl"; out="pinax-report")
           '
       - uses: actions/upload-artifact@v4

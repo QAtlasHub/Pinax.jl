@@ -1,5 +1,6 @@
 using Pinax
 using Test
+using Test: DefaultTestSet   # explicit stock context for report-off (inert) assertions
 
 # A theme variant overriding emit_check — proves the new contract point dispatches like emit_table.
 struct CheckOverrideAgent <: Pinax.AgentBase end
@@ -183,7 +184,7 @@ end
         @test occursin("\"custom_chk\":\"E\"", j)   # override fired via _agent_benchmark! dispatch
     end
 
-    @testset "@expect with no container is inert inside a test (invariant V)" begin
+    @testset DefaultTestSet "@expect with no container is inert inside a test (invariant V)" begin
         # No container open + inside a testset → the content seam is inert → `_push_check!` no-ops
         # (returns nothing) rather than erroring. With a container open (a `@benchmark` page) the
         # value-validation gate still fires, so ill-posed checks are still caught (below).

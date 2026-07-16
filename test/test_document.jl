@@ -1,5 +1,6 @@
 using Pinax
 using Test
+using Test: DefaultTestSet   # explicit stock context for report-off (inert) assertions
 
 const SIDE = Ref(0)   # for checking @figure deferral
 
@@ -192,7 +193,7 @@ const SIDE = Ref(0)   # for checking @figure deferral
         @test Pinax.current_document() === outer   # global state restored
     end
 
-    @testset "misuse errors" begin
+    @testset DefaultTestSet "misuse errors" begin
         # Inside a testset, a content macro with no container open is invariant-V test-content: it
         # no-ops (returns nothing, adds nothing) rather than erroring, so a bare `Pkg.test()` with a
         # stray `@figure` in a test can never break. The manuscript-misuse error still fires at depth

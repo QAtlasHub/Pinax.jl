@@ -1,6 +1,7 @@
 using Pinax
 using Pinax: _approx_numbers, _check_from, _margin_svg, Check, TestNode
 using Test
+using Test: DefaultTestSet   # explicit stock context for report-off (inert) assertions
 
 # The AbstractTestSet subtype lives in the extension — `Test` is a weakdep, because Pinax is a
 # rendering package and `using Pinax` must not drag Test into every user's session. Loading `Test`
@@ -159,7 +160,7 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
     @testset "the seam is inert inside a stock testset, report off (invariant V)" begin
         # A DefaultTestSet is the innermost and no manuscript is open → :inert → @figure no-ops, and
         # its argument (a deferred gen) is never evaluated. It must neither error nor capture.
-        @testset "stock inner" begin
+        @testset DefaultTestSet "stock inner" begin
             @test Pinax._current_container() === :inert
             ## every content macro is inert here — none stores anything, none errors
             @figure error("this gen must never run")   # gen deferred + inert → never evaluated
