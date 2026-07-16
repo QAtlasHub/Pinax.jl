@@ -6,6 +6,7 @@ using Downloads
 using Literate
 
 const GALLERY_JL = joinpath(@__DIR__, "literate", "gallery.jl")
+const TEST2PINAX_JL = joinpath(@__DIR__, "literate", "test2pinax.jl")
 
 # The "Examples" page shows the gallery script's source verbatim (plain `julia` blocks, NOT executed).
 # The gallery itself is compiled separately (below); here we EMBED it live at the top of the page via
@@ -52,6 +53,32 @@ let
     )
 end
 
+# The "Test → Pinax" page, same pattern: show the suite verbatim, live-embed the report gallery the
+# bridge renders from it (build/test2pinax_html/, compiled below) at the top.
+let
+    embed =
+        "\n" * Pinax.documenter_embed(
+            "test2pinax_html/", html_fmt; page="test2pinax.md", title="DemoPkg test report"
+        )
+    add_embed = function (content)
+        i = findfirst('\n', content)
+        return if i === nothing
+            content * embed
+        else
+            content[1:i] * embed * content[(i + 1):end]
+        end
+    end
+    Literate.markdown(
+        TEST2PINAX_JL,
+        joinpath(@__DIR__, "src");
+        name="test2pinax",
+        documenter=false,
+        execute=false,
+        credit=false,
+        postprocess=add_embed,
+    )
+end
+
 assets_dir = joinpath(@__DIR__, "src", "assets")
 mkpath(assets_dir)
 Downloads.download(
@@ -66,6 +93,7 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Examples" => "examples.md",
+        "Test → Pinax" => "test2pinax.md",
         "Comments" => "comments.md",
         "API Reference" => "api.md",
     ],
@@ -88,6 +116,14 @@ let build = joinpath(@__DIR__, "build")
     end
     cd(build) do
         return Base.include(Module(:PinaxGallery), GALLERY_JL)
+    end
+    # The test-report demo: run the suite with the report switched on (env-driven, exactly as CI
+    # drives it) so `render_test_report` writes build/test2pinax_html/ — the gallery embedded at the
+    # top of the "Test → Pinax" page. Every check passes, so the root testset does not error the build.
+    cd(build) do
+        return withenv("PINAX_TEST_REPORT" => "1", "PINAX_TEST_OUT" => "test2pinax") do
+            return Base.include(Module(:PinaxTest2Pinax), TEST2PINAX_JL)
+        end
     end
 end
 
