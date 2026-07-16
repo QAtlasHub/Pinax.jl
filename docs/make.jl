@@ -129,7 +129,7 @@ end
 
 deploydocs(;
     versions=["stable", "dev"],
-    repo="github.com/sotashimozono/Pinax.jl.git",
+    repo="github.com/QAtlasHub/Pinax.jl.git",
     devbranch="main",
     push_preview=true,
 )
