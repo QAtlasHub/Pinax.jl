@@ -4,9 +4,9 @@
 <div class="pinax-meta">1 figure</div>
 <script type="application/json" id="pinax-committed">{"comments":{},"bookmarks":{},"features":["comments","bookmarks","export"]}</script>
 <section class="page" id="test_testset_jl">
-<p class="pinax-subtitle">73/73 passed · 55.47s</p>
+<p class="pinax-subtitle">84/84 passed · 71.38s</p>
 <div class="pinax-benchmark">
-<div class="pinax-verdict pinax-verdict-pass">test_testset.jl   73/73 PASS</div>
+<div class="pinax-verdict pinax-verdict-pass">test_testset.jl   84/84 PASS</div>
 <table class="pinax-checks"><thead><tr><th></th><th>id</th><th>label</th><th>got</th><th>want</th><th>Δ vs tol (kind)</th></tr></thead><tbody>
 <tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t683</td><td>Ext !== nothing</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 <tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t684</td><td>PinaxTestSet &lt;: Test.AbstractTestSet</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
@@ -81,6 +81,29 @@
 <tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t753</td><td>occursin(&quot;Convergence of&quot;, md)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 <tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t754</td><td>occursin(&quot;[χ = 8]&quot;, md) &amp;&amp; occursin(&quot;[χ = 32]&quot;, md)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 <tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t755</td><td>occursin(&quot;1/3&quot;, md)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t756</td><td>any((r-&gt;begin
+            #= /home/runner/work/Pinax.jl/Pinax.jl/test/test_testset.jl:500 =#
+            r.…</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t757</td><td>any((r-&gt;begin
+            #= /home/runner/work/Pinax.jl/Pinax.jl/test/test_testset.jl:501 =#
+            r.…</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t758</td><td>any((r-&gt;begin
+            #= /home/runner/work/Pinax.jl/Pinax.jl/test/test_testset.jl:502 =#
+            r.…</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t759</td><td>any((r-&gt;begin
+            #= /home/runner/work/Pinax.jl/Pinax.jl/test/test_testset.jl:503 =#
+            r.…</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t760</td><td>occursin(&quot;Provenance&quot;, md) &amp;&amp; occursin(&quot;feat/x&quot;, md)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t761</td><td>Pinax._package_line(proj) == &quot;Demo v1.2.3&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t762</td><td>Pinax._package_line(nothing) == &quot;&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t763</td><td>Pinax._package_line(joinpath(tempdir(), &quot;nope-missing.toml&quot;)) == &quot;&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t764</td><td>Pinax._package_line(proj) == &quot;&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t765</td><td>any((r-&gt;begin
+            #= /home/runner/work/Pinax.jl/Pinax.jl/test/test_testset.jl:537 =#
+            r.…</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t766</td><td>!(any((r-&gt;begin
+                #= /home/runner/work/Pinax.jl/Pinax.jl/test/test_testset.jl:538 =#
+        …</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 </tbody></table></div>
 <div class="figgrid">
 <figure id="test_testset_jl_margins">
@@ -112,6 +135,7 @@
 <a href="#test_testset_jl_non_numeric_axis_categorical_ticks_c1_">non-numeric axis → categorical ticks (C1)</a>
 <a href="#test_testset_jl_mixed_inconsistent_siblings_do_not_fold_kept_as_sections_warned_iii_">mixed / inconsistent siblings do NOT fold — kept as sections, warned (III)</a>
 <a href="#test_testset_jl_a_real_testset_for_folds_through_the_delegation_preamble_end_to_end_">a real `@testset for` folds through the delegation preamble (end-to-end)</a>
+<a href="#test_testset_jl_provenance_the_report_records_when_what_where_it_ran_h_">provenance — the report records WHEN / WHAT / WHERE it ran (H)</a>
 </nav>
 <section class="section" id="test_testset_jl_pinaxtestset"><h2>Sec. 209. PinaxTestSet</h2>
 </section>
@@ -156,6 +180,8 @@
 <section class="section" id="test_testset_jl_mixed_inconsistent_siblings_do_not_fold_kept_as_sections_warned_iii_"><h2>Sec. 229. mixed / inconsistent siblings do NOT fold — kept as sections, warned (III)</h2>
 </section>
 <section class="section" id="test_testset_jl_a_real_testset_for_folds_through_the_delegation_preamble_end_to_end_"><h2>Sec. 230. a real `@testset for` folds through the delegation preamble (end-to-end)</h2>
+</section>
+<section class="section" id="test_testset_jl_provenance_the_report_records_when_what_where_it_ran_h_"><h2>Sec. 231. provenance — the report records WHEN / WHAT / WHERE it ran (H)</h2>
 </section>
 </section>
 <script src="app.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script><script>window.addEventListener("load",function(){renderMathInElement(document.body,{delimiters:[{left:"$$",right:"$$",display:true},{left:"$",right:"$",display:false}],macros:{},throwOnError:false});});</script></body></html>
