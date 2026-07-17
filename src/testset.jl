@@ -933,9 +933,12 @@ function _provenance_rows()
     return rows
 end
 
-function _active_package_line()
+_active_package_line() = _package_line(Base.active_project())
+
+# `name v<version>` from a Project.toml, or "" if it has no name / cannot be read (non-fatal). Split
+# from the `Base.active_project()` lookup so the parse is unit-testable without activating an env.
+function _package_line(p)
     try
-        p = Base.active_project()
         (p === nothing || !isfile(p)) && return ""
         d = TOML.parsefile(p)
         name = get(d, "name", "")

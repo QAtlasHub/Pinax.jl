@@ -517,5 +517,25 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
             md = read(joinpath(out * "_agent", "agent.md"), String)
             @test occursin("Provenance", md) && occursin("feat/x", md)
         end
+
+        # the package line reads name@version from a project file; empty/absent → "" (never an error)
+        proj = joinpath(mktempdir(), "Project.toml")
+        write(proj, "name = \"Demo\"\nversion = \"1.2.3\"\n")
+        @test Pinax._package_line(proj) == "Demo v1.2.3"
+        @test Pinax._package_line(nothing) == ""
+        @test Pinax._package_line(joinpath(tempdir(), "nope-missing.toml")) == ""
+        write(proj, "version = \"1.2.3\"\n")   # no name → ""
+        @test Pinax._package_line(proj) == ""
+
+        # with the CI variables unset, the local `git` probe runs and empty CI fields are omitted
+        withenv(
+            "GITHUB_SHA" => nothing,
+            "GITHUB_REPOSITORY" => nothing,
+            "GITHUB_REF_NAME" => nothing,
+        ) do
+            rows = Pinax._provenance_rows()
+            @test any(r -> r.field == "generated", rows)
+            @test !any(r -> r.field == "repo", rows)   # an empty CI repo is omitted, not blank
+        end
     end
 end
