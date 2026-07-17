@@ -9,7 +9,10 @@
 @testset "midpoint rule → π (a convergence study)" begin
     @desc md"The midpoint rule for the integral of 4/(1+x^2) on [0,1] converges to π as O(1/n²). The report shows the estimate approaching π and the tolerance budget shrinking — from the numbers the suite already computed, with no figure code."
 
-    midpoint(n) = sum(k -> 4 / (1 + ((k - 0.5) / n)^2), 1:n) / n   # → π as n → ∞
+    # `@code` shows the computation behind the figure (Documenter `@example`-like): the source is
+    # rendered as a snippet, and it still runs — the definition leaks out, so the sweep below uses it.
+    @code caption = "the quadrature" midpoint(n) =
+        sum(k -> 4 / (1 + ((k - 0.5) / n)^2), 1:n) / n
 
     # An unnamed `@testset for` is a SAMPLE, not a section: these four iterations fold into ONE
     # convergence figure (got vs n, π as the reference, the tolerance as a band) plus a margin figure.

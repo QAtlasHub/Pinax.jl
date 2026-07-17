@@ -186,6 +186,35 @@ function _agent_tables!(theme::AgentBase, tables, ctx)
     return nothing
 end
 
+# One @code block → a JSON object: the source and its captured output (a tool reads the computation).
+function emit_code(::AgentBase, blk, ctx)
+    io = ctx.io
+    print(
+        io,
+        "{\"id\":",
+        _jsonstr(string(blk.id)),
+        ",\"lang\":",
+        _jsonstr(blk.lang),
+        ",\"source\":",
+        _jsonstr(blk.source),
+        ",\"output\":",
+        _jsonstr(blk.output),
+        "}",
+    )
+    return nothing
+end
+
+function _agent_codes!(theme::AgentBase, codes, ctx)
+    io = ctx.io
+    print(io, "[")
+    for (i, blk) in enumerate(codes)
+        i == 1 || print(io, ",")
+        emit_code(theme, blk, ctx)
+    end
+    print(io, "]")
+    return nothing
+end
+
 # One @expect check -> a JSON object with native-typed numerics (a tool reads 4.6e-5, not "4.6e-5").
 function emit_check(::AgentBase, chk, ctx)
     io = ctx.io
@@ -318,6 +347,8 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
     )
     print(io, ",\"tables\":")
     _agent_tables!(theme, sec.tables, ctx)
+    print(io, ",\"codes\":")
+    _agent_codes!(theme, sec.codes, ctx)
     print(io, ",\"content\":")
     _agent_content!(sec, ctx)
     print(io, "}")
@@ -347,6 +378,8 @@ function emit_page(theme::AgentBase, pg, ctx)
     )
     print(io, ",\"tables\":")
     _agent_tables!(theme, pg.tables, ctx)
+    print(io, ",\"codes\":")
+    _agent_codes!(theme, pg.codes, ctx)
     print(io, ",\"content\":")
     _agent_content!(pg, ctx)
     print(io, ",\"sections\":[")
@@ -483,7 +516,17 @@ function _agent_md_check(io, chk)
     return nothing
 end
 
-# A container's figures + tables + checks in declaration order (@raw panels are HTML, skipped in md view).
+# A @code block in agent.md → a fenced source block + its captured output.
+function _agent_md_code(io, blk)
+    isempty(blk.caption) || println(io, "_", blk.caption, "_")
+    println(io, "```", blk.lang)
+    println(io, blk.source)
+    println(io, "```")
+    isempty(blk.output) || println(io, "`=> ", blk.output, "`")
+    return nothing
+end
+
+# A container's figures + tables + checks + codes in declaration order (@raw panels are HTML, skipped in md view).
 function _agent_md_content(io, c, outdir, comments, as_table)
     for (kind, item) in _content_items(c)
         if kind === :figure
@@ -492,6 +535,8 @@ function _agent_md_content(io, c, outdir, comments, as_table)
             _agent_md_table(io, item)
         elseif kind === :check
             _agent_md_check(io, item)
+        elseif kind === :code
+            _agent_md_code(io, item)
         end
     end
     return nothing
