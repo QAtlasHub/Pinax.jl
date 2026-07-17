@@ -364,24 +364,49 @@ end
 
 # ── the document ─────────────────────────────────────────────────────
 
+# Assign a COLLISION-FREE id: `base` if unseen, else `base-2`, `base-3`, … plus a loud diagnostic —
+# two distinct nodes must never fold onto one anchor / `agent.json` id silently (a `_slug(desc)` is
+# flat, so two same-named test files or sections would otherwise clash). `seen` accumulates every
+# page/section id assigned in the document; page ids are global, section ids are page-qualified.
+function _unique_id!(seen::Set{Symbol}, base::Symbol, desc)
+    if !(base in seen)
+        push!(seen, base)
+        return base
+    end
+    k = 2
+    while Symbol(base, "-", k) in seen
+        k += 1
+    end
+    id = Symbol(base, "-", k)
+    push!(seen, id)
+    _diag!(
+        WARNING,
+        string(id),
+        "duplicate id \"$(base)\" (from \"$(desc)\") → disambiguated to $(id); rename the testset to fix",
+    )
+    return id
+end
+
 # `acc` collects every Check pushed anywhere in this subtree, in emission order. A page's checks are
 # spread across its @sections (that is the whole nesting), so the page-level margin figure cannot be
 # rebuilt from the page container alone — it has to be accumulated on the way down.
 #
 # `n` is duck-typed: a live `PinaxTestSet` (direct render — carries user `@figure`/`@desc`/… too) or
 # a merged `TestNode` (a sharded run — checks + structure only). Same fold either way.
-function _emit_node!(n, counter::Ref{Int}, page_when::Function, acc::Vector{Check}=Check[])
+function _emit_node!(
+    n, counter::Ref{Int}, page_when::Function, seen::Set{Symbol}, acc::Vector{Check}=Check[]
+)
     _emit_own_content!(n, counter, acc)
     # Nested testsets become pages (a file) or sections (a group). @pinaxignore'd ones are skipped
     # HERE only — never in the counts, so an ignored subtree still fails the suite if it is red.
     for ch in n.children
         ch.ignore && continue
         if page_when(ch.description)
-            pid = _slug(ch.description)
+            pid = _unique_id!(seen, _slug(ch.description), ch.description)   # page ids are GLOBAL
             _enter_page!(pid, ch.description; status=:benchmark, summary=_summary_line(ch))
             try
                 page_checks = Check[]
-                _emit_node!(ch, counter, page_when, page_checks)
+                _emit_node!(ch, counter, page_when, seen, page_checks)
                 append!(acc, page_checks)
                 # Back at page level (every section closed), so the figure lands on the page.
                 _push_margin_figure!(pid, page_checks)
@@ -393,13 +418,16 @@ function _emit_node!(n, counter::Ref{Int}, page_when::Function, acc::Vector{Chec
             # `@testset "MyPkg"` that most runtests wrap everything in) → flatten it: its children
             # become top-level pages, exactly as `_collect_rows!` already treats it. A section needs a
             # page, which a grouping at this level does not provide.
-            _emit_node!(ch, counter, page_when, acc)
+            _emit_node!(ch, counter, page_when, seen, acc)
         else
-            _enter_section!(
-                _slug(ch.description), ch.description; summary=_summary_line(ch)
+            # Section ids are PAGE-QUALIFIED (`<pageid>_<slug>`) so a "conv" section in two files does
+            # not clash; a true sibling collision within one page then gets the `-2` suffix.
+            sid = _unique_id!(
+                seen, Symbol(current_page().id, :_, _slug(ch.description)), ch.description
             )
+            _enter_section!(sid, ch.description; summary=_summary_line(ch))
             try
-                _emit_node!(ch, counter, page_when, acc)
+                _emit_node!(ch, counter, page_when, seen, acc)
             finally
                 _exit_section!()
             end
@@ -497,6 +525,7 @@ function render_test_report(
 )
     reset!(; title=title)
     counter = Ref(0)
+    seen = Set{Symbol}((:overview, :per_file))   # ids the overview page already owns
     # An overview page first: one row per file, so the whole suite is one glance — and the SAME rows
     # land in agent.json as data, so an LLM reads the suite without scraping a log.
     _enter_page!(:overview, title; layout=:wide, summary=_summary_line(root))
@@ -513,7 +542,7 @@ function render_test_report(
     finally
         _exit_page!()
     end
-    _emit_node!(root, counter, page_when)
+    _emit_node!(root, counter, page_when, seen)
     doc = current_document()
     gallery = render(doc; out="$(out)_html", theme=:gallery)
     agent = render(doc; out="$(out)_agent", theme=:agent)

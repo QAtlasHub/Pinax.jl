@@ -214,6 +214,34 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         @test isfile(Pinax.dump_test_report(root, joinpath(dir, "d.toml")))
     end
 
+    @testset "hierarchical + collision-free ids (B)" begin
+        # A flat `_slug(desc)` would collide for same-named files or sections. Page ids are made
+        # globally unique, section ids page-qualified, and any true collision gets a `-2` suffix + a
+        # loud diagnostic — never a silent overwrite / duplicate `agent.json` id.
+        sec(name) = TestNode(name; checks=[Check(:t0, "c", 1.0, 1.0, 0.0, 0.5, :abs, true)])
+        file(name, secs) = TestNode(name; children=secs)
+        root = TestNode(
+            "Pkg";
+            children=[
+                file("test_a.jl", [sec("basics"), sec("basics")]),  # sibling collision within one page
+                file("test_a.jl", [sec("basics")]),                 # duplicate FILE (page) name
+            ],
+        )
+        dir = mktempdir()
+        Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
+        # duplicate page ids disambiguated → both files render (no silent overwrite)
+        @test isfile(joinpath(dir, "r_html", "test_a_jl.html"))
+        @test isfile(joinpath(dir, "r_html", "test_a_jl-2.html"))
+        # section ids are page-qualified; the sibling collision within test_a.jl took the `-2` suffix
+        html = read(joinpath(dir, "r_html", "test_a_jl.html"), String)
+        @test occursin("test_a_jl_basics", html) && occursin("test_a_jl_basics-2", html)
+        # both collisions are surfaced as loud diagnostics (never silent)
+        dups = count(
+            e -> occursin("duplicate id", e.message), Pinax.current_document().diag.entries
+        )
+        @test dups >= 2
+    end
+
     @testset "a manuscript built inside a test still writes to CTX, not :inert (A)" begin
         # Pinax's own suite builds manuscripts inside @testset. An open CTX container must win over
         # the enclosing stock testset — otherwise every manuscript test would silently go inert.
