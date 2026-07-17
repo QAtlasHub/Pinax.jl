@@ -4,45 +4,45 @@
 <div class="pinax-meta">1 figure</div>
 <script type="application/json" id="pinax-committed">{"comments":{},"bookmarks":{},"features":["comments","bookmarks","export"]}</script>
 <section class="page" id="test_hierarchy_jl">
-<p class="pinax-subtitle">35/35 passed · 1.37s</p>
+<p class="pinax-subtitle">35/35 passed · 1.63s</p>
 <div class="pinax-benchmark">
 <div class="pinax-verdict pinax-verdict-pass">test_hierarchy.jl   35/35 PASS</div>
 <table class="pinax-checks"><thead><tr><th></th><th>id</th><th>label</th><th>got</th><th>want</th><th>Δ vs tol (kind)</th></tr></thead><tbody>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t413</td><td>doc.parts == [:thermal =&gt; &quot;Thermal&quot;, :quench =&gt; &quot;Quench&quot;]</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t414</td><td>[p.part for p = doc.pages] == [:thermal, :thermal, :quench]</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t415</td><td>length((doc.pages[1]).figures) == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t416</td><td>isempty((doc.pages[1]).sections)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t417</td><td>occursin(&quot;&lt;details class=\&quot;pinax-group\&quot; open&gt;&lt;summary&gt;Thermal&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t418</td><td>occursin(&quot;&lt;details class=\&quot;pinax-group\&quot; open&gt;&lt;summary&gt;Quench&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t419</td><td>isfile(joinpath(sitedir(&quot;grp&quot;), &quot;energy.html&quot;))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t420</td><td>isfile(joinpath(sitedir(&quot;grp&quot;), &quot;dqt.html&quot;))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t421</td><td>occursin(&quot;EQ1&quot;, read(joinpath(sitedir(&quot;num&quot;), &quot;energy.html&quot;), String))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t422</td><td>occursin(&quot;EQ2&quot;, read(joinpath(sitedir(&quot;num&quot;), &quot;cv.html&quot;), String))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t423</td><td>occursin(&quot;GQ1&quot;, read(joinpath(sitedir(&quot;num&quot;), &quot;dqt.html&quot;), String))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t424</td><td>occursin(&quot;&lt;div class=\&quot;card-thumb\&quot;&gt;&lt;img src=&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t425</td><td>occursin(&quot;class=\&quot;card-thumb-pdf\&quot;&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t426</td><td>occursin(&quot;loading=\&quot;lazy\&quot;&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t427</td><td>!(occursin(&quot;card-thumb-ph&quot;, idx))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t428</td><td>occursin(&quot;card-thumb card-thumb-empty&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t429</td><td>occursin(&quot;class=\&quot;card-thumb-pdf\&quot;&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t430</td><td>haskey((Pinax.current_document()).part_descs, :thermal)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t431</td><td>occursin(&quot;&lt;div class=\&quot;part-desc\&quot;&gt;&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t432</td><td>occursin(&quot;&lt;strong&gt;reproducing&lt;/strong&gt;&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t433</td><td>occursin(&quot;sudden-quench dynamics&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t434</td><td>occursin(&quot;&lt;p class=\&quot;pinax-subtitle\&quot;&gt;スイープ: χ&lt;/p&gt;&quot;, a)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t435</td><td>occursin(&quot;&lt;div class=\&quot;card-summary\&quot;&gt;スイープ: χ&lt;/div&gt;&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t436</td><td>pg.desc !== nothing &amp;&amp; occursin(&quot;page level desc&quot;, pg.desc.source)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t437</td><td>pg.panels == [&quot;&lt;div class=\&quot;banner\&quot;&gt;hi&lt;/div&gt;&quot;]</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t438</td><td>occursin(&quot;page level desc&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t439</td><td>occursin(&quot;&lt;div class=\&quot;banner\&quot;&gt;hi&lt;/div&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t440</td><td>(pages[:log]).status == :trial</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t441</td><td>(pages[:keep]).status == :final</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t442</td><td>(pages[:res]).status == :final</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t443</td><td>occursin(&quot;\&quot;status\&quot;:\&quot;trial\&quot;&quot;, j)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t444</td><td>occursin(&quot;\&quot;status\&quot;:\&quot;final\&quot;&quot;, j)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t445</td><td>occursin(&quot;[status: trial]&quot;, md)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t446</td><td>!(occursin(&quot;[status: final]&quot;, md))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t447</td><td>occursin(&quot;card-status&quot;, idx)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t413</td><td>doc.parts == [:thermal =&gt; &quot;Thermal&quot;, :quench =&gt; &quot;Quench&quot;] <span class="pinax-src">@ test_hierarchy.jl:29</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t414</td><td>[p.part for p = doc.pages] == [:thermal, :thermal, :quench] <span class="pinax-src">@ test_hierarchy.jl:30</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t415</td><td>length((doc.pages[1]).figures) == 1 <span class="pinax-src">@ test_hierarchy.jl:32</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t416</td><td>isempty((doc.pages[1]).sections) <span class="pinax-src">@ test_hierarchy.jl:33</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t417</td><td>occursin(&quot;&lt;details class=\&quot;pinax-group\&quot; open&gt;&lt;summary&gt;Thermal&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:49</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t418</td><td>occursin(&quot;&lt;details class=\&quot;pinax-group\&quot; open&gt;&lt;summary&gt;Quench&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:50</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t419</td><td>isfile(joinpath(sitedir(&quot;grp&quot;), &quot;energy.html&quot;)) <span class="pinax-src">@ test_hierarchy.jl:52</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t420</td><td>isfile(joinpath(sitedir(&quot;grp&quot;), &quot;dqt.html&quot;)) <span class="pinax-src">@ test_hierarchy.jl:53</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t421</td><td>occursin(&quot;EQ1&quot;, read(joinpath(sitedir(&quot;num&quot;), &quot;energy.html&quot;), String)) <span class="pinax-src">@ test_hierarchy.jl:80</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t422</td><td>occursin(&quot;EQ2&quot;, read(joinpath(sitedir(&quot;num&quot;), &quot;cv.html&quot;), String)) <span class="pinax-src">@ test_hierarchy.jl:81</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t423</td><td>occursin(&quot;GQ1&quot;, read(joinpath(sitedir(&quot;num&quot;), &quot;dqt.html&quot;), String)) <span class="pinax-src">@ test_hierarchy.jl:82</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t424</td><td>occursin(&quot;&lt;div class=\&quot;card-thumb\&quot;&gt;&lt;img src=&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:103</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t425</td><td>occursin(&quot;class=\&quot;card-thumb-pdf\&quot;&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:104</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t426</td><td>occursin(&quot;loading=\&quot;lazy\&quot;&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:105</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t427</td><td>!(occursin(&quot;card-thumb-ph&quot;, idx)) <span class="pinax-src">@ test_hierarchy.jl:106</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t428</td><td>occursin(&quot;card-thumb card-thumb-empty&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:107</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t429</td><td>occursin(&quot;class=\&quot;card-thumb-pdf\&quot;&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:127</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t430</td><td>haskey((Pinax.current_document()).part_descs, :thermal) <span class="pinax-src">@ test_hierarchy.jl:142</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t431</td><td>occursin(&quot;&lt;div class=\&quot;part-desc\&quot;&gt;&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:144</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t432</td><td>occursin(&quot;&lt;strong&gt;reproducing&lt;/strong&gt;&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:145</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t433</td><td>occursin(&quot;sudden-quench dynamics&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:146</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t434</td><td>occursin(&quot;&lt;p class=\&quot;pinax-subtitle\&quot;&gt;スイープ: χ&lt;/p&gt;&quot;, a) <span class="pinax-src">@ test_hierarchy.jl:159</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t435</td><td>occursin(&quot;&lt;div class=\&quot;card-summary\&quot;&gt;スイープ: χ&lt;/div&gt;&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:161</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t436</td><td>pg.desc !== nothing &amp;&amp; occursin(&quot;page level desc&quot;, pg.desc.source) <span class="pinax-src">@ test_hierarchy.jl:172</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t437</td><td>pg.panels == [&quot;&lt;div class=\&quot;banner\&quot;&gt;hi&lt;/div&gt;&quot;] <span class="pinax-src">@ test_hierarchy.jl:173</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t438</td><td>occursin(&quot;page level desc&quot;, html) <span class="pinax-src">@ test_hierarchy.jl:175</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t439</td><td>occursin(&quot;&lt;div class=\&quot;banner\&quot;&gt;hi&lt;/div&gt;&quot;, html) <span class="pinax-src">@ test_hierarchy.jl:176</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t440</td><td>(pages[:log]).status == :trial <span class="pinax-src">@ test_hierarchy.jl:198</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t441</td><td>(pages[:keep]).status == :final <span class="pinax-src">@ test_hierarchy.jl:199</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t442</td><td>(pages[:res]).status == :final <span class="pinax-src">@ test_hierarchy.jl:200</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t443</td><td>occursin(&quot;\&quot;status\&quot;:\&quot;trial\&quot;&quot;, j) <span class="pinax-src">@ test_hierarchy.jl:204</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t444</td><td>occursin(&quot;\&quot;status\&quot;:\&quot;final\&quot;&quot;, j) <span class="pinax-src">@ test_hierarchy.jl:205</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t445</td><td>occursin(&quot;[status: trial]&quot;, md) <span class="pinax-src">@ test_hierarchy.jl:207</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t446</td><td>!(occursin(&quot;[status: final]&quot;, md)) <span class="pinax-src">@ test_hierarchy.jl:208</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t447</td><td>occursin(&quot;card-status&quot;, idx) <span class="pinax-src">@ test_hierarchy.jl:213</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 </tbody></table></div>
 <div class="figgrid">
 <figure id="test_hierarchy_jl_margins">

@@ -4,24 +4,24 @@
 <div class="pinax-meta">1 figure</div>
 <script type="application/json" id="pinax-committed">{"comments":{},"bookmarks":{},"features":["comments","bookmarks","export"]}</script>
 <section class="page" id="test_datavault_jl">
-<p class="pinax-subtitle">14/14 passed · 9.87s</p>
+<p class="pinax-subtitle">14/14 passed · 10.19s</p>
 <div class="pinax-benchmark">
 <div class="pinax-verdict pinax-verdict-pass">test_datavault.jl   14/14 PASS</div>
 <table class="pinax-checks"><thead><tr><th></th><th>id</th><th>label</th><th>got</th><th>want</th><th>Δ vs tol (kind)</th></tr></thead><tbody>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t246</td><td>calls[] == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t247</td><td>calls[] == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t248</td><td>calls[] == 2</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t249</td><td>calls[] == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t250</td><td>calls[] == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t251</td><td>isfile(meta)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t252</td><td>occursin(&quot;git_hash&quot;, read(meta, String))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t253</td><td>res.n == 3</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t254</td><td>isfile(res.gallery)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t255</td><td>isfile(res.agent)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t256</td><td>occursin(&quot;\&quot;val\&quot;&quot;, read(res.agent, String))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t257</td><td>occursin(&quot;64&quot;, read(res.agent, String))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t258</td><td>occursin(&quot;| N | val |&quot;, md)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t259</td><td>Pinax.report(42, recipe; title = &quot;x&quot;, out = joinpath(tmp, &quot;z&quot;))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t246</td><td>calls[] == 1 <span class="pinax-src">@ test_datavault.jl:51</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t247</td><td>calls[] == 1 <span class="pinax-src">@ test_datavault.jl:54</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t248</td><td>calls[] == 2 <span class="pinax-src">@ test_datavault.jl:59</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t249</td><td>calls[] == 1 <span class="pinax-src">@ test_datavault.jl:67</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t250</td><td>calls[] == 1 <span class="pinax-src">@ test_datavault.jl:72</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t251</td><td>isfile(meta) <span class="pinax-src">@ test_datavault.jl:79</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t252</td><td>occursin(&quot;git_hash&quot;, read(meta, String)) <span class="pinax-src">@ test_datavault.jl:80</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t253</td><td>res.n == 3 <span class="pinax-src">@ test_datavault.jl:120</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t254</td><td>isfile(res.gallery) <span class="pinax-src">@ test_datavault.jl:121</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t255</td><td>isfile(res.agent) <span class="pinax-src">@ test_datavault.jl:122</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t256</td><td>occursin(&quot;\&quot;val\&quot;&quot;, read(res.agent, String)) <span class="pinax-src">@ test_datavault.jl:123</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t257</td><td>occursin(&quot;64&quot;, read(res.agent, String)) <span class="pinax-src">@ test_datavault.jl:124</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t258</td><td>occursin(&quot;| N | val |&quot;, md) <span class="pinax-src">@ test_datavault.jl:126</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t259</td><td>Pinax.report(42, recipe; title = &quot;x&quot;, out = joinpath(tmp, &quot;z&quot;)) <span class="pinax-src">@ test_datavault.jl:130</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 </tbody></table></div>
 <div class="figgrid">
 <figure id="test_datavault_jl_margins">

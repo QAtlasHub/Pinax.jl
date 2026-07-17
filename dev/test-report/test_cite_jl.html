@@ -4,34 +4,34 @@
 <div class="pinax-meta">1 figure</div>
 <script type="application/json" id="pinax-committed">{"comments":{},"bookmarks":{},"features":["comments","bookmarks","export"]}</script>
 <section class="page" id="test_cite_jl">
-<p class="pinax-subtitle">24/24 passed · 2.08s</p>
+<p class="pinax-subtitle">24/24 passed · 2.16s</p>
 <div class="pinax-benchmark">
 <div class="pinax-verdict pinax-verdict-pass">test_cite.jl   24/24 PASS</div>
 <table class="pinax-checks"><thead><tr><th></th><th>id</th><th>label</th><th>got</th><th>want</th><th>Δ vs tol (kind)</th></tr></thead><tbody>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t168</td><td>e.year == &quot;2026&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t169</td><td>occursin(&quot;Environment-matrix-product operator&quot;, e.title)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t170</td><td>occursin(&quot;Shimozono&quot;, e.authors) &amp;&amp; occursin(&quot;Hotta&quot;, e.authors)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t171</td><td>e.venue == &quot;Physical Review B&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t172</td><td>Pinax.bib_link(e) === nothing</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t173</td><td>occursin(&quot;&lt;a href=\&quot;#ref-shimozono2026environment\&quot;&gt;[1]&lt;/a&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t174</td><td>occursin(&quot;id=\&quot;bibliography\&quot;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t175</td><td>occursin(&quot;id=\&quot;ref-shimozono2026environment\&quot;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t176</td><td>occursin(&quot;Shimozono&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t177</td><td>occursin(&quot;&lt;a href=\&quot;#bibliography\&quot;&gt;References&lt;/a&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t178</td><td>occursin(&quot;&lt;a href=\&quot;#ref-example_url\&quot;&gt;[1]&lt;/a&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t179</td><td>occursin(&quot;&lt;a href=\&quot;#ref-shimozono2026environment\&quot;&gt;[2]&lt;/a&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t180</td><td>count(&quot;id=\&quot;ref-example_url\&quot;&quot;, html) == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t181</td><td>occursin(&quot;&lt;a href=\&quot;#ref-shimozono2026environment\&quot;&gt;Shimozono and Hotta&lt;/a&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t182</td><td>occursin(&quot;https://doi.org/10.0000/example.doi&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t183</td><td>occursin(&quot;https://example.com/pat&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t184</td><td>occursin(&quot;https://arxiv.org/abs/0000.00001&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t185</td><td>occursin(&quot;[?]&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t186</td><td>occursin(&quot;unknown key :ghost&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t187</td><td>!(occursin(&quot;id=\&quot;bibliography\&quot;&quot;, html))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t188</td><td>!(occursin(&quot;&gt;References&lt;/a&gt;&quot;, html))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t189</td><td>occursin(&quot;&lt;a href=\&quot;#ref-shimozono2026environment\&quot;&gt;[1]&lt;/a&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t190</td><td>occursin(&quot;id=\&quot;ref-shimozono2026environment\&quot;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t191</td><td>occursin(&quot;file not found&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t168</td><td>e.year == &quot;2026&quot; <span class="pinax-src">@ test_cite.jl:55</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t169</td><td>occursin(&quot;Environment-matrix-product operator&quot;, e.title) <span class="pinax-src">@ test_cite.jl:56</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t170</td><td>occursin(&quot;Shimozono&quot;, e.authors) &amp;&amp; occursin(&quot;Hotta&quot;, e.authors) <span class="pinax-src">@ test_cite.jl:57</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t171</td><td>e.venue == &quot;Physical Review B&quot; <span class="pinax-src">@ test_cite.jl:58</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t172</td><td>Pinax.bib_link(e) === nothing <span class="pinax-src">@ test_cite.jl:59</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t173</td><td>occursin(&quot;&lt;a href=\&quot;#ref-shimozono2026environment\&quot;&gt;[1]&lt;/a&gt;&quot;, html) <span class="pinax-src">@ test_cite.jl:71</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t174</td><td>occursin(&quot;id=\&quot;bibliography\&quot;&quot;, html) <span class="pinax-src">@ test_cite.jl:72</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t175</td><td>occursin(&quot;id=\&quot;ref-shimozono2026environment\&quot;&quot;, html) <span class="pinax-src">@ test_cite.jl:73</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t176</td><td>occursin(&quot;Shimozono&quot;, html) <span class="pinax-src">@ test_cite.jl:74</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t177</td><td>occursin(&quot;&lt;a href=\&quot;#bibliography\&quot;&gt;References&lt;/a&gt;&quot;, html) <span class="pinax-src">@ test_cite.jl:75</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t178</td><td>occursin(&quot;&lt;a href=\&quot;#ref-example_url\&quot;&gt;[1]&lt;/a&gt;&quot;, html) <span class="pinax-src">@ test_cite.jl:87</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t179</td><td>occursin(&quot;&lt;a href=\&quot;#ref-shimozono2026environment\&quot;&gt;[2]&lt;/a&gt;&quot;, html) <span class="pinax-src">@ test_cite.jl:88</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t180</td><td>count(&quot;id=\&quot;ref-example_url\&quot;&quot;, html) == 1 <span class="pinax-src">@ test_cite.jl:89</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t181</td><td>occursin(&quot;&lt;a href=\&quot;#ref-shimozono2026environment\&quot;&gt;Shimozono and Hotta&lt;/a&gt;&quot;, html) <span class="pinax-src">@ test_cite.jl:101</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t182</td><td>occursin(&quot;https://doi.org/10.0000/example.doi&quot;, html) <span class="pinax-src">@ test_cite.jl:115</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t183</td><td>occursin(&quot;https://example.com/pat&quot;, html) <span class="pinax-src">@ test_cite.jl:116</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t184</td><td>occursin(&quot;https://arxiv.org/abs/0000.00001&quot;, html) <span class="pinax-src">@ test_cite.jl:117</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t185</td><td>occursin(&quot;[?]&quot;, html) <span class="pinax-src">@ test_cite.jl:129</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t186</td><td>occursin(&quot;unknown key :ghost&quot;, html) <span class="pinax-src">@ test_cite.jl:130</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t187</td><td>!(occursin(&quot;id=\&quot;bibliography\&quot;&quot;, html)) <span class="pinax-src">@ test_cite.jl:142</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t188</td><td>!(occursin(&quot;&gt;References&lt;/a&gt;&quot;, html)) <span class="pinax-src">@ test_cite.jl:143</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t189</td><td>occursin(&quot;&lt;a href=\&quot;#ref-shimozono2026environment\&quot;&gt;[1]&lt;/a&gt;&quot;, html) <span class="pinax-src">@ test_cite.jl:156</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t190</td><td>occursin(&quot;id=\&quot;ref-shimozono2026environment\&quot;&quot;, html) <span class="pinax-src">@ test_cite.jl:157</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t191</td><td>occursin(&quot;file not found&quot;, html) <span class="pinax-src">@ test_cite.jl:169</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 </tbody></table></div>
 <div class="figgrid">
 <figure id="test_cite_jl_margins">

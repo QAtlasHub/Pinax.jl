@@ -4,31 +4,31 @@
 <div class="pinax-meta">1 figure</div>
 <script type="application/json" id="pinax-committed">{"comments":{},"bookmarks":{},"features":["comments","bookmarks","export"]}</script>
 <section class="page" id="test_index_jl">
-<p class="pinax-subtitle">21/21 passed · 0.31s</p>
+<p class="pinax-subtitle">21/21 passed · 0.37s</p>
 <div class="pinax-benchmark">
 <div class="pinax-verdict pinax-verdict-pass">test_index.jl   21/21 PASS</div>
 <table class="pinax-checks"><thead><tr><th></th><th>id</th><th>label</th><th>got</th><th>want</th><th>Δ vs tol (kind)</th></tr></thead><tbody>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t452</td><td>((Pinax.current_document()).pages[1]).summary == &quot;what this page does&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t453</td><td>((Pinax.current_document()).pages[1]).summary === nothing</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t454</td><td>occursin(&quot;&lt;div class=\&quot;pinax-cards\&quot;&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t455</td><td>occursin(&quot;&lt;div class=\&quot;card-summary\&quot;&gt;alpha blurb&lt;/div&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t456</td><td>!(occursin(&quot;&lt;div class=\&quot;card-sections\&quot;&gt;&quot;, html))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t457</td><td>!(occursin(&quot;inner a&quot;, html))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t458</td><td>count(&quot;&lt;a class=\&quot;pinax-card\&quot;&quot;, html) == 2</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t459</td><td>count(&quot;&lt;div class=\&quot;card-summary\&quot;&gt;&quot;, html) == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t460</td><td>occursin(&quot;&lt;div class=\&quot;card-sections\&quot;&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t461</td><td>occursin(&quot;alpha blurb&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t462</td><td>occursin(&quot;&lt;span class=\&quot;sec-name\&quot;&gt;Sec A&lt;/span&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t463</td><td>occursin(&quot;— inner a&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t464</td><td>occursin(&quot;&lt;span class=\&quot;sec-name\&quot;&gt;Sec T&lt;/span&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t465</td><td>occursin(&quot;&lt;ul class=\&quot;pinax-toc\&quot;&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t466</td><td>!(occursin(&quot;&lt;div class=\&quot;pinax-cards\&quot;&gt;&quot;, html))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t467</td><td>occursin(&quot;&lt;span class=\&quot;toc-summary\&quot;&gt;— alpha blurb&lt;/span&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t468</td><td>occursin(&quot;&lt;a href=\&quot;a.html\&quot;&gt;Alpha&lt;/a&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t469</td><td>occursin(&quot;&lt;span class=\&quot;toc-meta\&quot;&gt;(1 section · 1 figure)&lt;/span&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t470</td><td>occursin(&quot;&lt;div class=\&quot;card-summary\&quot;&gt;no sections yet&lt;/div&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t471</td><td>count(&quot;&lt;div class=\&quot;card-sections\&quot;&gt;&quot;, html) == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t472</td><td>#= /home/runner/work/Pinax.jl/Pinax.jl/test/test_index.jl:113 =# @pinaxsetup index = :bogus</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t452</td><td>((Pinax.current_document()).pages[1]).summary == &quot;what this page does&quot; <span class="pinax-src">@ test_index.jl:22</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t453</td><td>((Pinax.current_document()).pages[1]).summary === nothing <span class="pinax-src">@ test_index.jl:32</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t454</td><td>occursin(&quot;&lt;div class=\&quot;pinax-cards\&quot;&gt;&quot;, html) <span class="pinax-src">@ test_index.jl:48</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t455</td><td>occursin(&quot;&lt;div class=\&quot;card-summary\&quot;&gt;alpha blurb&lt;/div&gt;&quot;, html) <span class="pinax-src">@ test_index.jl:49</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t456</td><td>!(occursin(&quot;&lt;div class=\&quot;card-sections\&quot;&gt;&quot;, html)) <span class="pinax-src">@ test_index.jl:50</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t457</td><td>!(occursin(&quot;inner a&quot;, html)) <span class="pinax-src">@ test_index.jl:51</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t458</td><td>count(&quot;&lt;a class=\&quot;pinax-card\&quot;&quot;, html) == 2 <span class="pinax-src">@ test_index.jl:52</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t459</td><td>count(&quot;&lt;div class=\&quot;card-summary\&quot;&gt;&quot;, html) == 1 <span class="pinax-src">@ test_index.jl:53</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t460</td><td>occursin(&quot;&lt;div class=\&quot;card-sections\&quot;&gt;&quot;, html) <span class="pinax-src">@ test_index.jl:72</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t461</td><td>occursin(&quot;alpha blurb&quot;, html) <span class="pinax-src">@ test_index.jl:73</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t462</td><td>occursin(&quot;&lt;span class=\&quot;sec-name\&quot;&gt;Sec A&lt;/span&gt;&quot;, html) <span class="pinax-src">@ test_index.jl:74</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t463</td><td>occursin(&quot;— inner a&quot;, html) <span class="pinax-src">@ test_index.jl:75</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t464</td><td>occursin(&quot;&lt;span class=\&quot;sec-name\&quot;&gt;Sec T&lt;/span&gt;&quot;, html) <span class="pinax-src">@ test_index.jl:76</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t465</td><td>occursin(&quot;&lt;ul class=\&quot;pinax-toc\&quot;&gt;&quot;, html) <span class="pinax-src">@ test_index.jl:92</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t466</td><td>!(occursin(&quot;&lt;div class=\&quot;pinax-cards\&quot;&gt;&quot;, html)) <span class="pinax-src">@ test_index.jl:93</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t467</td><td>occursin(&quot;&lt;span class=\&quot;toc-summary\&quot;&gt;— alpha blurb&lt;/span&gt;&quot;, html) <span class="pinax-src">@ test_index.jl:94</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t468</td><td>occursin(&quot;&lt;a href=\&quot;a.html\&quot;&gt;Alpha&lt;/a&gt;&quot;, html) <span class="pinax-src">@ test_index.jl:95</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t469</td><td>occursin(&quot;&lt;span class=\&quot;toc-meta\&quot;&gt;(1 section · 1 figure)&lt;/span&gt;&quot;, html) <span class="pinax-src">@ test_index.jl:96</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t470</td><td>occursin(&quot;&lt;div class=\&quot;card-summary\&quot;&gt;no sections yet&lt;/div&gt;&quot;, html) <span class="pinax-src">@ test_index.jl:108</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t471</td><td>count(&quot;&lt;div class=\&quot;card-sections\&quot;&gt;&quot;, html) == 1 <span class="pinax-src">@ test_index.jl:109</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t472</td><td>#= /home/runner/work/Pinax.jl/Pinax.jl/test/test_index.jl:113 =# @pinaxsetup index = :bogus <span class="pinax-src">@ test_index.jl:113</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 </tbody></table></div>
 <div class="figgrid">
 <figure id="test_index_jl_margins">

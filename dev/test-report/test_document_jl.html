@@ -4,53 +4,53 @@
 <div class="pinax-meta">1 figure</div>
 <script type="application/json" id="pinax-committed">{"comments":{},"bookmarks":{},"features":["comments","bookmarks","export"]}</script>
 <section class="page" id="test_document_jl">
-<p class="pinax-subtitle">41/41 passed · 0.97s</p>
+<p class="pinax-subtitle">41/41 passed · 1.1s</p>
 <div class="pinax-benchmark">
 <div class="pinax-verdict pinax-verdict-pass">test_document.jl   41/41 PASS</div>
 <table class="pinax-checks"><thead><tr><th></th><th>id</th><th>label</th><th>got</th><th>want</th><th>Δ vs tol (kind)</th></tr></thead><tbody>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t273</td><td>length(doc.pages) == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t274</td><td>pg.id === :eq</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t275</td><td>pg.title == &quot;Thermal Equilibrium&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t276</td><td>pg.anchor == &quot;eq&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t277</td><td>length(pg.sections) == 2</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t278</td><td>(pg.sections[1]).id === :energy</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t279</td><td>(pg.sections[2]).id === :conv</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t280</td><td>length((pg.sections[1]).figures) == 2</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t281</td><td>length((pg.sections[2]).figures) == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t282</td><td>(pg.sections[2]).facet == &quot;system.g&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t283</td><td>(pg.sections[1]).desc isa Pinax.Desc</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t284</td><td>occursin(&quot;langle&quot;, (pg.sections[1]).desc.source)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t285</td><td>SIDE[] == 0</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t286</td><td>fig.gen() == 42</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t287</td><td>SIDE[] == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t288</td><td>occursin(&quot;42&quot;, fig.code)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t289</td><td>(figs[1]).id === :s_fig1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t290</td><td>(figs[1]).anchor == &quot;s_fig1&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t291</td><td>(figs[2]).id === :custom</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t292</td><td>fig.params == (N = 8, g = 0.5)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t293</td><td>(figs[1]).caption == &quot;override&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t294</td><td>(figs[2]).caption == &quot;only&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t273</td><td>length(doc.pages) == 1 <span class="pinax-src">@ test_document.jl:21</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t274</td><td>pg.id === :eq <span class="pinax-src">@ test_document.jl:23</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t275</td><td>pg.title == &quot;Thermal Equilibrium&quot; <span class="pinax-src">@ test_document.jl:24</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t276</td><td>pg.anchor == &quot;eq&quot; <span class="pinax-src">@ test_document.jl:25</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t277</td><td>length(pg.sections) == 2 <span class="pinax-src">@ test_document.jl:26</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t278</td><td>(pg.sections[1]).id === :energy <span class="pinax-src">@ test_document.jl:27</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t279</td><td>(pg.sections[2]).id === :conv <span class="pinax-src">@ test_document.jl:28</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t280</td><td>length((pg.sections[1]).figures) == 2 <span class="pinax-src">@ test_document.jl:29</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t281</td><td>length((pg.sections[2]).figures) == 1 <span class="pinax-src">@ test_document.jl:30</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t282</td><td>(pg.sections[2]).facet == &quot;system.g&quot; <span class="pinax-src">@ test_document.jl:31</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t283</td><td>(pg.sections[1]).desc isa Pinax.Desc <span class="pinax-src">@ test_document.jl:32</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t284</td><td>occursin(&quot;langle&quot;, (pg.sections[1]).desc.source) <span class="pinax-src">@ test_document.jl:33</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t285</td><td>SIDE[] == 0 <span class="pinax-src">@ test_document.jl:48</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t286</td><td>fig.gen() == 42 <span class="pinax-src">@ test_document.jl:49</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t287</td><td>SIDE[] == 1 <span class="pinax-src">@ test_document.jl:50</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t288</td><td>occursin(&quot;42&quot;, fig.code) <span class="pinax-src">@ test_document.jl:51</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t289</td><td>(figs[1]).id === :s_fig1 <span class="pinax-src">@ test_document.jl:63</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t290</td><td>(figs[1]).anchor == &quot;s_fig1&quot; <span class="pinax-src">@ test_document.jl:64</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t291</td><td>(figs[2]).id === :custom <span class="pinax-src">@ test_document.jl:65</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t292</td><td>fig.params == (N = 8, g = 0.5) <span class="pinax-src">@ test_document.jl:76</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t293</td><td>(figs[1]).caption == &quot;override&quot; <span class="pinax-src">@ test_document.jl:89</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t294</td><td>(figs[2]).caption == &quot;only&quot; <span class="pinax-src">@ test_document.jl:90</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 <tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t295</td><td>any((e-&gt;begin
             #= /home/runner/work/Pinax.jl/Pinax.jl/test/test_document.jl:100 =#
-            e…</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t296</td><td>Pinax.resolved_thumbnail(pgs[1]) == Pinax.FigRef(:picked)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t297</td><td>Pinax.resolved_thumbnail(pgs[2]) == Pinax.FigRef((((pgs[2]).sections[1]).figures[2]).id)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t298</td><td>Pinax.resolved_thumbnail(pgs[3]) == Pinax.FigRef((((pgs[3]).sections[1]).figures[1]).id)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t299</td><td>Pinax.resolved_thumbnail(pgs[4]) === nothing</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t300</td><td>sec.summary == &quot;blurb&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t301</td><td>sec.layout === :wide</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t302</td><td>m.theme === :gallery</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t303</td><td>m.debug</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t304</td><td>m.numbering === :page</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t305</td><td>m.index === :rich</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t306</td><td>(Pinax.current_document()).meta.theme === :gallery</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t307</td><td>(Pinax.current_document()).meta.debug</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t308</td><td>(Pinax.current_document()).meta.bib_sources == [&quot;a.bib&quot;, &quot;b.bib&quot;]</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t309</td><td>(Pinax.current_document()).newcommands[raw&quot;\E&quot;] == raw&quot;\langle H\rangle&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t310</td><td>s == raw&quot;E = $H$ and \alpha&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t311</td><td>length(doc.pages) == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t312</td><td>(doc.pages[1]).id === :scoped</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t313</td><td>Pinax.current_document() === outer</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+            e… <span class="pinax-src">@ test_document.jl:100</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t296</td><td>Pinax.resolved_thumbnail(pgs[1]) == Pinax.FigRef(:picked) <span class="pinax-src">@ test_document.jl:130</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t297</td><td>Pinax.resolved_thumbnail(pgs[2]) == Pinax.FigRef((((pgs[2]).sections[1]).figures[2]).id) <span class="pinax-src">@ test_document.jl:131</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t298</td><td>Pinax.resolved_thumbnail(pgs[3]) == Pinax.FigRef((((pgs[3]).sections[1]).figures[1]).id) <span class="pinax-src">@ test_document.jl:133</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t299</td><td>Pinax.resolved_thumbnail(pgs[4]) === nothing <span class="pinax-src">@ test_document.jl:135</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t300</td><td>sec.summary == &quot;blurb&quot; <span class="pinax-src">@ test_document.jl:146</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t301</td><td>sec.layout === :wide <span class="pinax-src">@ test_document.jl:147</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t302</td><td>m.theme === :gallery <span class="pinax-src">@ test_document.jl:154</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t303</td><td>m.debug <span class="pinax-src">@ test_document.jl:155</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t304</td><td>m.numbering === :page <span class="pinax-src">@ test_document.jl:156</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t305</td><td>m.index === :rich <span class="pinax-src">@ test_document.jl:157</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t306</td><td>(Pinax.current_document()).meta.theme === :gallery <span class="pinax-src">@ test_document.jl:161</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t307</td><td>(Pinax.current_document()).meta.debug <span class="pinax-src">@ test_document.jl:165</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t308</td><td>(Pinax.current_document()).meta.bib_sources == [&quot;a.bib&quot;, &quot;b.bib&quot;] <span class="pinax-src">@ test_document.jl:169</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t309</td><td>(Pinax.current_document()).newcommands[raw&quot;\E&quot;] == raw&quot;\langle H\rangle&quot; <span class="pinax-src">@ test_document.jl:173</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t310</td><td>s == raw&quot;E = $H$ and \alpha&quot; <span class="pinax-src">@ test_document.jl:178</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t311</td><td>length(doc.pages) == 1 <span class="pinax-src">@ test_document.jl:191</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t312</td><td>(doc.pages[1]).id === :scoped <span class="pinax-src">@ test_document.jl:192</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t313</td><td>Pinax.current_document() === outer <span class="pinax-src">@ test_document.jl:193</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 </tbody></table></div>
 <div class="figgrid">
 <figure id="test_document_jl_margins">

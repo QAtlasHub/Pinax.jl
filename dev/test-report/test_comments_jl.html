@@ -8,28 +8,28 @@
 <div class="pinax-benchmark">
 <div class="pinax-verdict pinax-verdict-pass">test_comments.jl   22/22 PASS</div>
 <table class="pinax-checks"><thead><tr><th></th><th>id</th><th>label</th><th>got</th><th>want</th><th>Δ vs tol (kind)</th></tr></thead><tbody>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t192</td><td>isempty(c)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t193</td><td>isempty(b)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t194</td><td>length(c[:energy]) == 2</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t195</td><td>((c[:energy])[1]).author == &quot;me&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t196</td><td>((c[:energy])[1]).text == &quot;first note&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t197</td><td>((c[:energy])[2]).author == &quot;llm&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t198</td><td>((c[:other])[1]).author == &quot;sensei&quot;</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t199</td><td>isempty(b)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t200</td><td>:energy in b</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t201</td><td>length(c[:energy]) == 1</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t202</td><td>occursin(&quot;&lt;div class=\&quot;pinax-comments\&quot;&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t203</td><td>occursin(&quot;&lt;span class=\&quot;author\&quot;&gt;llm&lt;/span&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t204</td><td>occursin(&quot;&lt;strong&gt;large&lt;/strong&gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t205</td><td>occursin(&quot;class=\&quot;pinax-bm-on\&quot;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t206</td><td>occursin(&quot;class=\&quot;section bookmarked\&quot;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t207</td><td>!(occursin(&quot;&lt;div class=\&quot;pinax-comments\&quot;&gt;&quot;, html))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t208</td><td>occursin(&quot;&amp;lt;script&amp;gt;&quot;, html)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t209</td><td>!(occursin(&quot;&lt;script&gt;alert&quot;, html))</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t210</td><td>read(f, String) == before</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t211</td><td>occursin(&quot;&lt;div class=\&quot;pinax-comments\&quot;&gt;&quot;, card)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t212</td><td>occursin(&quot;look at this peak&quot;, card)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
-<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t213</td><td>occursin(&quot;&lt;span class=\&quot;author\&quot;&gt;me&lt;/span&gt;&quot;, card)</td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t192</td><td>isempty(c) <span class="pinax-src">@ test_comments.jl:12</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t193</td><td>isempty(b) <span class="pinax-src">@ test_comments.jl:13</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t194</td><td>length(c[:energy]) == 2 <span class="pinax-src">@ test_comments.jl:22</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t195</td><td>((c[:energy])[1]).author == &quot;me&quot; <span class="pinax-src">@ test_comments.jl:23</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t196</td><td>((c[:energy])[1]).text == &quot;first note&quot; <span class="pinax-src">@ test_comments.jl:24</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t197</td><td>((c[:energy])[2]).author == &quot;llm&quot; <span class="pinax-src">@ test_comments.jl:25</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t198</td><td>((c[:other])[1]).author == &quot;sensei&quot; <span class="pinax-src">@ test_comments.jl:26</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t199</td><td>isempty(b) <span class="pinax-src">@ test_comments.jl:27</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t200</td><td>:energy in b <span class="pinax-src">@ test_comments.jl:35</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t201</td><td>length(c[:energy]) == 1 <span class="pinax-src">@ test_comments.jl:36</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t202</td><td>occursin(&quot;&lt;div class=\&quot;pinax-comments\&quot;&gt;&quot;, html) <span class="pinax-src">@ test_comments.jl:49</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t203</td><td>occursin(&quot;&lt;span class=\&quot;author\&quot;&gt;llm&lt;/span&gt;&quot;, html) <span class="pinax-src">@ test_comments.jl:50</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t204</td><td>occursin(&quot;&lt;strong&gt;large&lt;/strong&gt;&quot;, html) <span class="pinax-src">@ test_comments.jl:51</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t205</td><td>occursin(&quot;class=\&quot;pinax-bm-on\&quot;&quot;, html) <span class="pinax-src">@ test_comments.jl:64</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t206</td><td>occursin(&quot;class=\&quot;section bookmarked\&quot;&quot;, html) <span class="pinax-src">@ test_comments.jl:65</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t207</td><td>!(occursin(&quot;&lt;div class=\&quot;pinax-comments\&quot;&gt;&quot;, html)) <span class="pinax-src">@ test_comments.jl:76</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t208</td><td>occursin(&quot;&amp;lt;script&amp;gt;&quot;, html) <span class="pinax-src">@ test_comments.jl:89</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t209</td><td>!(occursin(&quot;&lt;script&gt;alert&quot;, html)) <span class="pinax-src">@ test_comments.jl:90</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t210</td><td>read(f, String) == before <span class="pinax-src">@ test_comments.jl:104</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t211</td><td>occursin(&quot;&lt;div class=\&quot;pinax-comments\&quot;&gt;&quot;, card) <span class="pinax-src">@ test_comments.jl:119</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t212</td><td>occursin(&quot;look at this peak&quot;, card) <span class="pinax-src">@ test_comments.jl:120</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
+<tr class="pinax-pass"><td class="pinax-badge">✓</td><td>t213</td><td>occursin(&quot;&lt;span class=\&quot;author\&quot;&gt;me&lt;/span&gt;&quot;, card) <span class="pinax-src">@ test_comments.jl:121</span></td><td>1.0</td><td>1.0</td><td>0.0 vs 0.5 (abs)</td></tr>
 </tbody></table></div>
 <div class="figgrid">
 <figure id="test_comments_jl_margins">
