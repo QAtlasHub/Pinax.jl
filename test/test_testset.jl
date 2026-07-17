@@ -657,4 +657,56 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         aj = read(joinpath(out * "_agent", "agent.json"), String)
         @test count("\"pass\":", aj) >= 500                        # agent.json enumerates every check
     end
+
+    @testset "a CI matrix merges as parts, not shards — the cell is a binding (K)" begin
+        # A matrix runs the SAME files in every cell (unlike shards, which partition files), so merging
+        # by concatenation would fold the cells away. Each cell is a `@part` instead: one report, file
+        # structure preserved, page ids qualified per cell, per-cell verdicts, cell = the provenance.
+        dir = mktempdir()
+        cellnode(pass) = TestNode(
+            "root";
+            children=[
+                TestNode(
+                    "test_foo.jl";
+                    checks=[
+                        Check(
+                            :t,
+                            "chk",
+                            pass ? 1.0 : 2.0,
+                            1.0,
+                            pass ? 0.0 : 1.0,
+                            0.5,
+                            :abs,
+                            pass,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        dA = withenv("PINAX_TEST_MATRIX" => "julia 1.11 · ubuntu") do
+            Pinax.dump_test_report(cellnode(true), joinpath(dir, "a.toml"))
+        end
+        dB = withenv("PINAX_TEST_MATRIX" => "julia 1.10 · ubuntu") do
+            Pinax.dump_test_report(cellnode(false), joinpath(dir, "b.toml"))
+        end
+        @test occursin("matrix", read(dA, String))              # the cell rides in the dump
+
+        out = joinpath(dir, "m")
+        render_test_report([dA, dB]; out=out, title="Matrix")
+        idx = read(joinpath(out * "_html", "index.html"), String)
+        md = read(joinpath(out * "_agent", "agent.md"), String)
+        files = readdir(out * "_html")
+        @test occursin("julia 1.11 · ubuntu", idx) && occursin("julia 1.10 · ubuntu", idx)  # both parts
+        # the SAME file in two cells → two pages, ids qualified per cell (no collision)
+        @test count(f -> occursin("test_foo_jl", f) && endswith(f, ".html"), files) == 2
+        @test occursin("1/1 PASS", md) && occursin("0/1 FAIL", md)   # per-cell verdict, not merged
+
+        # a single-cell (non-matrix) run is self-identifying: the cell is a provenance row
+        withenv("PINAX_TEST_MATRIX" => "julia 1.11 · ubuntu") do
+            @test any(
+                r -> r.field == "matrix" && r.value == "julia 1.11 · ubuntu",
+                Pinax._provenance_rows(),
+            )
+        end
+    end
 end
