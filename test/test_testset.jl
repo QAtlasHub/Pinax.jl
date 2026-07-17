@@ -8,6 +8,7 @@ using Pinax:
     _looks_like_a_file,
     render_test_report,
     Check,
+    CodeBlock,
     TestNode
 using Test
 using Test: DefaultTestSet   # explicit stock context for report-off (inert) assertions
@@ -741,5 +742,46 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         @test svgfor() == s1        # unchanged checks → identical SVG (cache-consistent)
         rep(c2)
         @test svgfor() != s1        # changed checks → the SVG reflects the new numbers (never stale)
+    end
+
+    @testset "@code shows the computation behind a figure/check" begin
+        # `@code` renders source (+ optional captured output) as a snippet — a sibling to
+        # `@figure`/`@table`. A simple assignment leaks + shows its value; a pure expression shows its
+        # value; a definition runs BARE (natural scoping, no wrapper that would relocalise it).
+        Pinax.reset!()
+        @page :p "P" begin
+            @code y = 6 * 7
+            @code 2^10
+            @code midpoint(x) = 2x
+            @code run = false z = boom()
+            @assert y == 42 && midpoint(3) == 6      # the assignment + definition leaked to here
+        end
+        codes = Pinax.current_document().pages[1].codes
+        @test [c.output for c in codes] == ["42", "1024", "", ""]  # value / value / defn / show-only
+        @test codes[1].source == "y = 6 * 7" && codes[4].source == "z = boom()"
+
+        # captured into a test (a PinaxTestSet), rides a dump, and renders in every backend
+        root = PinaxTestSet("cap")
+        Test.push_testset(root)
+        try
+            @code E = 1.0 + 1.0 / 8
+            @assert E ≈ 1.125
+        finally
+            Test.pop_testset()
+        end
+        @test length(root.codes) == 1 && root.codes[1].output == "1.125"
+
+        dir = mktempdir()
+        n = TestNode(
+            "f.jl"; codes=[CodeBlock(:c1, "c1", "E = f(x)", "1.125", "energy", "julia")]
+        )
+        d = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
+        @test Pinax.load_test_dump(d).children[1].codes[1].source == "E = f(x)"   # round-trips a shard
+        render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
+        @test occursin("E = f(x)", read(joinpath(dir, "rep_html", "f_jl.html"), String))
+        @test occursin(
+            "\"source\":\"E = f(x)\"",
+            read(joinpath(dir, "rep_agent", "agent.json"), String),
+        )
     end
 end

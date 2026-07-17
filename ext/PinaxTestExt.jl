@@ -15,6 +15,7 @@ module PinaxTestExt
 using Pinax
 using Pinax:
     Check,
+    CodeBlock,
     Figure,
     Table,
     Desc,
@@ -57,9 +58,10 @@ mutable struct PinaxTestSet <: AbstractTestSet
     figures::Vector{Figure}
     tables::Vector{Table}
     checks::Vector{Check}
+    codes::Vector{CodeBlock}
     panels::Vector{String}
     desc::Union{Desc,Nothing}
-    content::Vector{Pair{Symbol,Int}}   # declaration order of figures/tables/panels/checks
+    content::Vector{Pair{Symbol,Int}}   # declaration order of figures/tables/panels/checks/codes
     children::Vector{PinaxTestSet}
     nbroken::Int                        # @test_broken / skipped: counted, never a Check
     nerror::Int                         # failing checks that were ERRORS rather than plain fails
@@ -93,6 +95,7 @@ function PinaxTestSet(
         Figure[],
         Table[],
         Check[],
+        CodeBlock[],
         String[],
         nothing,
         Pair{Symbol,Int}[],

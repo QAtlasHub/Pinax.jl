@@ -156,6 +156,22 @@ function Check(id, label, got, want, delta, tol, kind, pass)
     return Check(id, label, got, want, delta, tol, kind, pass, "")
 end
 
+"""
+A code-snippet artifact — the source (and optionally its captured output), a sibling to `Figure` /
+`Table`. Renders as a highlighted `<pre><code>` block (gallery), an `lstlisting`-style verbatim (LaTeX),
+and a `{kind:"code", source, output, lang}` object (`agent.json`). This is how a report shows the
+COMPUTATION behind a figure or check — "here is the code, here is what it produced" (`@code`, a
+Documenter `@example`-like block, issue #69's recorded follow-up).
+"""
+mutable struct CodeBlock
+    id::Symbol
+    anchor::String
+    source::String        # the code, as written (deparsed)
+    output::String        # captured value / printed output, or "" (show-only, or no result)
+    caption::String
+    lang::String          # syntax hint for the highlighter, e.g. "julia"
+end
+
 "A section (a group of figures + a description)."
 mutable struct Section
     id::Symbol
@@ -170,7 +186,8 @@ mutable struct Section
     panels::Vector{String}           # @raw HTML blocks (project-specific UI escape hatch, notes 06 §6)
     tables::Vector{Table}            # @table artifacts
     checks::Vector{Check}            # @expect PASS/FAIL checks (a @benchmark test set)
-    content::Vector{Pair{Symbol,Int}}  # declaration order: (:figure|:table|:panel|:check) => index into the list above
+    codes::Vector{CodeBlock}         # @code snippet+output blocks
+    content::Vector{Pair{Symbol,Int}}  # declaration order: (:figure|:table|:panel|:check|:code) => index into the list above
 end
 
 """
@@ -193,7 +210,8 @@ mutable struct Page
     layout::Union{Symbol,Nothing}    # :grid|:single|:wide hint for the page-level figure grid
     tables::Vector{Table}            # page-level @table artifacts (page-as-leaf)
     checks::Vector{Check}            # page-level @expect checks (a @benchmark test set)
-    content::Vector{Pair{Symbol,Int}}  # declaration order of figures/tables/panels/checks
+    codes::Vector{CodeBlock}         # page-level @code snippet+output blocks
+    content::Vector{Pair{Symbol,Int}}  # declaration order of figures/tables/panels/checks/codes
     status::Symbol                   # maturity tag a backend/registry interprets: :final (default, the
     # shaped/curated page) vs :trial (a raw experiment attempt) vs :benchmark (a `@benchmark` test set,
     # which each backend dispatches on to render a verdict / fixed test-report). Pinax only carries it.
@@ -323,6 +341,7 @@ _anchor(id::Symbol) = replace(string(id), r"[^A-Za-z0-9_-]" => "_")
 # Container = a Section or a page-as-leaf Page; both have `.id` and `.figures`.
 _auto_fig_id(c) = Symbol(string(c.id), "_fig", length(c.figures) + 1)
 _auto_table_id(c) = Symbol(string(c.id), "_tbl", length(c.tables) + 1)
+_auto_code_id(c) = Symbol(string(c.id), "_code", length(c.codes) + 1)
 
 # Stringify the @figure expression for change detection, stripping source line numbers so that
 # moving a figure to a different line does not spuriously invalidate its cache entry (notes 10).
@@ -468,6 +487,7 @@ function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing, status
         layout,
         Table[],
         Check[],
+        CodeBlock[],
         Pair{Symbol,Int}[],
         st,
     )
@@ -579,6 +599,7 @@ function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=
         String[],
         Table[],
         Check[],
+        CodeBlock[],
         Pair{Symbol,Int}[],
     )
     push!(pg.sections, sec)
@@ -763,6 +784,137 @@ function _push_check!(; id, label, got, want=0.0, tol, kind=:auto)
 end
 
 # The container's content (figures / tables / @raw panels / @expect checks) in declaration order, as (kind, item) pairs.
+"""
+    @code [caption=…] [id=…] [lang="julia"] [run=true] expr
+    @code [kw…] begin … end
+
+Show a **code snippet** — the computation behind a figure or check — and, by default, RUN it and show
+its result. `@code E = compute(χ)` renders the source `E = compute(χ)` and its value; the assignment
+still happens in the enclosing scope, so following code (a `@test`, a `@figure`) uses `E`. `run=false`
+shows the source only (no evaluation). It captures the block's **return value** (not stdout).
+
+Content, not structure (law II): it needs `using Pinax`, is purely additive, and has no bearing on a
+verdict — a Documenter `@example`-like block, rendered as code + output by every backend.
+"""
+macro code(args...)
+    isempty(args) && error("@code needs an expression")
+    expr = nothing
+    kws = Expr[]
+    run = true
+    # A `key = value` arg is a KEYWORD only for the reserved names — anything else with `head === :(=)`
+    # is the expression itself (an assignment like `E = compute(x)`, the common case). So `@code caption`
+    # is reserved; a variable literally named `caption` cannot be the shown assignment (as in `@table`).
+    for a in args
+        if a isa Expr &&
+            a.head === :(=) &&
+            a.args[1] isa Symbol &&
+            a.args[1] in (:caption, :id, :lang, :run)
+            a.args[1] === :run ? (run = a.args[2] === true) : push!(kws, a)
+        elseif expr === nothing
+            expr = a
+        else
+            error("@code takes a single expression (plus kwargs)")
+        end
+    end
+    expr === nothing && error("@code needs an expression")
+    src = _code_str(expr)
+    _kw(k, v) = Expr(:kw, k, v)
+    ksrc = _kw(:source, src)
+    isassign = expr isa Expr && expr.head === :(=) && expr.args[1] isa Symbol
+    isdefn =
+        expr isa Expr && (
+            expr.head in _CODE_STMT_HEADS ||
+            (expr.head === :(=) && !(expr.args[1] isa Symbol))
+        )
+    if !run
+        # show-only — do not evaluate at all
+        return Expr(
+            :block,
+            Expr(
+                :call,
+                _push_code!,
+                Expr(:parameters, ksrc, _kw(:output, ""), _kwspecs(kws)...),
+            ),
+            nothing,
+        )
+    elseif isassign
+        # a simple `sym = rhs`: run it BARE (so `sym` leaks to the caller exactly as without @code),
+        # then read the value back off `sym` — capturing output without a wrapper that would relocalise.
+        sym = expr.args[1]
+        params = Expr(
+            :parameters,
+            ksrc,
+            _kw(:output, Expr(:call, _repr_output, esc(sym))),
+            _kwspecs(kws)...,
+        )
+        return Expr(:block, esc(expr), Expr(:call, _push_code!, params), esc(sym))
+    elseif isdefn
+        # a function/other definition or a compound statement: run BARE (its scoping must be identical
+        # to writing it without @code — a value wrapper would relocalise the definition); no output.
+        params = Expr(:parameters, ksrc, _kw(:output, ""), _kwspecs(kws)...)
+        return Expr(:block, esc(expr), Expr(:call, _push_code!, params), nothing)
+    else
+        # a pure expression (leaks nothing): wrap it to capture its value as the output.
+        v = gensym(:codeval)
+        params = Expr(
+            :parameters, ksrc, _kw(:output, Expr(:call, _repr_output, v)), _kwspecs(kws)...
+        )
+        return Expr(:block, Expr(:(=), v, esc(expr)), Expr(:call, _push_code!, params), v)
+    end
+end
+
+# Heads that must run BARE under `@code` (a value-capturing wrapper would change their scoping): a
+# definition, a control-flow / scope block, an import, etc.
+const _CODE_STMT_HEADS = (
+    :function,
+    :block,
+    :const,
+    :for,
+    :while,
+    :let,
+    :struct,
+    :abstract,
+    :primitive,
+    :macro,
+    :module,
+    :using,
+    :import,
+    :global,
+    :local,
+    :do,
+    :toplevel,
+    :if,
+    :try,
+)
+
+# A code result rendered for display: the return value's `repr`, "" for `nothing`, bounded in size.
+function _repr_output(v)
+    v === nothing && return ""
+    s = try
+        repr(v)
+    catch
+        try
+            string(v)
+        catch
+            "«unprintable»"
+        end
+    end
+    return length(s) > 2000 ? string(first(s, 1997), "…") : s
+end
+
+function _push_code!(; source, output="", caption="", id=nothing, lang="julia")
+    c = _current_container()
+    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
+    c === nothing && error("@code outside of a @section or @page")
+    cid = id === nothing ? _auto_code_id(c) : Symbol(id)
+    blk = CodeBlock(
+        cid, _anchor(cid), string(source), string(output), string(caption), string(lang)
+    )
+    push!(c.codes, blk)
+    push!(c.content, :code => length(c.codes))
+    return blk
+end
+
 function _content_items(c)
     return [(
         k,
@@ -772,6 +924,8 @@ function _content_items(c)
             c.tables[i]
         elseif k === :check
             c.checks[i]
+        elseif k === :code
+            c.codes[i]
         else
             c.panels[i]
         end,

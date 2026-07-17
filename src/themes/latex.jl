@@ -168,8 +168,22 @@ function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx)
             _latex_emit_fig!(theme, item, assetdir, ctx)
         elseif kind === :table
             emit_table(theme, item, ctx)
+        elseif kind === :code
+            emit_code(theme, item, ctx)
         end
     end
+    return nothing
+end
+
+# A `@code` block → a verbatim listing of the source, then its captured output.
+function emit_code(::LaTeXBase, blk, ctx)
+    io = ctx.io
+    isempty(blk.caption) ||
+        println(io, "\\par\\noindent\\textbf{", _texesc(blk.caption), "}")
+    println(io, "\\begin{verbatim}")
+    println(io, blk.source)
+    isempty(blk.output) || (println(io, "# => "); println(io, blk.output))
+    println(io, "\\end{verbatim}")
     return nothing
 end
 

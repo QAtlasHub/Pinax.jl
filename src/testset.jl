@@ -215,8 +215,9 @@ struct TestNode
     figures::Vector{Figure}
     tables::Vector{Table}
     panels::Vector{String}
+    codes::Vector{CodeBlock}
     desc::Union{Desc,Nothing}
-    content::Vector{Pair{Symbol,Int}}   # declaration order of figures/tables/panels/checks
+    content::Vector{Pair{Symbol,Int}}   # declaration order of figures/tables/panels/checks/codes
 end
 
 function TestNode(
@@ -230,6 +231,7 @@ function TestNode(
     figures::Vector{Figure}=Figure[],
     tables::Vector{Table}=Table[],
     panels::Vector{String}=String[],
+    codes::Vector{CodeBlock}=CodeBlock[],
     desc::Union{Desc,Nothing}=nothing,
     content::Vector{Pair{Symbol,Int}}=Pair{Symbol,Int}[],
 )
@@ -244,6 +246,7 @@ function TestNode(
         figures,
         tables,
         panels,
+        codes,
         desc,
         content,
     )
@@ -899,9 +902,15 @@ function _emit_own_content!(n, counter::Ref{Int}, acc::Vector{Check})
     c = _ctx_container()
     c === nothing && return acc
     n.desc === nothing || (c.desc = n.desc)
-    if isempty(n.content) && !isempty(n.checks)
+    # A merged shard `TestNode` carries checks + codes but no interleaved `content` (a live
+    # `PinaxTestSet` does) — place them directly, checks then codes, so a dumped `@code` still shows.
+    if isempty(n.content) && (!isempty(n.checks) || !isempty(n.codes))
         for chk in n.checks
             _place_check!(c, chk, counter, acc)
+        end
+        for blk in n.codes
+            push!(c.codes, blk)
+            push!(c.content, :code => length(c.codes))
         end
         return acc
     end
@@ -917,6 +926,9 @@ function _emit_own_content!(n, counter::Ref{Int}, acc::Vector{Check})
         elseif kind === :panel
             push!(c.panels, n.panels[i])
             push!(c.content, :panel => length(c.panels))
+        elseif kind === :code
+            push!(c.codes, n.codes[i])
+            push!(c.content, :code => length(c.codes))
         end
     end
     return acc
@@ -1203,8 +1215,29 @@ function _node_to_dict(n)
     # TOML has no NaN, so an unmeasured elapsed is simply absent.
     isnan(n.elapsed) || (d["elapsed"] = n.elapsed)
     isempty(n.checks) || (d["check"] = [_check_to_dict(c) for c in n.checks])
+    # `@code` blocks are plain strings (unlike a `@figure` closure), so they DO cross a shard dump.
+    isempty(n.codes) || (d["code"] = [_code_to_dict(c) for c in n.codes])
     isempty(n.children) || (d["child"] = [_node_to_dict(c) for c in n.children])
     return d
+end
+function _code_to_dict(c::CodeBlock)
+    return Dict{String,Any}(
+        "id" => String(c.id),
+        "source" => c.source,
+        "output" => c.output,
+        "caption" => c.caption,
+        "lang" => c.lang,
+    )
+end
+function _dict_to_code(d::AbstractDict)
+    return CodeBlock(
+        Symbol(d["id"]),
+        _anchor(Symbol(d["id"])),
+        d["source"],
+        get(d, "output", ""),
+        get(d, "caption", ""),
+        get(d, "lang", "julia"),
+    )
 end
 
 # `id` is deliberately NOT dumped: it is assigned at render time (t1, t2, …) so that merging several
@@ -1231,6 +1264,7 @@ function _dict_to_node(d::AbstractDict)
         nbroken=get(d, "nbroken", 0),
         nerror=get(d, "nerror", 0),
         checks=Check[_dict_to_check(c) for c in get(d, "check", Any[])],
+        codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
         children=TestNode[_dict_to_node(c) for c in get(d, "child", Any[])],
     )
 end

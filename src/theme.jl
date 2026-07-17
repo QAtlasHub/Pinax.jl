@@ -56,6 +56,9 @@ function emit_table end
 "Render one `@expect` check (a gallery `<tr>`, a LaTeX tabular row, or a JSON check object). `emit_check(theme, check, ctx)`."
 function emit_check end
 
+"Render one `@code` block (source + captured output). `emit_code(theme, codeblock, ctx)`."
+function emit_code end
+
 "Render a markdown+math source (a `@desc`/`@caption`). `emit_text(theme, source, item, ctx; block)`."
 function emit_text end
 
