@@ -486,4 +486,56 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
             @test occursin("1/3", md)                              # verdict preserved (only χ=32 passes)
         end
     end
+
+    @testset "provenance — the report records WHEN / WHAT / WHERE it ran (H)" begin
+        # A green report with no commit or date is indistinguishable from a stale one. Provenance is
+        # captured non-fatally (any unreadable field is omitted, never an error), with CI variables
+        # preferred over a local `git` probe (reliable inside the `Pkg.test` sandbox).
+        withenv(
+            "GITHUB_SHA" => "0123456789abcdef",
+            "GITHUB_REF_NAME" => "feat/x",
+            "GITHUB_REPOSITORY" => "Org/Pkg.jl",
+        ) do
+            rows = Pinax._provenance_rows()
+            @test any(r -> r.field == "generated", rows)
+            @test any(r -> r.field == "julia" && r.value == string(VERSION), rows)
+            @test any(r -> r.field == "commit" && r.value == "0123456789ab", rows)  # 12 chars, from CI
+            @test any(r -> r.field == "repo" && r.value == "Org/Pkg.jl", rows)
+
+            # …and it reaches the rendered overview + agent.json
+            n = TestNode(
+                "Test report";
+                children=[
+                    TestNode(
+                        "test_a.jl";
+                        checks=[Check(:t, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+                    ),
+                ],
+            )
+            out = joinpath(mktempdir(), "rep")
+            render_test_report(n; out=out)
+            md = read(joinpath(out * "_agent", "agent.md"), String)
+            @test occursin("Provenance", md) && occursin("feat/x", md)
+        end
+
+        # the package line reads name@version from a project file; empty/absent → "" (never an error)
+        proj = joinpath(mktempdir(), "Project.toml")
+        write(proj, "name = \"Demo\"\nversion = \"1.2.3\"\n")
+        @test Pinax._package_line(proj) == "Demo v1.2.3"
+        @test Pinax._package_line(nothing) == ""
+        @test Pinax._package_line(joinpath(tempdir(), "nope-missing.toml")) == ""
+        write(proj, "version = \"1.2.3\"\n")   # no name → ""
+        @test Pinax._package_line(proj) == ""
+
+        # with the CI variables unset, the local `git` probe runs and empty CI fields are omitted
+        withenv(
+            "GITHUB_SHA" => nothing,
+            "GITHUB_REPOSITORY" => nothing,
+            "GITHUB_REF_NAME" => nothing,
+        ) do
+            rows = Pinax._provenance_rows()
+            @test any(r -> r.field == "generated", rows)
+            @test !any(r -> r.field == "repo", rows)   # an empty CI repo is omitted, not blank
+        end
+    end
 end

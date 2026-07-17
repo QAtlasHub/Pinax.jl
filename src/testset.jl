@@ -905,6 +905,51 @@ function _collect_rows!(rows::Vector{NamedTuple}, n, page_when::Function)
     return rows
 end
 
+# ── provenance (issue #69 H) ─────────────────────────────────────────
+#
+# The facts a test artifact must record to not lie: WHEN it ran, against WHAT code, on WHICH Julia/OS.
+# A green report with no commit/date is indistinguishable from a stale one, and a stochastic suite with
+# no recorded seed/commit is an artifact you cannot trust. Captured NON-FATALLY at render — any field
+# that cannot be read is simply omitted (never an error, invariant IV) — with CI variables preferred
+# over a local `git` probe (they are reliable inside the `Pkg.test` sandbox, where `git` may be absent).
+function _provenance_rows()
+    rows = NamedTuple[]
+    add(f, v) =
+        (v === nothing || isempty(string(v))) || push!(rows, (field=f, value=string(v)))
+    add("generated", Base.Libc.strftime("%Y-%m-%d %H:%M:%S", time()))
+    add("julia", VERSION)
+    add("os", string(Sys.KERNEL, " / ", Sys.ARCH))
+    add("threads", Threads.nthreads())
+    sha = get(ENV, "GITHUB_SHA", "")
+    isempty(sha) && (sha = try
+        readchomp(pipeline(`git rev-parse HEAD`; stderr=devnull))
+    catch
+        ""
+    end)
+    isempty(sha) || add("commit", first(sha, 12))
+    add("repo", get(ENV, "GITHUB_REPOSITORY", ""))
+    add("ref", get(ENV, "GITHUB_REF_NAME", ""))
+    add("package", _active_package_line())
+    return rows
+end
+
+_active_package_line() = _package_line(Base.active_project())
+
+# `name v<version>` from a Project.toml, or "" if it has no name / cannot be read (non-fatal). Split
+# from the `Base.active_project()` lookup so the parse is unit-testable without activating an env.
+function _package_line(p)
+    try
+        (p === nothing || !isfile(p)) && return ""
+        d = TOML.parsefile(p)
+        name = get(d, "name", "")
+        isempty(name) && return ""
+        ver = get(d, "version", "")
+        return isempty(ver) ? String(name) : "$(name) v$(ver)"
+    catch
+        return ""
+    end
+end
+
 """
     render_test_report(root::TestNode; out, title="Test report", page_when=…) -> (; gallery, agent)
     render_test_report(dumps::AbstractVector{<:AbstractString}; out, …)       -> (; gallery, agent)
@@ -928,11 +973,19 @@ function render_test_report(
 )
     reset!(; title=title)
     counter = Ref(0)
-    seen = Set{Symbol}((:overview, :per_file))   # ids the overview page already owns
+    seen = Set{Symbol}((:overview, :per_file, :provenance))   # ids the overview page already owns
     # An overview page first: one row per file, so the whole suite is one glance — and the SAME rows
     # land in agent.json as data, so an LLM reads the suite without scraping a log.
     _enter_page!(:overview, title; layout=:wide, summary=_summary_line(root))
     try
+        prov = _provenance_rows()
+        isempty(prov) || _push_table!(;
+            data=prov,
+            code="",
+            caption="Provenance — when this report ran, against what code, on which Julia / OS. " *
+                    "A report that omits these cannot be told apart from a stale one.",
+            id=:provenance,
+        )
         rows = NamedTuple[]
         _collect_rows!(rows, root, page_when)
         isempty(rows) || _push_table!(;
