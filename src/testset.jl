@@ -336,26 +336,45 @@ end
 _xml(s) = replace(String(s), "&" => "&amp;", "<" => "&lt;", ">" => "&gt;", "\"" => "&quot;")
 _fmt_margin(m) = m >= 10 ? "$(round(Int, m))×" : "$(round(m; digits=2))"
 
+# The largest number of bars the per-page margin figure draws (issue #69 J): a 10k-check suite would
+# otherwise emit a 10k-bar SVG that no one can read. We keep the WORST `_MAX_MARGIN_BARS` (highest
+# delta/tol — so every failure and every near-miss survives; only comfortably-passing bars are dropped),
+# and the caption says how many of how many are shown. The full per-check data is still in `agent.json`.
+const _MAX_MARGIN_BARS = 40
+
 # The figure for one page's checks: how far each assertion sat from its own tolerance.
 function _push_margin_figure!(page_id::Symbol, checks::Vector{Check})
     isempty(checks) && return nothing
+    total = length(checks)
+    shown = if total <= _MAX_MARGIN_BARS
+        checks
+    else
+        checks[partialsortperm(checks, 1:_MAX_MARGIN_BARS; by=_margin, rev=true)]
+    end
+    capped = length(shown) < total
     # `data=` must be plot-data (`series=[(; label, x, y)]`) — it is the figure's TEXT channel for the
     # agent backend. The per-check got/want/tol already ride along in the benchmark `checks` JSON, so
     # the series carries only what the picture itself shows: the margin of check i.
-    xs = collect(1:length(checks))
+    xs = collect(1:length(shown))
     data = (;
         xlabel="check #",
         ylabel="delta / tol",
         series=[
-            (; label="margin", x=xs, y=[_margin(c) for c in checks]),
+            (; label="margin", x=xs, y=[_margin(c) for c in shown]),
             (; label="pass/fail boundary", x=xs, y=fill(1.0, length(xs))),
         ],
     )
+    cap_note = if capped
+        " Showing the $(length(shown)) worst of $(total) checks (the rest are in agent.json)."
+    else
+        ""
+    end
     _push_figure!(;
-        gen=() -> _margin_svg(checks, tempname() * ".svg"),
+        gen=() -> _margin_svg(shown, tempname() * ".svg"),
         code="",
         caption="Tolerance budget spent by each check. The dashed line is the pass/fail " *
-                "boundary — a bar close to it passed, but barely.",
+                "boundary — a bar close to it passed, but barely." *
+                cap_note,
         id=Symbol(page_id, :_margins),
         data=data,
     )

@@ -116,6 +116,7 @@ const _GALLERY_CSS = """
   .pinax-checks tr.pinax-pass .pinax-badge{color:#1a7f37}
   .pinax-checks tr.pinax-fail .pinax-badge{color:#a40e26}
   .pinax-checks .pinax-src{color:#8a949e;font:11px ui-monospace,SFMono-Regular,Menlo,monospace}
+  .pinax-checks tr.pinax-more td{color:#6a737d;font-style:italic;background:#f6f8fa}
   figure{margin:0;border:1px solid #e2e5e9;border-radius:8px;padding:.5rem;background:#fdfdfe}
   figure img{width:100%;height:auto}
   figure iframe.pinax-pdf{width:100%;height:460px;border:1px solid #eee;border-radius:4px;background:#fff}
@@ -1320,11 +1321,46 @@ function _emit_benchmark!(theme::GalleryBase, pg, ctx)
         "<table class=\"pinax-checks\"><thead><tr><th></th><th>id</th><th>label</th>",
         "<th>got</th><th>want</th><th>Δ vs tol (kind)</th></tr></thead><tbody>",
     )
-    for chk in checks
+    # At scale (a 10k-check suite) a full HTML table is unusable, so the HUMAN gallery caps the rows —
+    # FAILURES first and never silently (a summary row states exactly how many are hidden), while
+    # `agent.json` and the shard dump stay complete (issue #69 J). The verdict above is over ALL checks.
+    shown, hidden_fail, hidden_pass = _cap_gallery_checks(checks, _MAX_CHECK_ROWS)
+    for chk in shown
         emit_check(theme, chk, ctx)
+    end
+    if hidden_fail + hidden_pass > 0
+        parts = String[]
+        hidden_fail > 0 && push!(parts, "$(hidden_fail) failing")
+        hidden_pass > 0 && push!(parts, "$(hidden_pass) passing")
+        println(
+            io,
+            "<tr class=\"pinax-more\"><td></td><td></td><td colspan=\"4\">… ",
+            join(parts, " + "),
+            " more not shown (all ",
+            v.total,
+            " checks are in <code>agent.json</code>)</td></tr>",
+        )
     end
     println(io, "</tbody></table></div>")
     return nothing
+end
+
+# Cap the rows a benchmark page draws for a human: failures first (never hidden before a pass), then as
+# many passes as fit. Returns (shown, hidden_failing, hidden_passing) — the caller states the hidden
+# counts. `agent.json` is uncapped, so nothing is lost, only deferred to the machine-readable artifact.
+const _MAX_CHECK_ROWS = 200
+function _cap_gallery_checks(checks, cap)
+    length(checks) <= cap && return (checks, 0, 0)
+    fails = filter(c -> !c.pass, checks)
+    passes = filter(c -> c.pass, checks)
+    shown_fail = fails[1:min(cap, length(fails))]
+    room = cap - length(shown_fail)
+    shown_pass = passes[1:min(max(room, 0), length(passes))]
+    return (
+        vcat(shown_fail, shown_pass),
+        length(fails) - length(shown_fail),
+        length(passes) - length(shown_pass),
+    )
 end
 
 # Emit a container's content (figures / tables / @raw panels) in DECLARATION order. Consecutive

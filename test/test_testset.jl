@@ -619,4 +619,42 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         aj = read(joinpath(dir, "rep_agent", "agent.json"), String)
         @test occursin("\"source\":\"test_x.jl:42\"", aj)
     end
+
+    @testset "at scale the human gallery caps rows; agent.json stays complete (J)" begin
+        # A 10k-check page is an unusable HTML table, so the gallery caps rows — FAILURES first and
+        # never silently (a summary row counts the hidden) — while agent.json and the shard dump stay
+        # complete and the verdict is over ALL checks.
+        mk(i, pass) = Check(
+            Symbol("t", i),
+            "chk $(i)",
+            pass ? 1.0 : 2.0,
+            1.0,
+            pass ? 0.0 : 1.0,
+            0.5,
+            :abs,
+            pass,
+        )
+        fails = (3, 50, 480)
+        checks = [mk(i, !(i in fails)) for i in 1:500]
+
+        shown, hf, hp = Pinax._cap_gallery_checks(checks, Pinax._MAX_CHECK_ROWS)
+        @test length(shown) == Pinax._MAX_CHECK_ROWS
+        @test count(c -> !c.pass, shown) == length(fails)          # every failure survives the cap
+        @test hf == 0 && hp == 500 - Pinax._MAX_CHECK_ROWS
+        small = checks[1:10]
+        @test Pinax._cap_gallery_checks(small, Pinax._MAX_CHECK_ROWS) == (small, 0, 0)  # small = all
+
+        out = joinpath(mktempdir(), "rep")
+        render_test_report(
+            TestNode("Test report"; children=[TestNode("big.jl"; checks=checks)]); out=out
+        )
+        html = read(joinpath(out * "_html", "big_jl.html"), String)
+        @test occursin("more not shown", html)                     # the loud summary row
+        @test occursin("$(500 - length(fails))/500", html)         # verdict over ALL 500
+        @test count("pinax-pass\"", html) + count("pinax-fail\"", html) <=
+            Pinax._MAX_CHECK_ROWS
+        @test occursin("worst of 500", html)                       # the margin figure capped too
+        aj = read(joinpath(out * "_agent", "agent.json"), String)
+        @test count("\"pass\":", aj) >= 500                        # agent.json enumerates every check
+    end
 end
