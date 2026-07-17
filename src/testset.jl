@@ -798,7 +798,12 @@ end
 # `n` is duck-typed: a live `PinaxTestSet` (direct render — carries user `@figure`/`@desc`/… too) or
 # a merged `TestNode` (a sharded run — checks + structure only). Same fold either way.
 function _emit_node!(
-    n, counter::Ref{Int}, page_when::Function, seen::Set{Symbol}, acc::Vector{Check}=Check[]
+    n,
+    counter::Ref{Int},
+    page_when::Function,
+    seen::Set{Symbol},
+    acc::Vector{Check}=Check[];
+    id_prefix::AbstractString="",
 )
     _emit_own_content!(n, counter, acc)
     # A level whose children are all canonical `@testset for` samples is a SWEEP, not a stack of
@@ -813,11 +818,16 @@ function _emit_node!(
     for ch in n.children
         ch.ignore && continue
         if page_when(ch.description)
-            pid = _unique_id!(seen, _slug(ch.description), ch.description)   # page ids are GLOBAL
+            # Page ids are GLOBAL. Under a CI matrix (issue #69 K) the same file appears in every cell,
+            # so `id_prefix` qualifies the id per cell — distinct pages under distinct `@part`s, no
+            # spurious duplicate-id collisions.
+            pid = _unique_id!(
+                seen, Symbol(id_prefix, _slug(ch.description)), ch.description
+            )
             _enter_page!(pid, ch.description; status=:benchmark, summary=_summary_line(ch))
             try
                 page_checks = Check[]
-                _emit_node!(ch, counter, page_when, seen, page_checks)
+                _emit_node!(ch, counter, page_when, seen, page_checks; id_prefix=id_prefix)
                 append!(acc, page_checks)
                 # Back at page level (every section closed), so the figure lands on the page.
                 _push_margin_figure!(pid, page_checks)
@@ -829,7 +839,7 @@ function _emit_node!(
             # `@testset "MyPkg"` that most runtests wrap everything in) → flatten it: its children
             # become top-level pages, exactly as `_collect_rows!` already treats it. A section needs a
             # page, which a grouping at this level does not provide.
-            _emit_node!(ch, counter, page_when, seen, acc)
+            _emit_node!(ch, counter, page_when, seen, acc; id_prefix=id_prefix)
         else
             # A child that parses as a canonical binding but is being rendered as a SECTION means its
             # siblings are not a consistent sweep (mixed/partial) — so we did not fold. Say so once
@@ -850,7 +860,7 @@ function _emit_node!(
             )
             _enter_section!(sid, ch.description; summary=_summary_line(ch))
             try
-                _emit_node!(ch, counter, page_when, seen, acc)
+                _emit_node!(ch, counter, page_when, seen, acc; id_prefix=id_prefix)
             finally
                 _exit_section!()
             end
@@ -949,6 +959,7 @@ function _provenance_rows()
     isempty(sha) || add("commit", first(sha, 12))
     add("repo", get(ENV, "GITHUB_REPOSITORY", ""))
     add("ref", get(ENV, "GITHUB_REF_NAME", ""))
+    add("matrix", report_matrix())     # the CI matrix cell (issue #69 K), when set — a single-cell report is self-identifying
     add("package", _active_package_line())
     return rows
 end
@@ -1029,9 +1040,17 @@ function render_test_report(
     dumps::AbstractVector{<:AbstractString}; title::AbstractString="Test report", kwargs...
 )
     isempty(dumps) && error("Pinax.render_test_report: no dumps given.")
-    roots = [load_test_dump(d) for d in dumps]
-    # The shards partition the test FILES, so their children are disjoint and concatenating them is
-    # the whole merge. Elapsed time is summed, not maxed: it is CPU time spent, not wall clock.
+    parsed = [TOML.parsefile(d) for d in dumps]
+    roots = [_dict_to_node(d["root"]) for d in parsed]
+    cells = [String(get(d, "matrix", "")) for d in parsed]
+    # A CI MATRIX (issue #69 K): ≥2 distinct cells means the SAME files ran in each cell — NOT disjoint
+    # like shards — so we group each cell under a `@part` rather than concatenating (which would merge
+    # cells away). One report, structure preserved, navigable by cell; the cell IS the provenance.
+    if length(unique(c for c in cells if !isempty(c))) >= 2
+        return _render_matrix(roots, cells; title=title, kwargs...)
+    end
+    # SHARDS: the shards partition the test FILES, so their children are disjoint and concatenating is
+    # the whole merge (invariant VI). Elapsed time is summed, not maxed: CPU time spent, not wall clock.
     merged = TestNode(
         title;
         elapsed=sum(r -> isnan(r.elapsed) ? 0.0 : r.elapsed, roots; init=0.0),
@@ -1041,6 +1060,70 @@ function render_test_report(
         nerror=sum(r -> r.nerror, roots; init=0),
     )
     return render_test_report(merged; title=title, kwargs...)
+end
+
+# A CI matrix merge (issue #69 K): each cell is a `@part` holding that cell's file pages (ids qualified
+# by the cell so the same file across cells does not collide). One overview across all cells, then the
+# cells; nothing is merged away and the file structure is preserved. The `julia/os/commit` provenance
+# of a merge job is not the cells', so the cell label carries that instead.
+function _render_matrix(
+    roots,
+    cells;
+    out::AbstractString,
+    title::AbstractString="Test report",
+    page_when::Function=_looks_like_a_file,
+)
+    pairs = [(r, c) for (r, c) in zip(roots, cells) if !isempty(c)]
+    reset!(; title=title)
+    counter = Ref(0)
+    seen = Set{Symbol}((:overview, :per_file, :provenance))
+    allfiles = reduce(vcat, (r.children for (r, _) in pairs); init=TestNode[])
+    rowsroot = TestNode(
+        title;
+        children=allfiles,
+        checks=reduce(vcat, (r.checks for (r, _) in pairs); init=Check[]),
+        nbroken=sum(((r, _),) -> r.nbroken, pairs; init=0),
+        nerror=sum(((r, _),) -> r.nerror, pairs; init=0),
+        elapsed=sum(((r, _),) -> isnan(r.elapsed) ? 0.0 : r.elapsed, pairs; init=0.0),
+    )
+    _enter_page!(:overview, title; layout=:wide, summary=_summary_line(rowsroot))
+    try
+        _push_table!(;
+            data=[(;
+                field="matrix cells", value=join(unique(c for (_, c) in pairs), "  ·  ")
+            )],
+            code="",
+            id=:provenance,
+            caption="This report merges CI matrix cells (issue #69 K); each cell is a part below. " *
+                    "The provenance (Julia / OS / commit) is the cell label — a merge job's own is not the cells'.",
+        )
+        rows = NamedTuple[]
+        for (r, c) in pairs
+            cr = NamedTuple[]
+            _collect_rows!(cr, r, page_when)
+            append!(rows, (merge((; cell=c), row) for row in cr))
+        end
+        isempty(rows) || _push_table!(;
+            data=rows,
+            code="",
+            id=:per_file,
+            caption="Per-cell, per-file result profile. `worst margin` is the largest `delta/tol` in that (cell, file).",
+        )
+    finally
+        _exit_page!()
+    end
+    for (r, c) in pairs
+        _enter_part!(Symbol("cell_", _slug(c)), c)
+        try
+            _emit_node!(r, counter, page_when, seen; id_prefix=string(_slug(c), "_"))
+        finally
+            _exit_part!()
+        end
+    end
+    doc = current_document()
+    gallery = render(doc; out="$(out)_html", theme=:gallery)
+    agent = render(doc; out="$(out)_agent", theme=:agent)
+    return (; gallery, agent)
 end
 
 # ── the dump (how a sharded run gets merged) ─────────────────────────
@@ -1059,8 +1142,11 @@ function dump_test_report(root, path::AbstractString)
     dir = dirname(path)
     isempty(dir) || mkpath(dir)
     _warn_if_undumpable(root)
+    d = Dict{String,Any}("root" => _node_to_dict(root))
+    m = report_matrix()
+    isempty(m) || (d["matrix"] = m)   # the CI matrix cell, so a later merge can group cells (#69 K)
     open(path, "w") do io
-        return TOML.print(io, Dict("root" => _node_to_dict(root)))
+        return TOML.print(io, d)
     end
     return path
 end
@@ -1143,3 +1229,6 @@ end
 
 "Where a shard writes its tree instead of rendering (`PINAX_TEST_DUMP`); empty = render directly."
 report_dump() = get(ENV, "PINAX_TEST_DUMP", "")
+
+"The CI matrix cell this run belongs to (`PINAX_TEST_MATRIX`, e.g. `\"julia 1.11 · ubuntu\"`); empty = not a matrix run. Set by the CI job; carried into the dump so a later merge can group cells (issue #69 K)."
+report_matrix() = get(ENV, "PINAX_TEST_MATRIX", "")
