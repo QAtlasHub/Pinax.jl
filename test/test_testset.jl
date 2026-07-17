@@ -760,6 +760,10 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         @test [c.output for c in codes] == ["42", "1024", "", ""]  # value / value / defn / show-only
         @test codes[1].source == "y = 6 * 7" && codes[4].source == "z = boom()"
 
+        # it renders in every backend (gallery/agent covered below; here the LaTeX verbatim)
+        tex = read(Pinax.render(; out=joinpath(mktempdir(), "tex"), theme=:latex), String)
+        @test occursin("y = 6 * 7", tex) && occursin("\\begin{verbatim}", tex)
+
         # captured into a test (a PinaxTestSet), rides a dump, and renders in every backend
         root = PinaxTestSet("cap")
         Test.push_testset(root)
