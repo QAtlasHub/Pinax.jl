@@ -28,8 +28,8 @@ using Pinax:
     dump_test_report,
     render_test_report,
     report_dump,
-    report_enabled,
-    report_out
+    report_out,
+    report_title
 using Test: Test, AbstractTestSet
 
 function __init__()
@@ -46,16 +46,6 @@ function _current_test_container()
     ts = Test.get_testset()
     return ts isa PinaxTestSet ? ts : :inert
 end
-
-"""
-    _testset_type() -> Type
-
-`Test.DefaultTestSet` unless the report is switched on — see `Pinax.testset_type`. Falling back to
-the STOCK type (rather than to a Pinax set that merely skips rendering) is the point: with the env
-var unset there is no new code in the test path at all, so turning the bridge on cannot regress a
-suite that was passing.
-"""
-_testset_type() = report_enabled() ? PinaxTestSet : Test.DefaultTestSet
 
 # The testset IS a Pinax container: the same fields a `Section`/`Page` carries, so the content macros
 # push into it duck-typed through the seam, and the fold moves the real structs with no second model.
@@ -84,9 +74,10 @@ mutable struct PinaxTestSet <: AbstractTestSet
     title::String
 end
 
-# Both entry points land here: `@pinaxtestset "…"` (options only ever on the ROOT), and a NESTED
-# @testset, which Julia constructs from the parent's TYPE as `T(desc)` — with no options at all,
-# which is exactly why the root's options have to be able to come from the environment.
+# The ROOT is constructed with options (by `Pinax.test`'s in-process `@testset PinaxTestSet` or the
+# delegation preamble); a NESTED `@testset` is constructed by Julia from the parent's TYPE as
+# `T(desc)` with no options — which is exactly why the root's options come from the environment
+# (`Pinax.test` sets `PINAX_TEST_OUT` / `_DUMP` / `_TITLE`).
 function PinaxTestSet(
     description::AbstractString;
     out=report_out(),
@@ -177,22 +168,69 @@ function Test.finish(ts::PinaxTestSet)
     return ts
 end
 
-# The interface `Pinax.test` (docstring in src/testset.jl): open a capturing root and include the
-# suite. In the EXTENSION, `PinaxTestSet` is an ordinary visible name, so this is a plain
-# `@testset PinaxTestSet` — no gensym, no per-suite token; the suite the user writes is pure `@testset`.
-# `out` rides the env the constructor reads; the root's `finish` renders and re-throws on a red suite.
+# The interface `Pinax.test` (docstring in src/testset.jl). In the EXTENSION, `PinaxTestSet` is an
+# ordinary visible name, so the in-process form is a plain `@testset PinaxTestSet` — no gensym, no
+# per-suite token; the suite the user writes is pure `@testset`.
+
+# `Pinax.test(runtests)` — render a specific file in the CURRENT process (no sandbox): a capturing
+# root, include, render. The root's `finish` renders and re-throws on a red suite.
 function Pinax.test(
-    runtests::AbstractString="test/runtests.jl";
-    out=report_out(),
-    title::AbstractString="Test report",
+    runtests::AbstractString; out=report_out(), title::AbstractString=report_title()
 )
     file = abspath(runtests)
     isfile(file) || error("Pinax.test: no such test file — $(file)")
-    withenv("PINAX_TEST_OUT" => String(out)) do
+    # A fresh `Module()` has NO module-local `include` / `eval` (unlike a `module … end`), so a
+    # `runtests.jl` that `include`s its test files would hit `UndefVarError: include`. Define them.
+    m = Module(gensym(:PinaxTest))
+    Core.eval(m, :(include(p) = $(Base.include)($m, p)))
+    Core.eval(m, :(eval(x) = $(Core.eval)($m, x)))
+    withenv("PINAX_TEST_OUT" => String(out), "PINAX_TEST_TITLE" => String(title)) do
         Test.@testset PinaxTestSet "$(title)" begin
-            Base.include(Module(gensym(:PinaxTest)), file)
+            Base.include(m, file)
         end
     end
+    return nothing
+end
+
+# The `Pkg.test`-delegation half (called by the `-L` preamble): push an UNBALANCED capturing root, so
+# the suite's top-level `@testset` — which the preamble runs BEFORE — inherits it and records into it.
+# Test never `finish`es our root, so its natural throw is suppressed; the atexit hook re-imposes the
+# verdict via the process exit code.
+function Pinax._install_test_capture!()
+    # The `-L` preamble runs in EVERY `Pkg.test` subprocess. During precompilation (`generating_output`)
+    # our side effects (`push_testset`, `atexit`) would break the cache image — and there is no suite to
+    # capture there anyway — so install NOTHING then. The cache-flags probe is handled by the empty-root
+    # guard in `_finalize_test_capture!` (it installs but renders nothing). Only the test run captures.
+    Base.generating_output() && return nothing
+    root = PinaxTestSet(
+        report_title(); out=report_out(), dump=report_dump(), title=report_title()
+    )
+    Test.push_testset(root)
+    atexit(() -> _finalize_test_capture!(root))
+    return nothing
+end
+
+function _finalize_test_capture!(root::PinaxTestSet)
+    Test.get_testset_depth() > 0 && Test.pop_testset()
+    # A `-L` preamble runs in EVERY `Pkg.test` subprocess — the cache-flags probe and precompile, not
+    # just the test run — and those capture nothing. An empty root therefore means "not the test run":
+    # do nothing (no render, no print, no exit) so their stdout stays clean for `Pkg` to parse.
+    (isempty(root.children) && isempty(root.checks)) && return nothing
+    if root.ignore
+        nothing
+    elseif !isempty(root.dump)
+        dump_test_report(root, root.dump)
+        println("\nPinax test report: ", _summary_line(root), "\n  dumped → ", root.dump)
+    else
+        render_test_report(root; out=root.out, title=root.title, page_when=root.page_when)
+        println(
+            "\nPinax test report: ",
+            _summary_line(root),
+            "\n  rendered → $(root.out)_html/  $(root.out)_agent/",
+        )
+    end
+    nfail, nerr = _nfail(root), _nerror(root)
+    (nfail + nerr > 0) && exit(1)   # red suite → nonzero exit (finish's throw can't fire in atexit)
     return nothing
 end
 
