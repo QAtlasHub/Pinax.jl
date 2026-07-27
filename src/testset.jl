@@ -1475,15 +1475,16 @@ function dump_test_report(root, path::AbstractString)
     return path
 end
 
-# A shard dump carries checks + structure only; a `@figure`/`@table`/`@raw` written inside a test is a
-# closure / raw HTML that cannot cross the process boundary yet (the E/L follow-up). Warn loudly
-# rather than drop it silently — a sharded report would otherwise be missing content with no trace.
+# Everything a test captures crosses a shard dump EXCEPT a `@figure`: its `gen` is a closure, and a
+# closure cannot be serialized (materializing the asset into the dump would make the dump a directory —
+# deliberately not done). So the one exception is warned about loudly rather than dropped silently: a
+# sharded report must never be quietly missing content. `@desc` / `@table` / `@raw` / declaration order
+# all ride along, which is what makes the sharded and unsharded documents the same document.
 function _warn_if_undumpable(n)
-    if !isempty(n.figures) || !isempty(n.tables) || !isempty(n.panels)
-        @warn "Pinax: @figure/@table/@raw inside a test is not carried through a shard dump yet — \
-               it appears in a direct (non-sharded) render only." testset = n.description maxlog =
-            1
-    end
+    isempty(n.figures) ||
+        @warn "Pinax: a `@figure` written inside a test cannot cross a shard dump \
+               (its generator is a closure) — it appears in a direct \
+               (non-sharded) render only." testset = n.description maxlog = 1
     foreach(_warn_if_undumpable, n.children)
     return nothing
 end
@@ -1505,10 +1506,50 @@ function _node_to_dict(n)
     # TOML has no NaN, so an unmeasured elapsed is simply absent.
     isnan(n.elapsed) || (d["elapsed"] = n.elapsed)
     isempty(n.checks) || (d["check"] = [_check_to_dict(c) for c in n.checks])
-    # `@code` blocks are plain strings (unlike a `@figure` closure), so they DO cross a shard dump.
+    # Everything except a `@figure` closure is plain data, so it crosses the dump — and so does the
+    # DECLARATION ORDER, without which a merged shard would re-order its own content (issue #67: the
+    # sharded and unsharded documents must be the same document, by construction).
     isempty(n.codes) || (d["code"] = [_code_to_dict(c) for c in n.codes])
+    isempty(n.tables) || (d["table"] = [_table_to_dict(t) for t in n.tables])
+    isempty(n.panels) || (d["panel"] = collect(n.panels))
+    n.desc === nothing || (d["desc"] = n.desc.source)
+    isempty(n.content) || (
+        d["content"] = [
+            Dict{String,Any}("kind" => String(k), "i" => i) for (k, i) in n.content
+        ]
+    )
     isempty(n.children) || (d["child"] = [_node_to_dict(c) for c in n.children])
     return d
+end
+
+# TOML has no `missing` / `nothing` and no arbitrary objects, so a cell outside its type system is
+# carried as its display string — the same text the gallery would have shown for it.
+_toml_cell(x::Union{Real,Bool,AbstractString}) = x
+_toml_cell(x) = _cellstr(x)
+
+function _table_to_dict(t::Table)
+    t.params === nothing ||
+        @warn "Pinax: a `@table`'s `params` are not carried through a shard \
+               dump — the table's data and caption are." table = t.id maxlog = 1
+    return Dict{String,Any}(
+        "id" => String(t.id),
+        "caption" => t.caption,
+        "header" => collect(t.header),
+        "rows" => [[_toml_cell(c) for c in row] for row in t.rows],
+        "code" => t.code,
+    )
+end
+function _dict_to_table(d::AbstractDict)
+    id = Symbol(d["id"])
+    return Table(
+        id,
+        _anchor(id),
+        get(d, "caption", ""),
+        String[string(h) for h in get(d, "header", Any[])],
+        Vector{Any}[Any[c for c in row] for row in get(d, "rows", Any[])],
+        get(d, "code", ""),
+        nothing,
+    )
 end
 function _code_to_dict(c::CodeBlock)
     return Dict{String,Any}(
@@ -1557,6 +1598,16 @@ function _dict_to_node(d::AbstractDict)
         nerror=get(d, "nerror", 0),
         checks=Check[_dict_to_check(c) for c in get(d, "check", Any[])],
         codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
+        tables=Table[_dict_to_table(t) for t in get(d, "table", Any[])],
+        panels=String[string(p) for p in get(d, "panel", Any[])],
+        desc=haskey(d, "desc") ? Desc(d["desc"]) : nothing,
+        # A `@figure` did not survive, so any `:figure` entry in the recorded order is dropped — the
+        # rest keeps its declared position (a legacy dump with no `content` falls back to checks-then-
+        # codes in `_emit_own_content!`).
+        content=Pair{Symbol,Int}[
+            Symbol(e["kind"]) => Int(e["i"]) for
+            e in get(d, "content", Any[]) if e["kind"] != "figure"
+        ],
         children=TestNode[_dict_to_node(c) for c in get(d, "child", Any[])],
     )
 end

@@ -132,6 +132,53 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         @test occursin("t1 —", md) && occursin("t2 —", md)
     end
 
+    @testset "a dump carries everything but the figure closure (issue #67)" begin
+        # Sharded and unsharded must be the SAME document. Everything a test captures is plain data
+        # except a `@figure` (its generator is a closure), so `@desc` / `@table` / `@raw` and the
+        # DECLARATION ORDER all cross the dump — otherwise a merged shard silently re-orders and
+        # drops its own content.
+        dir = mktempdir()
+        tbl = Pinax.Table(
+            :tb,
+            "tb",
+            "a caption",
+            ["N", "E"],
+            Vector{Any}[Any[10, -0.1], Any[20, missing]],
+            "tc",
+            nothing,
+        )
+        n = TestNode(
+            "f.jl";
+            checks=[Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+            codes=[CodeBlock(:c1, "c1", "E = f(x)", "", "", "julia")],
+            tables=[tbl],
+            panels=["<p>raw panel</p>"],
+            desc=Pinax.Desc("a description"),
+            content=Pair{Symbol,Int}[:code => 1, :check => 1, :table => 1, :panel => 1],
+        )
+        p = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
+        back = Pinax.load_test_dump(p).children[1]
+        @test back.desc.source == "a description"
+        @test back.tables[1].caption == "a caption"
+        @test back.tables[1].rows == Vector{Any}[Any[10, -0.1], Any[20, ""]]  # missing → its cell text
+        @test back.panels == ["<p>raw panel</p>"]
+        @test back.content ==
+            Pair{Symbol,Int}[:code => 1, :check => 1, :table => 1, :panel => 1]
+        render_test_report([p]; out=joinpath(dir, "rep"))
+        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+        @test all(
+            occursin(k, html) for
+            k in ("a description", "a caption", "raw panel", "E = f(x)")
+        )
+        # a captured `@figure` is the one exception, and it is LOUD rather than silent
+        fig = Pinax.Figure(
+            :f, "f", "", nothing, () -> "x.svg", "code", false, String[], nothing
+        )
+        @test_logs (:warn, r"cannot cross a shard dump") Pinax.dump_test_report(
+            TestNode("g.jl"; figures=[fig]), joinpath(dir, "g.toml")
+        )
+    end
+
     @testset "a broken test is counted, never painted red" begin
         # Test.Broken is not a Pass, so encoding it as a Check would give pass=false — a red bar and
         # a FAIL verdict for a test the runner is perfectly happy about.
