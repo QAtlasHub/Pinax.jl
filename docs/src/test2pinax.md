@@ -57,3 +57,28 @@ a **convergence** figure and a **margin** figure are derivable with no figure co
 renders to three backends from one document: `:gallery` (human), `:agent` (`agent.json`, for a
 reviewing agent), and `:latex`. Sharded CI needs nothing extra — each shard dumps its tree and one
 later job merges the dumps and renders once, so the shard boundary never appears in the output.
+
+## Sharding: TestShards
+
+"Sharded CI needs nothing extra" holds for the *dump and merge*, but not for the capture, and the gap
+was silent. [TestShards](https://github.com/QAtlasHub/TestShards.jl) runs each shardable unit inside a
+testset it builds by hand rather than through `@testset` — deliberately, so a failed unit can still be
+read back. `Test` builds a nested testset from its **parent's type**, which is the only reason the
+capture sees a suite at all, so with a unit's testset being TestShards' own, a `@shard` suite under
+`Pinax.test` rendered `0/0 passed`: empty **and** green, indistinguishable from a suite with no tests.
+
+`ext/PinaxTestShardsExt.jl` closes it, through the provider seam TestShards exposes
+(`register_unit_provider!`). Loading both packages is the whole setup:
+
+```julia
+using MyPackage, TestShards, Pinax
+TestShards.@shard begin
+    include("core/a.jl")
+    include("core/b.jl")
+end
+```
+
+Each unit becomes a page, its `@testset`s become sections, and the margins are there as usual. The
+provider **declines** unless a capture is ambient, so a bare `Pkg.test()` of a sharded suite runs
+exactly as it did before — the same invariant as everywhere else here: the report changes nothing
+about how the suite runs.

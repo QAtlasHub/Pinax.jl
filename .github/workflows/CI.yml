@@ -33,6 +33,40 @@ jobs:
           file: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  # ── The TestShards provider (`ext/PinaxTestShardsExt.jl`), which cannot be covered by the suite
+  # above: TestShards is not in General yet, so it cannot go in `[extras]` (`Pkg.test` would demand a
+  # registered package) and re-adding a `[sources]` entry would put this package's own registration
+  # back where it was. So it gets its own job and its own environment. This is the ONLY place that
+  # extension runs — a failure here means it is broken while every other check is green. Fold
+  # `test/ext/testshards.jl` in as `test/test_testshards.jl` once TestShards is registered — the
+  # suite globs `test_*.jl` in `test/` only — and delete this job.
+  testshards:
+    name: TestShards provider
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: '1'
+      - uses: julia-actions/cache@v3
+      - name: Compose with TestShards, end to end
+        # Coverage is collected and uploaded here too: this job is the only place the extension runs,
+        # so without it `ext/PinaxTestShardsExt.jl` reads as untested rather than as tested elsewhere.
+        run: |
+          julia --code-coverage=user --project=@testshards-int -e '
+            using Pkg
+            Pkg.develop(PackageSpec(; path = pwd()))
+            Pkg.add(PackageSpec(; url = "https://github.com/QAtlasHub/TestShards.jl", rev = "main"))
+            include(joinpath("test", "ext", "testshards.jl"))'
+      - uses: julia-actions/julia-processcoverage@v1
+        with:
+          directories: src,ext
+      - uses: codecov/codecov-action@v7
+        with:
+          file: lcov.info
+          flags: testshards
+          token: ${{ secrets.CODECOV_TOKEN }}
+
   # ── Design proof: the SAME plain-`@testset` suite (`test/runtests.jl`, no token) runs three ways.
   # `Pkg.test()` is the `test` job above (stock Test, no report); these two add the Pinax entry points.
   # All three green, with the same verdict, is the proof that Pinax renders a report without changing
