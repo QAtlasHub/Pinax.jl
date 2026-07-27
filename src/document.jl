@@ -149,11 +149,12 @@ mutable struct Check
     pass::Bool
     source::String     # "file:line" of the assertion (issue #69 I) — carried for a failing @test so the
     # report says WHERE, not just what; "" when unknown (a passing @test / a manuscript @expect).
-    code::String       # the test's SOURCE REGION (the computation + the assertion), captured from the
-    # file so a report shows the code that produced this profile, together with it; "" when unknown.
+    code_anchor::String   # anchor of the `CodeBlock` holding the code that produced this check — the
+    # code itself is ONE artifact in the document (a `@code` block), and this is the reference to it,
+    # never a second copy of the source; "" when there is none.
 end
-# Keep the 8-/9-arg positional forms working (source/code default to "") — every existing construction
-# is unchanged, and only the `Test` bridge, which has the `LineNumberNode`, fills them in.
+# Keep the 8-/9-arg positional forms working (source/code_anchor default to "") — every existing
+# construction is unchanged, and only the `Test` bridge, which has the `LineNumberNode`, fills them in.
 function Check(id, label, got, want, delta, tol, kind, pass)
     return Check(id, label, got, want, delta, tol, kind, pass, "", "")
 end
@@ -171,7 +172,7 @@ Documenter `@example`-like block, issue #69's recorded follow-up).
 mutable struct CodeBlock
     id::Symbol
     anchor::String
-    source::String        # the code, as written (deparsed)
+    source::String        # the code, as WRITTEN (read back from the file; deparsed only as a fallback)
     output::String        # captured value / printed output, or "" (show-only, or no result)
     caption::String
     lang::String          # syntax hint for the highlighter, e.g. "julia"
@@ -798,6 +799,13 @@ its result. `@code E = compute(χ)` renders the source `E = compute(χ)` and its
 still happens in the enclosing scope, so following code (a `@test`, a `@figure`) uses `E`. `run=false`
 shows the source only (no evaluation). It captures the block's **return value** (not stdout).
 
+The snippet is the source **as written** — read back from the file, so comments and formatting survive
+and a definition does not come back as a `begin`-blocked normal form. (Where there is no readable
+source file — a REPL, a Documenter `@example` — it falls back to deparsing the expression.)
+
+Inside a test, every `@test` already gets one of these automatically, holding the code that produced
+it; an explicit `@code` is for showing a computation deliberately (a definition above a sweep, say).
+
 Content, not structure (law II): it needs `using Pinax`, is purely additive, and has no bearing on a
 verdict — a Documenter `@example`-like block, rendered as code + output by every backend.
 """
@@ -824,7 +832,13 @@ macro code(args...)
     expr === nothing && error("@code needs an expression")
     src = _code_str(expr)
     _kw(k, v) = Expr(:kw, k, v)
-    ksrc = _kw(:source, src)
+    # `source` is the deparsed normal form; `at`/`ast` let `_push_code!` recover what was actually
+    # WRITTEN at that line (see `_verbatim_code`) and fall back to the deparse when it cannot.
+    ksrc = [
+        _kw(:source, src),
+        _kw(:at, (String(string(__source__.file)), __source__.line)),
+        _kw(:ast, QuoteNode(expr)),
+    ]
     isassign = expr isa Expr && expr.head === :(=) && expr.args[1] isa Symbol
     isdefn =
         expr isa Expr && (
@@ -838,7 +852,7 @@ macro code(args...)
             Expr(
                 :call,
                 _push_code!,
-                Expr(:parameters, ksrc, _kw(:output, ""), _kwspecs(kws)...),
+                Expr(:parameters, ksrc..., _kw(:output, ""), _kwspecs(kws)...),
             ),
             nothing,
         )
@@ -848,7 +862,7 @@ macro code(args...)
         sym = expr.args[1]
         params = Expr(
             :parameters,
-            ksrc,
+            ksrc...,
             _kw(:output, Expr(:call, _repr_output, esc(sym))),
             _kwspecs(kws)...,
         )
@@ -856,13 +870,16 @@ macro code(args...)
     elseif isdefn
         # a function/other definition or a compound statement: run BARE (its scoping must be identical
         # to writing it without @code — a value wrapper would relocalise the definition); no output.
-        params = Expr(:parameters, ksrc, _kw(:output, ""), _kwspecs(kws)...)
+        params = Expr(:parameters, ksrc..., _kw(:output, ""), _kwspecs(kws)...)
         return Expr(:block, esc(expr), Expr(:call, _push_code!, params), nothing)
     else
         # a pure expression (leaks nothing): wrap it to capture its value as the output.
         v = gensym(:codeval)
         params = Expr(
-            :parameters, ksrc, _kw(:output, Expr(:call, _repr_output, v)), _kwspecs(kws)...
+            :parameters,
+            ksrc...,
+            _kw(:output, Expr(:call, _repr_output, v)),
+            _kwspecs(kws)...,
         )
         return Expr(:block, Expr(:(=), v, esc(expr)), Expr(:call, _push_code!, params), v)
     end
@@ -907,14 +924,21 @@ function _repr_output(v)
     return length(s) > 2000 ? string(first(s, 1997), "…") : s
 end
 
-function _push_code!(; source, output="", caption="", id=nothing, lang="julia")
+function _push_code!(;
+    source, output="", caption="", id=nothing, lang="julia", at=nothing, ast=nothing
+)
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@code outside of a @section or @page")
     cid = id === nothing ? _auto_code_id(c) : Symbol(id)
-    blk = CodeBlock(
-        cid, _anchor(cid), string(source), string(output), string(caption), string(lang)
-    )
+    # Prefer the source as WRITTEN over the deparsed normal form (`_verbatim_code`, which returns
+    # `nothing` when the file is not readable — a REPL, a Documenter `@example`).
+    src = string(source)
+    if ast !== nothing && at !== nothing
+        v = _verbatim_code(at[1], at[2], ast)
+        v === nothing || (src = v)
+    end
+    blk = CodeBlock(cid, _anchor(cid), src, string(output), string(caption), string(lang))
     push!(c.codes, blk)
     push!(c.content, :code => length(c.codes))
     return blk

@@ -764,6 +764,25 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         tex = read(Pinax.render(; out=joinpath(mktempdir(), "tex"), theme=:latex), String)
         @test occursin("y = 6 * 7", tex) && occursin("\\begin{verbatim}", tex)
 
+        # the source is what was WRITTEN, not the deparsed normal form: `string(::Expr)` re-emits a
+        # one-line definition with a `begin` block and drops the file's own formatting.
+        Pinax.reset!()
+        @page :v "V" begin
+            @code caption = "quadrature" mid(n) =
+                sum(k -> 4 / (1 + ((k - 0.5) / n)^2), 1:n) / n
+            @code begin
+                s = 0                          # a comment survives, because this is the file's text
+                s += 1
+            end
+        end
+        vcodes = Pinax.current_document().pages[1].codes
+        @test startswith(vcodes[1].source, "mid(n) =")   # the `@code` + kwargs prefix is peeled off
+        @test occursin("sum(k -> 4 / (1 + ((k - 0.5) / n)^2), 1:n) / n", vcodes[1].source)
+        @test !occursin("begin", vcodes[1].source)      # the deparse would have introduced one
+        @test occursin("# a comment survives", vcodes[2].source)
+        # …and the deparse is still the fallback where there is no readable source file
+        @test Pinax._verbatim_code("/nonexistent/x.jl", 1, :(a = 1)) === nothing
+
         # captured into a test (a PinaxTestSet), rides a dump, and renders in every backend
         root = PinaxTestSet("cap")
         Test.push_testset(root)
@@ -789,33 +808,82 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         )
     end
 
-    @testset "each @test auto-captures its source region — code + profile together (default)" begin
-        # A test's computation + assertion is read from its file at record time and shown WITH its
-        # profile; the region runs from just after the PREVIOUS test (bounded), so consecutive tests
-        # don't repeat each other's setup.
+    @testset "each @test captures the code that produced it, as a @code artifact (default)" begin
+        # The region is read SYNTACTICALLY: the statements of the innermost block leading up to the
+        # assertion, from just after the previous assertion (so consecutive checks never repeat each
+        # other's setup), and Pinax content macros are dropped because each renders itself.
         f = joinpath(mktempdir(), "t.jl")
-        write(f, "a = 1\nb = 2\n@test a + b == 3\nc = 4\n@test c == 4\n")
-        mk(line) = Test.Fail(
-            :test, :x, "x", nothing, nothing, LineNumberNode(line, Symbol(f)), false
+        write(
+            f,
+            """
+            @testset "s" begin
+                a = 1
+                @desc md"noise"
+                b = 2
+                @test a + b == 3
+                c = 4
+                @test c == 4
+            end
+            """,
         )
-        empty!(Ext._REGION_LAST)
-        r3 = Ext._capture_region(mk(3))
-        r5 = Ext._capture_region(mk(5))
-        @test occursin("a = 1", r3) && occursin("@test a + b == 3", r3)   # first test: from the top
-        @test occursin("c = 4", r5) && !occursin("a = 1", r5)             # second: no bleed from the first
+        b5 = Pinax._test_code_block(f, 5)
+        b7 = Pinax._test_code_block(f, 7)
+        @test occursin("a = 1", b5.source) && occursin("@test a + b == 3", b5.source)
+        @test !occursin("@desc", b5.source)                  # a self-rendering macro is not code
+        @test occursin("c = 4", b7.source) && !occursin("a = 1", b7.source)  # no bleed from the first
+        @test b5.id !== b7.id                                # distinct regions, distinct artifacts
+        @test startswith(b5.source, "a = 1")                 # dedented
 
-        # the code renders WITH the profile (gallery row + agent.json field) and rides a dump
+        # A `@testset for`'s samples share ONE snippet — the loop header plus the assertion, which is
+        # the sweep's specification — so the id is the same for every iteration.
+        g = joinpath(mktempdir(), "s.jl")
+        write(
+            g,
+            "@testset \"s\" begin\n    @testset for n in (8, 32)\n        @test n > 0\n    end\nend\n",
+        )
+        bs = Pinax._test_code_block(g, 3)
+        @test occursin("@testset for n in (8, 32)", bs.source) && endswith(bs.source, "end")
+        @test Pinax._test_code_block(g, 3).id === bs.id
+        @test Pinax._test_code_block(g, 99) === nothing       # not a statement line: no code, no error
+        @test Pinax._test_code_block(joinpath(dirname(g), "nope.jl"), 1) === nothing
+
+        # It renders as the ONE code format (`emit_code`), the check table LINKS to it, and both the
+        # block and the reference ride a shard dump.
         dir = mktempdir()
-        chk = Check(:t, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true, "", "x = compute()")
-        n = TestNode("f.jl"; checks=[chk])
+        blk = CodeBlock(:code_f_jl_1_2, "code_f_jl_1_2", "x = compute()", "", "", "julia")
+        chk = Check(:t, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true, "", blk.anchor)
+        n = TestNode("f.jl"; checks=[chk], codes=[blk])
         d = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
-        @test Pinax.load_test_dump(d).children[1].checks[1].code == "x = compute()"  # round-trips a shard
+        back = Pinax.load_test_dump(d).children[1]
+        @test back.checks[1].code_anchor == blk.anchor &&
+            back.codes[1].source == "x = compute()"
         render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
         html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
-        @test occursin("x = compute()", html) && occursin("pinax-code-row", html)
-        @test occursin(
-            "\"code\":\"x = compute()\"",
-            read(joinpath(dir, "rep_agent", "agent.json"), String),
-        )
+        @test occursin("pinax-code-src", html) && occursin("x = compute()", html)
+        @test occursin("class=\"pinax-codelink\" href=\"#code_f_jl_1_2\"", html)
+        @test !occursin("pinax-code-row", html)               # no second code renderer
+        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        @test occursin("\"code_anchor\":\"code_f_jl_1_2\"", agent)
+        @test occursin("\"anchor\":\"code_f_jl_1_2\"", agent)  # resolvable against the code object
+    end
+
+    @testset "one code artifact per region: a sweep's samples and N shards collapse onto it" begin
+        # Deduplication by id is what makes the snippet appear once rather than once per sample (live)
+        # and once per shard (merged) — the same rule on both paths.
+        dir = mktempdir()
+        blk() = CodeBlock(:code_s_jl_2_3, "code_s_jl_2_3", "@test n > 0", "", "", "julia")
+        samples = [
+            TestNode(
+                "n = $(v)";
+                checks=[Check(:c, "n > 0", Float64(v), 0.0, Float64(v), 1.0, :abs, true)],
+                codes=[blk()],
+            ) for v in (8, 32)
+        ]
+        node = TestNode("f.jl"; children=samples)
+        render_test_report(TestNode("T"; children=[node]); out=joinpath(dir, "rep"))
+        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+        @test count("@test n &gt; 0", html) == 1               # ONE block, not one per sample
+        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        @test count("\"anchor\":\"code_s_jl_2_3\"", agent) == 1   # one code object in `codes`
     end
 end

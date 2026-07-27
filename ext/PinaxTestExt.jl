@@ -135,7 +135,14 @@ function Test.record(ts::PinaxTestSet, res)
         res isa Test.Error && (ts.nerror += 1)
         chk = _check_from(_result_data_expr(res), _label(res), res isa Test.Pass, 0)
         chk.source = _source_str(res)                 # WHERE it failed (issue #69 I)
-        chk.code = _capture_region(res)               # the code that produced it (default: whole region)
+        # By DEFAULT, the code that produced this check — captured as the same `@code` artifact a
+        # manuscript would build, pushed BEFORE the check so it reads code-then-result. One block per
+        # source region: a `@testset for`'s N samples all point at the one snippet they share.
+        blk = _code_block_for(res)
+        if blk !== nothing
+            Pinax._push_auto_code!(ts, blk)
+            chk.code_anchor = blk.anchor
+        end
         push!(ts.checks, chk)
         push!(ts.content, :check => length(ts.checks))
     end
@@ -151,30 +158,15 @@ function _source_str(res)
     return string(basename(String(s.file)), ":", s.line)
 end
 
-# The SOURCE REGION that produced a test — its computation plus the assertion — read straight from the
-# file at record time (it exists while the suite runs, in the sandbox too). By default this is the whole
-# region since the PREVIOUS test in the same file (so consecutive tests do not repeat each other's
-# setup), bounded to `_MAX_REGION_LINES` so a first test does not drag in a whole file's preamble.
-const _MAX_REGION_LINES = 12
-const _REGION_LAST = Dict{String,Int}()   # file → last test line consumed (reset per capture)
-function _capture_region(res)
-    hasproperty(res, :source) || return ""
+# The `@code` artifact for a test result — the code that produced it, read from the file at record
+# time (it exists while the suite runs, in the `Pkg.test` sandbox too) via the result's
+# `LineNumberNode`. The extraction itself is core and `Test`-free (`Pinax._test_code_block`); the only
+# part that needs `Test` is getting the file and line out of a `Test.Result`.
+function _code_block_for(res)
+    hasproperty(res, :source) || return nothing
     s = getproperty(res, :source)
-    (s isa LineNumberNode && s.file !== nothing) || return ""
-    file = String(s.file)
-    line = s.line
-    isfile(file) || return ""
-    lines = try
-        readlines(file)
-    catch
-        return ""
-    end
-    (1 <= line <= length(lines)) || return ""
-    prev = get(_REGION_LAST, file, 0)
-    from = max(1, line - _MAX_REGION_LINES + 1)
-    (0 < prev < line) && (from = max(from, prev + 1))
-    _REGION_LAST[file] = line
-    return rstrip(join(lines[from:line], "\n"))
+    (s isa LineNumberNode && s.file !== nothing) || return nothing
+    return Pinax._test_code_block(String(s.file), s.line)
 end
 
 function Test.finish(ts::PinaxTestSet)
@@ -224,7 +216,7 @@ function Pinax.test(
     m = Module(gensym(:PinaxTest))
     Core.eval(m, :(include(p) = $(Base.include)($m, p)))
     Core.eval(m, :(eval(x) = $(Core.eval)($m, x)))
-    empty!(_REGION_LAST)
+    empty!(Pinax._FILE_AST)
     withenv("PINAX_TEST_OUT" => String(out), "PINAX_TEST_TITLE" => String(title)) do
         Test.@testset PinaxTestSet "$(title)" begin
             Base.include(m, file)
@@ -243,7 +235,7 @@ function Pinax._install_test_capture!()
     # capture there anyway — so install NOTHING then. The cache-flags probe is handled by the empty-root
     # guard in `_finalize_test_capture!` (it installs but renders nothing). Only the test run captures.
     Base.generating_output() && return nothing
-    empty!(_REGION_LAST)
+    empty!(Pinax._FILE_AST)
     root = PinaxTestSet(
         report_title(); out=report_out(), dump=report_dump(), title=report_title()
     )
