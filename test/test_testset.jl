@@ -179,6 +179,46 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         )
     end
 
+    @testset "the overview hook: what CI knows and the tree does not" begin
+        # A sharded report that is missing a shard looks like a smaller suite. The verdict on that
+        # lives in the JOB, not in the tree, so the hook lets the caller write it INTO the artifact —
+        # in Pinax's own vocabulary, on the overview page, in every backend.
+        dir = mktempdir()
+        node = TestNode("f.jl"; checks=[Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)])
+        render_test_report(
+            TestNode("T"; children=[node]);
+            out=joinpath(dir, "rep"),
+            overview=() -> begin
+                @desc md"**Every unit ran exactly once** — 2 observed, 2 run."
+                @table (; metric=["units observed", "units run"], value=[2, 2]) caption = "Completeness"
+                @raw "<p id=\"cinote\">from the merge job</p>"
+            end,
+        )
+        html = read(joinpath(dir, "rep_html", "overview.html"), String)
+        @test occursin("Every unit ran exactly once", html)
+        @test occursin("units observed", html) && occursin("Completeness", html)
+        @test occursin("id=\"cinote\"", html)
+        # …and it is DATA in agent.json, not only pixels — the table rows are native
+        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        @test occursin("units observed", agent) &&
+            occursin("\"caption\":\"Completeness\"", agent)
+        # the fixed tables are still there, and the hook's desc sits above them
+        @test occursin("Provenance", html) && occursin("Per-file result profile", html)
+
+        # A throwing hook is a DIAGNOSTIC, never a failed render: the report machinery may not turn a
+        # green run red (invariant IV) — and it says so in the artifact rather than swallowing it.
+        d2 = mktempdir()
+        render_test_report(
+            TestNode("T"; children=[node]);
+            out=joinpath(d2, "rep"),
+            overview=() -> error("boom"),
+        )
+        # diagnostics are document-level, so they land on the gallery's index, not on the page
+        h2 = read(joinpath(d2, "rep_html", "index.html"), String)
+        @test occursin("Diagnostics", h2) && occursin("boom", h2)   # named, with the cause
+        @test isfile(joinpath(d2, "rep_html", "overview.html"))     # …and the report still rendered
+    end
+
     @testset "a broken test is counted, never painted red" begin
         # Test.Broken is not a Pass, so encoding it as a Check would give pass=false — a red bar and
         # a FAIL verdict for a test the runner is perfectly happy about.
