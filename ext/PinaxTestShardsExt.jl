@@ -144,4 +144,60 @@ function _fold(ts)
     )
 end
 
+# ── the completeness verdict, in the artifact ────────────────────────────────────────
+#
+# TestShards observes the WHOLE unit sequence in every shard, so it knows which units should exist,
+# and `completeness` compares that against what ran. Neither package can state the result alone: it
+# holds the verdict, we hold the document. A sharded report missing a shard otherwise looks exactly
+# like a smaller suite, with nothing in the artifact to contradict that reading.
+
+function Pinax.completeness_overview(c::TestShards.Completeness)
+    ok = TestShards.complete(c)
+    return function ()
+        Pinax._set_desc!(_completeness_prose(c, ok))
+        Pinax._push_table!(;
+            data=[
+                (; metric="units observed", value=c.observed),
+                (; metric="units run", value=length(c.ran)),
+                (; metric="verdict", value=ok ? "every unit ran exactly once" : "FAILED"),
+            ],
+            code="",
+            id=:completeness,
+            caption="Completeness — whether the shards between them ran every unit they observed, " *
+                    "exactly once. A report missing a shard reads as a smaller suite unless it says so.",
+        )
+        return nothing
+    end
+end
+
+# Deliberately not `TestShards.completeness_report`, which renders the same verdict as a CI job
+# summary: that one repeats the table as markdown, and here the table is a real artifact. What is
+# shared is the STRUCT, so the two cannot disagree about the numbers.
+function _completeness_prose(c, ok)
+    ok &&
+        return "**Every unit ran exactly once** — $(c.observed) observed, $(length(c.ran)) run."
+    parts = ["**Completeness FAILED.**"]
+    c.disagreed && push!(
+        parts,
+        "The shards did not agree on how many units the suite has, so nothing downstream — the " *
+        "split, the indices, these merged records — means what it claims to.",
+    )
+    isempty(c.missed) || push!(
+        parts,
+        "$(_count(c.missed, "unit")) never ran: $(_positions(c.missed)). " *
+        "The run is green and that part of the suite was not tested.",
+    )
+    isempty(c.duplicated) || push!(
+        parts,
+        "$(_count(c.duplicated, "unit")) ran more than once: $(_positions(c.duplicated)) — " *
+        "so the timings are not a partition.",
+    )
+    return join(parts, " ")
+end
+
+# Spelled out rather than "1 unit(s)": Julia's Markdown escapes parentheses into HTML entities, and
+# a report about honesty should not read like a form letter either.
+_count(v, word) = "$(length(v)) $(word)$(length(v) == 1 ? "" : "s")"
+_positions(v) = length(v) == 1 ? "position $(only(v))" : "positions $(join(v, ", "))"
+
 end
