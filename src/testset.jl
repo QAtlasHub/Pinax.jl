@@ -8,7 +8,7 @@
 #
 #     test file  (@testset "test_foo.jl")  →  @page (status=:benchmark)
 #     @testset   (nested)                  →  @section  (recursively)
-#     @test                                →  a Check
+#     @test                                →  a Check  +  the @code that produced it
 #
 # THE POINT — a margin, not a verdict. For any `@test isapprox(got, want; rtol=…)` the real
 # numbers are recovered, so the report shows `delta/tol`: how much room a test passed BY. A
@@ -36,7 +36,9 @@ touch is the call. Two forms:
     sandbox): open a capturing root testset, `include` the file, render.
 
 Each test *file* (a `.jl`-named `@testset`) becomes a `status = :benchmark` page, each nested
-`@testset` a section, each `@test` a `Check` carrying its real `got`/`want`/`tol`. Writes
+`@testset` a section, each `@test` a `Check` carrying its real `got`/`want`/`tol` — and, by default,
+a `@code` block holding the source that produced it, so a reader sees what was measured and not only
+whether it passed. Writes
 `<out>_html` + `<out>_agent`; with `dump` set, dumps the tree there instead (a sharded CI shard) for
 [`render_test_report`](@ref) to merge later. A red suite still fails the process — the report never
 changes the verdict. A suite may also draw (`@desc`/`@figure`/`@table`/…); that content is captured,
@@ -109,6 +111,276 @@ function _ignore_current_testset! end
 _looks_like_a_file(desc::AbstractString) = endswith(desc, ".jl")
 
 _slug(s) = Symbol(replace(lowercase(strip(s)), r"[^a-z0-9]+" => "_"))
+
+# ── the code behind a check: one code format, captured by default ────
+#
+# A check shows a verdict and a margin, and a reader still cannot tell WHAT was measured — the
+# computation is right there in the test file and the report never showed it. So by default every
+# assertion carries its source region, and it is carried as the SAME artifact an explicit `@code`
+# builds (a `CodeBlock`, rendered by `emit_code` in every backend). One code format in the document,
+# not a second one for tests — a second renderer is a second thing to drift.
+#
+# The region is read SYNTACTICALLY, from the file's own parse tree: the statements of the innermost
+# block that lead up to the assertion, starting after the previous assertion in that block. Pinax
+# content macros (`@desc` / `@code` / `@figure` / …) are dropped, because each of them renders itself
+# — including their source would show them twice, in two different formats. An unnamed `@testset for`
+# is a sample rather than a section, so nothing else in the document shows its header: that one gets
+# prepended (with a closing `end`), which makes the snippet the sweep's specification.
+
+# Statements of a `:block` / `:toplevel` as (line, stmt) pairs — a LineNumberNode sets the line.
+function _blk_stmts(x::Expr)
+    out = Tuple{Int,Any}[]
+    line = 0
+    for a in x.args
+        a isa LineNumberNode ? (line = a.line) : push!(out, (line, a))
+    end
+    return out
+end
+
+# The greatest line mentioned anywhere in a subtree (0 when it mentions none).
+function _maxline(x)
+    x isa LineNumberNode && return x.line
+    x isa Expr || return 0
+    m = 0
+    for a in x.args
+        m = max(m, _maxline(a))
+    end
+    return m
+end
+
+struct _CodeBlk
+    stmts::Vector{Tuple{Int,Any}}
+    lo::Int
+    hi::Int
+    owners::Vector{Any}      # enclosing expressions, innermost first
+end
+
+function _walk_code_blocks!(out::Vector{_CodeBlk}, x, owners::Vector{Any})
+    x isa Expr || return nothing
+    if x.head === :block || x.head === :toplevel
+        st = _blk_stmts(x)
+        isempty(st) ||
+            push!(out, _CodeBlk(st, first(st)[1], max(_maxline(x), first(st)[1]), owners))
+        for a in x.args
+            _walk_code_blocks!(out, a, owners)
+        end
+    else
+        inner = Any[x]
+        append!(inner, owners)
+        for a in x.args
+            _walk_code_blocks!(out, a, inner)
+        end
+    end
+    return nothing
+end
+
+function _macroname(x)
+    x isa Expr && x.head === :macrocall && !isempty(x.args) && x.args[1] isa Symbol ||
+        return ""
+    return String(x.args[1])
+end
+
+# Statements that render themselves as their own artifact (so their source is not this check's code).
+const _SELF_RENDERING_MACROS = Set([
+    "@desc",
+    "@code",
+    "@caption",
+    "@figure",
+    "@table",
+    "@raw",
+    "@thumbnail",
+    "@no_thumbnail",
+    "@label",
+    "@pinaxignore",
+    "@section",
+    "@page",
+    "@part",
+    "@benchmark",
+    "@pinaxsetup",
+    "@newcommand",
+    "@bibliography",
+    "@testset",
+])
+# Statements that END a region: the code before an assertion belongs to THAT assertion, so the next
+# one starts fresh (consecutive checks never repeat each other's setup).
+const _ASSERTION_MACROS = Set([
+    "@test",
+    "@test_throws",
+    "@test_broken",
+    "@test_skip",
+    "@test_logs",
+    "@test_deprecated",
+    "@test_warn",
+    "@test_nowarn",
+    "@expect",
+])
+
+_is_assertion_stmt(s) = _macroname(s) in _ASSERTION_MACROS
+_is_self_rendering_stmt(s) = _macroname(s) in _SELF_RENDERING_MACROS
+
+function _code_parses(text)
+    return try
+        e = Meta.parseall(text)
+        !any(a -> a isa Expr && a.head === :incomplete, e.args)
+    catch
+        false
+    end
+end
+
+# The header line of the unnamed `@testset for` whose body is this block, or 0.
+function _sweep_header_line(b::_CodeBlk)
+    length(b.owners) >= 2 || return 0
+    f, mc = b.owners[1], b.owners[2]
+    (f isa Expr && f.head === :for) || return 0
+    _macroname(mc) == "@testset" || return 0
+    # `@testset for …` is [@testset, LNN, for]; a DESCRIBED one has a String before the `for`, and
+    # its description is the section title, so its header is already in the document.
+    length(mc.args) == 3 || return 0
+    ln = mc.args[2]
+    return ln isa LineNumberNode ? ln.line : 0
+end
+
+# Last source line of statement `i`. One followed by a sibling ends where the sibling begins; the
+# block's LAST statement has no such bound (and the block's extent may include its closing `end`), so
+# grow it line by line until the text PARSES — the minimal complete expression.
+function _stmt_hi(b::_CodeBlk, i::Int, lines)
+    lo = b.stmts[i][1]
+    i < length(b.stmts) && return max(lo, b.stmts[i + 1][1] - 1)
+    for hi in lo:min(length(lines), lo + 20)
+        _code_parses(join(lines[lo:hi], "\n")) && return hi
+    end
+    return lo
+end
+
+const _MAX_CODE_LINES = 12
+# file → (lines, parse tree). Test files do not change while the suite runs, so parse each once.
+const _FILE_AST = Dict{String,Union{Nothing,Tuple{Vector{String},Expr}}}()
+
+function _file_ast(file::AbstractString)
+    return get!(_FILE_AST, String(file)) do
+        isfile(file) || return nothing
+        try
+            src = read(file, String)
+            ast = Meta.parseall(src; filename=file)
+            (String.(split(src, '\n')), ast)
+        catch
+            nothing
+        end
+    end
+end
+
+"""
+    _test_code_block(file, line) -> CodeBlock | nothing
+
+The `@code` artifact for the assertion at `file:line` — the code that produced it. The id is derived
+from the line span, so every sample of a `@testset for` (the same line, N iterations) maps to ONE
+block: the sweep shows its specification once, not once per point.
+"""
+function _test_code_block(file::AbstractString, line::Integer)
+    fa = _file_ast(file)
+    fa === nothing && return nothing
+    lines, ast = fa
+    blks = _CodeBlk[]
+    _walk_code_blocks!(blks, ast, Any[])
+    cands = filter(b -> any(s -> s[1] == line, b.stmts), blks)
+    isempty(cands) && return nothing
+    b = argmin(x -> x.hi - x.lo, cands)          # the innermost block holding a statement at `line`
+    idx = findlast(s -> s[1] == line, b.stmts)
+    from = 1
+    for i in 1:(idx - 1)
+        _is_assertion_stmt(b.stmts[i][2]) && (from = i + 1)
+    end
+    keep = [i for i in from:idx if !_is_self_rendering_stmt(b.stmts[i][2])]
+    isempty(keep) && return nothing
+    pieces = [(b.stmts[i][1], _stmt_hi(b, i, lines)) for i in keep]
+    out = String[]
+    for (lo, hi) in pieces
+        append!(out, lines[lo:min(hi, length(lines))])
+    end
+    # a trailing blank / comment line introduces whatever comes NEXT, not this region
+    while !isempty(out) && (isempty(strip(out[end])) || startswith(strip(out[end]), "#"))
+        pop!(out)
+    end
+    isempty(out) && return nothing
+    hdr = _sweep_header_line(b)
+    head = hdr == 0 ? String[] : String[lines[l] for l in hdr:(b.lo - 1)]
+    budget = _MAX_CODE_LINES - length(head) - (hdr == 0 ? 0 : 1)
+    # never silently truncate: an elided region says so (the full file is a click away in CI)
+    length(out) > budget && (out = vcat(["#   …"], out[(end - budget + 2):end]))
+    body = vcat(head, out)
+    src = _dedent(body)
+    hdr == 0 || (src = string(src, "\nend"))
+    id = Symbol(
+        "code_", _slug(basename(String(file))), "_", first(pieces)[1], "_", last(pieces)[2]
+    )
+    return CodeBlock(id, _anchor(id), src, "", "", "julia")
+end
+
+_strip_lnn(x) = x
+function _strip_lnn(e::Expr)
+    return Expr(e.head, Any[_strip_lnn(a) for a in e.args if !(a isa LineNumberNode)]...)
+end
+
+function _dedent(ls)
+    indents = [length(l) - length(lstrip(l)) for l in ls if !isempty(strip(l))]
+    ind = isempty(indents) ? 0 : minimum(indents)
+    return rstrip(join((isempty(strip(l)) ? "" : l[(ind + 1):end] for l in ls), "\n"))
+end
+
+"""
+    _verbatim_code(file, line, expr) -> String | nothing
+
+The source of an `@code` block's expression **as written** at `file:line`, rather than deparsed from
+the AST — `@code f(x) = sum(k -> g(k), 1:x)` should read back as itself, not as the `begin`-blocked
+normal form `string(::Expr)` produces. The statement's text is read from the file and the leading
+`@code` (with its keywords) is peeled off by trying each token boundary of the first line until the
+remainder parses to the very expression the macro was handed. `nothing` when the file is not readable
+(a REPL, a Documenter `@example`), where the deparsed form is all there is.
+"""
+function _verbatim_code(file, line, expr)
+    fa = _file_ast(file)
+    fa === nothing && return nothing
+    lines, ast = fa
+    blks = _CodeBlk[]
+    _walk_code_blocks!(blks, ast, Any[])
+    cands = filter(b -> any(s -> s[1] == line, b.stmts), blks)
+    isempty(cands) && return nothing
+    b = argmin(x -> x.hi - x.lo, cands)
+    i = findlast(s -> s[1] == line, b.stmts)
+    lo = b.stmts[i][1]
+    hi = min(_stmt_hi(b, i, lines), length(lines))
+    text = _dedent(lines[lo:hi])
+    target = _strip_lnn(expr)
+    nl = something(findfirst('\n', text), length(text) + 1)
+    starts = Int[1]
+    for (j, ch) in enumerate(text)
+        j >= nl && break
+        isspace(ch) && j < length(text) && push!(starts, j + 1)
+    end
+    for s in starts
+        e = try
+            Meta.parse(SubString(text, s))
+        catch
+            continue
+        end
+        e isa Expr && e.head === :incomplete && continue
+        _strip_lnn(e) == target && return _dedent(split(SubString(text, s), '\n'))
+    end
+    return nothing
+end
+
+"""
+    _push_auto_code!(container, blk) -> CodeBlock | nothing
+
+Place an auto-captured `@code` artifact into a container, at most once per id. Deduplication by id is
+what collapses a sweep's N samples — and N shards' dumps — onto the one block they share.
+"""
+function _push_auto_code!(c, blk)
+    any(b -> b.id === blk.id, c.codes) && return nothing
+    push!(c.codes, blk)
+    push!(c.content, :code => length(c.codes))
+    return blk
+end
 
 # ── recovering the NUMBERS out of a test's expression ────────────────
 #
@@ -510,6 +782,17 @@ function _collect_checks!(acc, n)
     return acc
 end
 
+# Every distinct `@code` artifact captured anywhere in a swept subtree, in first-seen order.
+function _swept_codes(n, out=CodeBlock[])
+    for blk in n.codes
+        any(b -> b.id === blk.id, out) || push!(out, blk)
+    end
+    for ch in n.children
+        _swept_codes(ch, out)
+    end
+    return out
+end
+
 function _sweep_has_user_content(n)
     return !isempty(n.figures) ||
            !isempty(n.tables) ||
@@ -544,6 +827,12 @@ function _emit_sweep!(n, counter::Ref{Int}, page_when::Function, acc::Vector{Che
         string(c.id, "_sweep"),
         "@figure/@table inside a swept `@testset for` is not folded yet — omitted from the sweep view (issue #69 E follow-up)",
     )
+    # The samples are folded away, but the CODE they captured is the sweep's specification (the loop
+    # header + the assertion), so it must survive the fold: lift it to the section, deduplicated, ahead
+    # of the figures it explains.
+    for blk in _swept_codes(n)
+        _push_auto_code!(c, blk)
+    end
     qi = Ref(0)
     for (label, pts) in _group_quantities(samples)
         _push_sweep_figures!(c.id, qi, label, pts)
@@ -559,7 +848,7 @@ function _emit_sweep!(n, counter::Ref{Int}, page_when::Function, acc::Vector{Che
             chk.kind,
             chk.pass,
             chk.source,
-            chk.code,
+            chk.code_anchor,
         )
         _place_check!(c, tagged, counter, acc)
     end
@@ -910,8 +1199,7 @@ function _emit_own_content!(n, counter::Ref{Int}, acc::Vector{Check})
             _place_check!(c, chk, counter, acc)
         end
         for blk in n.codes
-            push!(c.codes, blk)
-            push!(c.content, :code => length(c.codes))
+            _push_auto_code!(c, blk)
         end
         return acc
     end
@@ -928,8 +1216,9 @@ function _emit_own_content!(n, counter::Ref{Int}, acc::Vector{Check})
             push!(c.panels, n.panels[i])
             push!(c.content, :panel => length(c.panels))
         elseif kind === :code
-            push!(c.codes, n.codes[i])
-            push!(c.content, :code => length(c.codes))
+            # Deduplicated by id: N shards of one sweep carry the same captured snippet, and it must
+            # appear once (the ids of explicit `@code` blocks are already container-unique).
+            _push_auto_code!(c, n.codes[i])
         end
     end
     return acc
@@ -1186,15 +1475,16 @@ function dump_test_report(root, path::AbstractString)
     return path
 end
 
-# A shard dump carries checks + structure only; a `@figure`/`@table`/`@raw` written inside a test is a
-# closure / raw HTML that cannot cross the process boundary yet (the E/L follow-up). Warn loudly
-# rather than drop it silently — a sharded report would otherwise be missing content with no trace.
+# Everything a test captures crosses a shard dump EXCEPT a `@figure`: its `gen` is a closure, and a
+# closure cannot be serialized (materializing the asset into the dump would make the dump a directory —
+# deliberately not done). So the one exception is warned about loudly rather than dropped silently: a
+# sharded report must never be quietly missing content. `@desc` / `@table` / `@raw` / declaration order
+# all ride along, which is what makes the sharded and unsharded documents the same document.
 function _warn_if_undumpable(n)
-    if !isempty(n.figures) || !isempty(n.tables) || !isempty(n.panels)
-        @warn "Pinax: @figure/@table/@raw inside a test is not carried through a shard dump yet — \
-               it appears in a direct (non-sharded) render only." testset = n.description maxlog =
-            1
-    end
+    isempty(n.figures) ||
+        @warn "Pinax: a `@figure` written inside a test cannot cross a shard dump \
+               (its generator is a closure) — it appears in a direct \
+               (non-sharded) render only." testset = n.description maxlog = 1
     foreach(_warn_if_undumpable, n.children)
     return nothing
 end
@@ -1216,10 +1506,50 @@ function _node_to_dict(n)
     # TOML has no NaN, so an unmeasured elapsed is simply absent.
     isnan(n.elapsed) || (d["elapsed"] = n.elapsed)
     isempty(n.checks) || (d["check"] = [_check_to_dict(c) for c in n.checks])
-    # `@code` blocks are plain strings (unlike a `@figure` closure), so they DO cross a shard dump.
+    # Everything except a `@figure` closure is plain data, so it crosses the dump — and so does the
+    # DECLARATION ORDER, without which a merged shard would re-order its own content (issue #67: the
+    # sharded and unsharded documents must be the same document, by construction).
     isempty(n.codes) || (d["code"] = [_code_to_dict(c) for c in n.codes])
+    isempty(n.tables) || (d["table"] = [_table_to_dict(t) for t in n.tables])
+    isempty(n.panels) || (d["panel"] = collect(n.panels))
+    n.desc === nothing || (d["desc"] = n.desc.source)
+    isempty(n.content) || (
+        d["content"] = [
+            Dict{String,Any}("kind" => String(k), "i" => i) for (k, i) in n.content
+        ]
+    )
     isempty(n.children) || (d["child"] = [_node_to_dict(c) for c in n.children])
     return d
+end
+
+# TOML has no `missing` / `nothing` and no arbitrary objects, so a cell outside its type system is
+# carried as its display string — the same text the gallery would have shown for it.
+_toml_cell(x::Union{Real,Bool,AbstractString}) = x
+_toml_cell(x) = _cellstr(x)
+
+function _table_to_dict(t::Table)
+    t.params === nothing ||
+        @warn "Pinax: a `@table`'s `params` are not carried through a shard \
+               dump — the table's data and caption are." table = t.id maxlog = 1
+    return Dict{String,Any}(
+        "id" => String(t.id),
+        "caption" => t.caption,
+        "header" => collect(t.header),
+        "rows" => [[_toml_cell(c) for c in row] for row in t.rows],
+        "code" => t.code,
+    )
+end
+function _dict_to_table(d::AbstractDict)
+    id = Symbol(d["id"])
+    return Table(
+        id,
+        _anchor(id),
+        get(d, "caption", ""),
+        String[string(h) for h in get(d, "header", Any[])],
+        Vector{Any}[Any[c for c in row] for row in get(d, "rows", Any[])],
+        get(d, "code", ""),
+        nothing,
+    )
 end
 function _code_to_dict(c::CodeBlock)
     return Dict{String,Any}(
@@ -1254,7 +1584,8 @@ function _check_to_dict(c::Check)
         "pass" => c.pass,
     )
     isempty(c.source) || (d["source"] = c.source)   # carry WHERE it failed across a shard dump
-    isempty(c.code) || (d["code"] = c.code)          # …and the code that produced it
+    # …and the REFERENCE to the code block that produced it (the block itself rides `n.codes`).
+    isempty(c.code_anchor) || (d["code_anchor"] = c.code_anchor)
     return d
 end
 
@@ -1267,6 +1598,16 @@ function _dict_to_node(d::AbstractDict)
         nerror=get(d, "nerror", 0),
         checks=Check[_dict_to_check(c) for c in get(d, "check", Any[])],
         codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
+        tables=Table[_dict_to_table(t) for t in get(d, "table", Any[])],
+        panels=String[string(p) for p in get(d, "panel", Any[])],
+        desc=haskey(d, "desc") ? Desc(d["desc"]) : nothing,
+        # A `@figure` did not survive, so any `:figure` entry in the recorded order is dropped — the
+        # rest keeps its declared position (a legacy dump with no `content` falls back to checks-then-
+        # codes in `_emit_own_content!`).
+        content=Pair{Symbol,Int}[
+            Symbol(e["kind"]) => Int(e["i"]) for
+            e in get(d, "content", Any[]) if e["kind"] != "figure"
+        ],
         children=TestNode[_dict_to_node(c) for c in get(d, "child", Any[])],
     )
 end
@@ -1282,7 +1623,7 @@ function _dict_to_check(d::AbstractDict)
         Symbol(d["kind"]),
         d["pass"],
         get(d, "source", ""),
-        get(d, "code", ""),
+        get(d, "code_anchor", ""),
     )
 end
 

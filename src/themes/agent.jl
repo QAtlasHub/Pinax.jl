@@ -193,6 +193,8 @@ function emit_code(::AgentBase, blk, ctx)
         io,
         "{\"id\":",
         _jsonstr(string(blk.id)),
+        ",\"anchor\":",          # what a check's `code_anchor` points at
+        _jsonstr(blk.anchor),
         ",\"lang\":",
         _jsonstr(blk.lang),
         ",\"source\":",
@@ -238,8 +240,9 @@ function emit_check(::AgentBase, chk, ctx)
         _agent_jsonval(chk.pass),
         ",\"source\":",
         _jsonstr(chk.source),
-        ",\"code\":",
-        _jsonstr(chk.code),
+        # the code is ONE object in `codes` (kind "code"); a check REFERENCES it by anchor
+        ",\"code_anchor\":",
+        _jsonstr(chk.code_anchor),
         "}",
     )
     return nothing
@@ -495,11 +498,6 @@ end
 # A single @expect check as a markdown list line (the LLM read view): a ✓/✗ badge + the numbers.
 function _agent_md_check(io, chk)
     badge = chk.pass ? "PASS" : "FAIL"
-    if !isempty(chk.code)
-        println(io, "```julia")
-        println(io, chk.code)
-        println(io, "```")
-    end
     println(
         io,
         "- [",

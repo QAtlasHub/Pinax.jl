@@ -117,8 +117,8 @@ const _GALLERY_CSS = """
   .pinax-checks tr.pinax-fail .pinax-badge{color:#a40e26}
   .pinax-checks .pinax-src{color:#8a949e;font:11px ui-monospace,SFMono-Regular,Menlo,monospace}
   .pinax-checks tr.pinax-more td{color:#6a737d;font-style:italic;background:#f6f8fa}
-  .pinax-checks tr.pinax-code-row td{padding:.35rem .5rem .15rem;background:inherit}
-  .pinax-checks tr.pinax-code-row pre{margin:0}
+  .pinax-checks .pinax-codelink{color:#57606a;font-size:11px;text-decoration:none;border-bottom:1px dotted #b6bec7}
+  .pinax-checks .pinax-codelink:hover{color:#0969da;border-bottom-color:#0969da}
   .pinax-code{margin:.6rem 0}
   .pinax-code-cap{color:#57606a;font-size:.9em;margin-bottom:.2rem}
   .pinax-code pre{margin:0;padding:.6rem .8rem;border-radius:8px;overflow:auto;font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
@@ -1280,22 +1280,20 @@ function emit_check(::GalleryBase, chk, ctx)
     io = ctx.io
     cls = chk.pass ? "pinax-pass" : "pinax-fail"
     badge = chk.pass ? "✓" : "✗"
-    # The code that produced this test, shown as a full-width row ABOVE its profile — "here is the code,
-    # here is what it checked", together (issue #69's follow-up). Auto-captured from the test's source.
-    isempty(chk.code) || println(
-        io,
-        "<tr class=\"pinax-code-row ",
-        cls,
-        "\"><td></td><td colspan=\"5\"><pre class=\"pinax-code-src\"><code class=\"language-julia\">",
-        _esc(chk.code),
-        "</code></pre></td></tr>",
-    )
     print(io, "<tr class=\"", cls, "\">")
     print(io, "<td class=\"pinax-badge\">", badge, "</td>")
     print(io, "<td>", _esc(string(chk.id)), "</td>")
     print(io, "<td>", _esc(chk.label))
     isempty(chk.source) ||
         print(io, " <span class=\"pinax-src\">@ ", _esc(chk.source), "</span>")
+    # The code that produced this check is ONE artifact in the section below (a `@code` block), so the
+    # table — the verdict-and-margin view — links to it instead of carrying a second copy of it.
+    isempty(chk.code_anchor) || print(
+        io,
+        " <a class=\"pinax-codelink\" href=\"#",
+        _esc(chk.code_anchor),
+        "\" title=\"the code that produced this check\">code</a>",
+    )
     print(io, "</td>")
     print(io, "<td>", _esc(_cellstr(chk.got)), "</td>")
     print(io, "<td>", _esc(_cellstr(chk.want)), "</td>")
