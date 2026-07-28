@@ -82,6 +82,40 @@ Each unit becomes a page, its `@testset`s become sections, and the margins are t
 provider **declines** unless a capture is ambient, so a bare `Pkg.test()` of a sharded suite runs
 exactly as it did before — the same invariant as everywhere else here: the report changes nothing
 about how the suite runs.
+
+TestShards' `evidence!` comes across too. A test that says what grounds it —
+
+```julia
+@testset "tight" begin
+    evidence!(; tolerance = 0.01, achieved = 0.0097, oracle = "closed form")
+    @test isapprox(1.0, 1.0098; rtol = 0.01)
+end
+```
+
+— gets that as a table on the section that recorded it, beside the check and the code. From
+`agent.md` of a real run:
+
+```text
+#### tight  [id: unit_a_jl_tight]
+    evidence!(; tolerance = 0.01, achieved = 0.0097, oracle = "closed form")
+    @test isapprox(1.0, 1.0098; rtol=0.01)
+
+- [PASS] t1 — isapprox(1.0, 1.0098; rtol = 0.01): got 1.0, want 1.0098 (Δ 0.0097 vs tol 0.01 rel)
+
+_What this test established (`evidence!`)._  [table: unit_a_jl_tight_tbl1]
+| established | value |
+| --- | --- |
+| achieved | 0.0097 |
+| oracle | closed form |
+| tolerance | 0.01 |
+```
+
+A verdict says the test passed and the margin says by how much; this says *against what*. Being a
+table it is native rows in `agent.json`, which is the binding an agent needs to reconcile a claim
+against what was actually compared. Evidence recorded inside a swept `@testset for` is the one case
+that does not survive — it is dropped with the rest of that sample's content, and the sweep fold
+already warns about a `@table` there.
+
 ## Saying what the job knows and the tree does not
 
 A merged report is built from the trees the shards dumped, and some things are simply not in a tree.

@@ -60,7 +60,62 @@ end
 
 # Attach the finished unit to the capturing root. `Test.finish` on a non-root `PinaxTestSet` does
 # exactly that and cannot throw — only a root re-signals a red suite, and a unit is never the root.
-_close(ts) = (Test.finish(ts); nothing)
+# Before that, the evidence: this is the last moment the unit is still a testset rather than a page.
+function _close(ts)
+    _attach_evidence!(ts)
+    Test.finish(ts)
+    return nothing
+end
+
+"""
+Turn what a test **established** into content on the node that established it.
+
+`evidence!(; tolerance = 1e-12, achieved = err, oracle = "closed-form")` is a test saying what grounds
+it — and a report that shows the verdict and the margin still leaves that unsaid. It is data, so it
+becomes a `@table`: legible to a reader, and *native rows* in `agent.json`, where it is the binding an
+agent needs to reconcile a claim against what was actually compared.
+
+Attached per node, walking the children, because that is where the test recorded it — a nested
+`@testset` keeps its own. Keys are sorted, so a rebuild produces the same table rather than a
+different order of the same facts (the render cache keys on content).
+
+The id is qualified by the UNIT, matching how the fold qualifies section ids (`<page>_<section>`):
+a node's own id is a bare slug at this point, so two files each with a `@testset "tight"` that records
+evidence would otherwise land two tables on one anchor.
+
+One case does not survive, and it is not silent: evidence recorded inside a swept `@testset for` is
+dropped with the rest of that sample's content, and Pinax already warns that a `@table` inside a
+sweep is not folded.
+"""
+function _attach_evidence!(ts, prefix::Symbol=Pinax._slug(ts.description))
+    ev = TestShards.evidence(ts)
+    isempty(ev) || _push_evidence_table!(ts, ev, prefix)
+    for c in ts.children
+        _attach_evidence!(c, prefix)
+    end
+    return nothing
+end
+
+function _push_evidence_table!(node, ev, prefix::Symbol)
+    rows = Vector{Any}[Any[k, ev[k]] for k in sort!(collect(keys(ev)))]
+    id = if node.id === prefix
+        Pinax._auto_table_id(node)
+    else
+        Symbol(prefix, :_, node.id, "_tbl", length(node.tables) + 1)
+    end
+    tbl = Pinax.Table(
+        id,
+        Pinax._anchor(id),
+        "What this test established (`evidence!`).",
+        ["established", "value"],
+        rows,
+        "",
+        nothing,
+    )
+    push!(node.tables, tbl)
+    push!(node.content, :table => length(node.tables))
+    return tbl
+end
 
 """
 A unit's counts and structure as plain data, for TestShards' `unit_fold` —

@@ -23,7 +23,9 @@ function shard_suite()
         joinpath(d, "unit_a.jl"),
         """
         using Test
+        using TestShards: evidence!
         @testset "tight" begin
+            evidence!(; tolerance = 0.01, achieved = 0.0097, oracle = "closed form")
             @test isapprox(1.0, 1.0098; rtol=0.01)
         end
         @testset "sweep" begin
@@ -134,6 +136,27 @@ end
         @test occursin("@test isapprox(1.0, 1.0098; rtol=0.01)", html)
         # one page per unit, and the second unit is there too
         @test isfile(joinpath(rep * "_html", "unit_b_jl.html"))
+    end
+
+    @testset "what a test established becomes content, not only a record" begin
+        # `evidence!` is a test saying what grounds it. A verdict and a margin leave that unsaid, so
+        # the provider attaches it as a @table on the node that recorded it — legible for a reader,
+        # and native rows in agent.json, where it is the binding for reconciling a claim.
+        _, _, _, rep = captured_run()
+        html = read(joinpath(rep * "_html", "unit_a_jl.html"), String)
+        @test occursin("What this test established", html)
+        @test occursin("closed form", html) && occursin("tolerance", html)
+        agent = read(joinpath(rep * "_agent", "agent.json"), String)
+        # native rows, and sorted keys so a rebuild is the same table rather than the same facts
+        # in a different order
+        @test occursin("[\"achieved\",0.0097]", agent)
+        @test occursin("[\"oracle\",\"closed form\"]", agent)
+        i_ach = findfirst("\"achieved\"", agent)
+        i_tol = findfirst("\"tolerance\"", agent)
+        @test i_ach !== nothing && i_tol !== nothing && first(i_ach) < first(i_tol)
+        # it landed on the section that recorded it, not on the page — and the table id is
+        # UNIT-qualified, so two files each with a `@testset "tight"` cannot share one anchor
+        @test occursin("\"id\":\"unit_a_jl_tight_tbl1\"", agent)
     end
 
     @testset "TestShards' own records are unchanged" begin
