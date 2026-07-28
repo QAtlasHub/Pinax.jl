@@ -1305,6 +1305,30 @@ function _package_line(p)
     end
 end
 
+# The caller's own content on the overview page. What the CI job knows and the document does not — a
+# completeness verdict, a note about the environment — belongs IN the artifact rather than in a log
+# that expires, and the way to say it is Pinax's own vocabulary rather than a second one: the hook
+# runs with the overview page open, so `@desc` / `@table` / `@raw` land on it. A `@desc` renders
+# ABOVE the standard tables (a page's description is not content-ordered), which is where a verdict
+# wants to be; tables follow the fixed ones.
+#
+# It cannot break the render. A throwing hook is recorded as a diagnostic — loud in the artifact,
+# silent in the exit code — exactly like every other failure in the report machinery.
+function _overview_hook(overview)
+    overview === nothing && return nothing
+    try
+        overview()
+    catch err
+        _diag!(
+            ERROR,
+            "overview",
+            "the `overview` hook threw, so its content is missing from this page: " *
+            sprint(showerror, err),
+        )
+    end
+    return nothing
+end
+
 """
     render_test_report(root::TestNode; out, title="Test report", page_when=…) -> (; gallery, agent)
     render_test_report(dumps::AbstractVector{<:AbstractString}; out, …)       -> (; gallery, agent)
@@ -1317,14 +1341,29 @@ Given a list of TOML dumps (see [`dump_test_report`](@ref)) their trees are **me
 first — which is how a sharded CI run becomes a single coherent gallery instead of N disconnected
 ones.
 
+`overview` is an optional zero-argument function run with the **overview page open**, so it writes
+with Pinax's ordinary content macros — `@desc`, `@table`, `@raw` — and its content lands there. This
+is how something the running job knows but the tree does not gets into the artifact instead of into a
+CI log that expires: a completeness verdict ("every unit ran exactly once"), the environment, a note
+about what was skipped. A `@desc` appears above the fixed tables. If the hook throws, that is a
+diagnostic in the report, not a failed render.
+
 Writes `<out>_html` (the human gallery) and `<out>_agent` (`agent.json`), following the same
 convention as [`report`](@ref).
+
+```julia
+render_test_report(dumps; out="test-report", overview = () -> begin
+    @desc md"**Every unit ran exactly once** — 24 observed, 24 run."
+    @table (; metric=["units observed", "units run"], value=[24, 24]) caption = "Completeness"
+end)
+```
 """
 function render_test_report(
     root;
     out::AbstractString,
     title::AbstractString="Test report",
     page_when::Function=_looks_like_a_file,
+    overview=nothing,
 )
     reset!(; title=title)
     counter = Ref(0)
@@ -1350,6 +1389,7 @@ function render_test_report(
                     "that file: 1.0 means a check landed exactly on its tolerance.",
             id=:per_file,
         )
+        _overview_hook(overview)
     finally
         _exit_page!()
     end
@@ -1396,6 +1436,7 @@ function _render_matrix(
     out::AbstractString,
     title::AbstractString="Test report",
     page_when::Function=_looks_like_a_file,
+    overview=nothing,
 )
     pairs = [(r, c) for (r, c) in zip(roots, cells) if !isempty(c)]
     reset!(; title=title)
@@ -1433,6 +1474,7 @@ function _render_matrix(
             id=:per_file,
             caption="Per-cell, per-file result profile. `worst margin` is the largest `delta/tol` in that (cell, file).",
         )
+        _overview_hook(overview)
     finally
         _exit_page!()
     end

@@ -82,3 +82,29 @@ Each unit becomes a page, its `@testset`s become sections, and the margins are t
 provider **declines** unless a capture is ambient, so a bare `Pkg.test()` of a sharded suite runs
 exactly as it did before — the same invariant as everywhere else here: the report changes nothing
 about how the suite runs.
+## Saying what the job knows and the tree does not
+
+A merged report is built from the trees the shards dumped, and some things are simply not in a tree.
+Whether **every** shard reported, for one: a sharded report that is missing a shard looks exactly like
+a smaller suite. That verdict lives in the CI job, and until now it lived only in a log that expires.
+
+`render_test_report(…; overview)` takes a zero-argument function and runs it with the **overview page
+open**, so it writes in Pinax's ordinary vocabulary and the content lands there:
+
+```julia
+Pinax.render_test_report(
+    readdir("pinax-dumps"; join=true);
+    out = "test-report",
+    overview = () -> begin
+        @desc md"**Every unit ran exactly once** — 24 observed, 24 run."
+        @table (; metric = ["units observed", "units run"], value = [24, 24]) caption = "Completeness"
+    end,
+)
+```
+
+A `@desc` appears above the fixed provenance and per-file tables — a page's description is not
+content-ordered — which is where a verdict wants to be; tables follow them. Everything goes to every
+backend, so the verdict is **data** in `agent.json` and not only pixels in the gallery.
+
+If the hook throws, that is a diagnostic in the report and the report still renders: the same rule as
+everywhere else here — the machinery that draws a run may not change its verdict, in either direction.
