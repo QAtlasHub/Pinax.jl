@@ -1,6 +1,6 @@
 name = "Pinax"
 uuid = "e782a80a-1ac9-479e-ba2b-0f3433ef5b4f"
-version = "0.39.17"
+version = "0.39.18"
 authors = ["sota shimozono <shimozono-sota631@g.ecc.u-tokyo.ac.jp>"]
 
 [deps]
@@ -16,6 +16,7 @@ Makie = "ee78f7c6-11fb-53f2-987a-cfe4a2b5a57a"
 ParamIO = "938a3ac2-d340-473c-bcf1-88af577e4ccf"
 Plots = "91a5bcdd-55d7-5caf-9e0b-520d859cae80"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TestShards = "acceef1d-f5e0-4fe4-a546-818dc56ce7b2"
 
 [extensions]
 PinaxDataVaultExt = ["DataVault", "ParamIO"]
@@ -24,6 +25,7 @@ PinaxMakieExt = "Makie"
 PinaxParamIOExt = "ParamIO"
 PinaxPlotsExt = "Plots"
 PinaxTestExt = "Test"
+PinaxTestShardsExt = ["TestShards", "Test"]
 
 [compat]
 Aqua = "0.8"
@@ -38,6 +40,7 @@ Plots = "1"
 Sockets = "1"
 TOML = "1"
 Test = "1"
+TestShards = "0.3"
 julia = "1.12"
 
 [extras]

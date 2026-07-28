@@ -17,6 +17,9 @@ mkpath.(values(PATHS))
         Aqua.test_all(Pinax)
     end
     # ----- Test files in the "test" directory. -----
+    # NOTE: only `test/test_*.jl` is collected, and only from `test/` itself. `test/ext/` holds tests
+    # for an extension whose weak dependency is not registered yet and so cannot be an `[extras]`
+    # entry; a dedicated CI job installs it and runs those directly. See `.github/workflows/CI.yml`.
     test_args = copy(ARGS)
     println("Passed arguments ARGS = $(test_args) to tests.")
     @time for dir in dirs
