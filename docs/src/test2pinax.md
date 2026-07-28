@@ -142,3 +142,27 @@ backend, so the verdict is **data** in `agent.json` and not only pixels in the g
 
 If the hook throws, that is a diagnostic in the report and the report still renders: the same rule as
 everywhere else here — the machinery that draws a run may not change its verdict, in either direction.
+
+### Completeness, packaged
+
+The verdict above is the one that matters most, so it comes ready-made. TestShards observes the whole
+unit sequence in *every* shard, so it knows which units should exist; `completeness` compares that
+against what ran, and `completeness_overview` turns the result into overview content:
+
+```julia
+using Pinax, TestShards
+c = TestShards.completeness(windows, ran)
+render_test_report(dumps; out = "test-report", overview = completeness_overview(c))
+```
+
+The numbers become a table — native rows in `agent.json` — and the verdict becomes the prose above it,
+naming the positions of any hole:
+
+```text
+**Completeness FAILED.** 1 unit never ran: position 2. The run is green and that part of the
+suite was not tested.
+```
+
+Neither package can say that alone: TestShards holds the verdict, Pinax holds the document. The method
+lives in `PinaxTestShardsExt`, so it appears when both packages are loaded and costs nothing when they
+are not.

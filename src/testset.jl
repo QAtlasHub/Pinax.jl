@@ -1305,6 +1305,28 @@ function _package_line(p)
     end
 end
 
+"""
+    completeness_overview(c) -> Function
+
+The overview content for a TestShards completeness verdict — pass it as `overview` to
+[`render_test_report`](@ref):
+
+```julia
+c = TestShards.completeness(windows, ran)
+render_test_report(dumps; out = "test-report", overview = completeness_overview(c))
+```
+
+A sharded report that is missing a shard looks exactly like a smaller suite, and nothing in the
+artifact contradicts that reading. This puts the verdict IN the artifact: the numbers as a table
+(native rows in `agent.json`, so a registry or an agent reads them) and the verdict — with the
+positions of any hole — as prose above it.
+
+Declared here with no methods: the one method lives in `PinaxTestShardsExt`, because it takes
+TestShards' `Completeness`. `TestShards.completeness_report` renders the same verdict for a CI job
+summary; this renders it for the document, and the two surfaces are deliberately separate.
+"""
+function completeness_overview end
+
 # The caller's own content on the overview page. What the CI job knows and the document does not — a
 # completeness verdict, a note about the environment — belongs IN the artifact rather than in a log
 # that expires, and the way to say it is Pinax's own vocabulary rather than a second one: the hook

@@ -169,6 +169,48 @@ end
         @test unit_counts(plain) == unit_counts(captured)
     end
 
+    @testset "the completeness verdict rides in the artifact" begin
+        # Neither package can state this alone: TestShards observes the whole unit sequence in every
+        # shard and so knows which units should exist; we hold the document. Without it, a report
+        # missing a shard reads as a smaller suite.
+        w(shard, seen) = TestShards.ShardWindow(shard, 0.0, 1.0, 1, 1.0, seen)
+        node = Pinax.TestNode(
+            "f.jl"; checks=[Pinax.Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)]
+        )
+
+        whole = TestShards.completeness(
+            [w("s1", 2), w("s2", 2)], [(1, "s1", "a.jl"), (2, "s2", "b.jl")]
+        )
+        @test TestShards.complete(whole)
+        dir = mktempdir()
+        Pinax.render_test_report(
+            Pinax.TestNode("T"; children=[node]);
+            out=joinpath(dir, "rep"),
+            overview=Pinax.completeness_overview(whole),
+        )
+        html = read(joinpath(dir, "rep_html", "overview.html"), String)
+        @test occursin("Every unit ran exactly once", html)
+        @test occursin("units observed", html) &&
+            occursin("every unit ran exactly once", html)
+        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        @test occursin("[\"units observed\",2]", agent)      # native, not "2"
+        @test occursin("\"id\":\"completeness\"", agent)
+
+        # A hole is NAMED — the whole point is that the artifact contradicts "smaller suite"
+        holed = TestShards.completeness([w("s1", 2), w("s2", 2)], [(1, "s1", "a.jl")])
+        @test !TestShards.complete(holed)
+        d2 = mktempdir()
+        Pinax.render_test_report(
+            Pinax.TestNode("T"; children=[node]);
+            out=joinpath(d2, "rep"),
+            overview=Pinax.completeness_overview(holed),
+        )
+        h2 = read(joinpath(d2, "rep_html", "overview.html"), String)
+        @test occursin("Completeness FAILED", h2)
+        @test occursin("1 unit never ran", h2) && occursin("position 2", h2)
+        @test occursin("FAILED", read(joinpath(d2, "rep_agent", "agent.json"), String))
+    end
+
     @testset "sharded, the shards merge into one document" begin
         # Each shard dumps instead of rendering; one merge renders every dump as a single document.
         dumps = mktempdir()
