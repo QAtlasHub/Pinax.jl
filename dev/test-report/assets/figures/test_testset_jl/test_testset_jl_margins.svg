@@ -84,40 +84,40 @@
 <text x="242" y="525" text-anchor="end" fill="#333">Pinax.dump_test_report(TestNode…</text>
 <rect x="250" y="515" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="525" fill="#666">0.0</text>
-<text x="242" y="543" text-anchor="end" fill="#333">Pinax._ntests(n) == 2</text>
+<text x="242" y="543" text-anchor="end" fill="#333">occursin(&quot;Every unit ran exactl…</text>
 <rect x="250" y="533" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="543" fill="#666">0.0</text>
-<text x="242" y="561" text-anchor="end" fill="#333">Pinax._nfail(n) == 0</text>
+<text x="242" y="561" text-anchor="end" fill="#333">occursin(&quot;units observed&quot;, html…</text>
 <rect x="250" y="551" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="561" fill="#666">0.0</text>
-<text x="242" y="579" text-anchor="end" fill="#333">occursin(&quot;1 broken&quot;, Pinax._sum…</text>
+<text x="242" y="579" text-anchor="end" fill="#333">occursin(&quot;id=\&quot;cinote\&quot;&quot;, html)</text>
 <rect x="250" y="569" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="579" fill="#666">0.0</text>
-<text x="242" y="597" text-anchor="end" fill="#333">occursin(&quot;1/2 passed&quot;, Pinax._s…</text>
+<text x="242" y="597" text-anchor="end" fill="#333">occursin(&quot;units observed&quot;, agen…</text>
 <rect x="250" y="587" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="597" fill="#666">0.0</text>
-<text x="242" y="615" text-anchor="end" fill="#333">captured === root</text>
+<text x="242" y="615" text-anchor="end" fill="#333">occursin(&quot;Provenance&quot;, html) &amp;&amp;…</text>
 <rect x="250" y="605" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="615" fill="#666">0.0</text>
-<text x="242" y="633" text-anchor="end" fill="#333">length(root.figures) == 2</text>
+<text x="242" y="633" text-anchor="end" fill="#333">occursin(&quot;Diagnostics&quot;, h2) &amp;&amp; …</text>
 <rect x="250" y="623" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="633" fill="#666">0.0</text>
-<text x="242" y="651" text-anchor="end" fill="#333">root.desc !== nothing &amp;&amp; occurs…</text>
+<text x="242" y="651" text-anchor="end" fill="#333">isfile(joinpath(d2, &quot;rep_html&quot;,…</text>
 <rect x="250" y="641" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="651" fill="#666">0.0</text>
-<text x="242" y="669" text-anchor="end" fill="#333">root.content == [:figure =&gt; 1, …</text>
+<text x="242" y="669" text-anchor="end" fill="#333">Pinax._ntests(n) == 2</text>
 <rect x="250" y="659" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="669" fill="#666">0.0</text>
-<text x="242" y="687" text-anchor="end" fill="#333">occursin(&quot;a table caption&quot;, html)</text>
+<text x="242" y="687" text-anchor="end" fill="#333">Pinax._nfail(n) == 0</text>
 <rect x="250" y="677" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="687" fill="#666">0.0</text>
-<text x="242" y="705" text-anchor="end" fill="#333">occursin(&quot;hand built&quot;, html)</text>
+<text x="242" y="705" text-anchor="end" fill="#333">occursin(&quot;1 broken&quot;, Pinax._sum…</text>
 <rect x="250" y="695" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="705" fill="#666">0.0</text>
-<text x="242" y="723" text-anchor="end" fill="#333">isfile(Pinax.dump_test_report(r…</text>
+<text x="242" y="723" text-anchor="end" fill="#333">occursin(&quot;1/2 passed&quot;, Pinax._s…</text>
 <rect x="250" y="713" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="723" fill="#666">0.0</text>
-<text x="242" y="741" text-anchor="end" fill="#333">isfile(joinpath(dir, &quot;r_html&quot;, …</text>
+<text x="242" y="741" text-anchor="end" fill="#333">captured === root</text>
 <rect x="250" y="731" width="1.0" height="11" fill="#4c9f70" rx="2"/>
 <text x="256.0" y="741" fill="#666">0.0</text>
 <line x1="508.33333333333337" y1="22" x2="508.33333333333337" y2="748" stroke="#d9534f" stroke-width="1" stroke-dasharray="3,2"/>
