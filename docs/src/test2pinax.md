@@ -83,6 +83,44 @@ provider **declines** unless a capture is ambient, so a bare `Pkg.test()` of a s
 exactly as it did before — the same invariant as everywhere else here: the report changes nothing
 about how the suite runs.
 
+### When the runner owns `Pkg.test`
+
+`Pinax.test()` gets its capture in by handing `Pkg.test` a `-L` preamble, which is what lets it leave
+`runtests.jl` untouched. In CI that route is often closed: the action running the suite owns the
+`Pkg.test` call and exposes no way to add a flag to it — `julia-actions/julia-runtest` has inputs for
+`check_bounds`, `coverage`, `depwarn` and the rest, and none for `julia_args`. Replacing the action to
+get the flag in means re-implementing whatever else it was setting, and **coverage is the one that
+hurts**: a sharded suite that stops emitting `.cov` counters has nothing to merge.
+
+So install the capture from inside the suite instead. It is one line, and it is inert unless the
+environment asks for a report:
+
+```julia
+using MyPackage, TestShards, Pinax
+Pinax.install_test_capture!()
+TestShards.@shard begin
+    include("core/a.jl")
+end
+```
+
+The runner stays whoever it was, with its own flags. Per-shard dumping is then one environment
+variable — set `PINAX_TEST_DUMP` to an **absolute** path, since `Pkg.test` tears its sandbox down
+around you:
+
+```yaml
+- uses: julia-actions/julia-runtest@v1        # coverage, check_bounds, … all still its business
+  env:
+    PINAX_TEST_DUMP: ${{ github.workspace }}/pinax-dumps/${{ matrix.shard }}.toml
+```
+
+and one job afterwards merges them with [`render_test_report`](@ref).
+
+[`Pinax.install_test_capture!`](@ref) does nothing at all unless `PINAX_TEST_OUT` or
+`PINAX_TEST_DUMP` is set, so the line above can be committed and a developer's `Pkg.test()` behaves
+as it always did. It is idempotent too: a `runtests.jl` carrying it is still a valid target for
+`Pinax.test()`, and the second install declines rather than opening a rival root that would take the
+assertions and leave the first to render empty and green.
+
 TestShards' `evidence!` comes across too. A test that says what grounds it —
 
 ```julia

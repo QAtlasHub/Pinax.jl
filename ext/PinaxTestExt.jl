@@ -234,14 +234,20 @@ function Pinax._install_test_capture!()
     # our side effects (`push_testset`, `atexit`) would break the cache image — and there is no suite to
     # capture there anyway — so install NOTHING then. The cache-flags probe is handled by the empty-root
     # guard in `_finalize_test_capture!` (it installs but renders nothing). Only the test run captures.
-    Base.generating_output() && return nothing
+    Base.generating_output() && return false
+    # One root per process. Both ways in reach here — the preamble, and `install_test_capture!` from
+    # the suite — and a `runtests.jl` carrying the call is still a valid target for `Pinax.test()`, so
+    # they meet routinely. A second root would take every assertion and leave the first to render an
+    # empty, green report.
+    Pinax._CAPTURE_INSTALLED[] && return false
+    Pinax._CAPTURE_INSTALLED[] = true
     empty!(Pinax._FILE_AST)
     root = PinaxTestSet(
         report_title(); out=report_out(), dump=report_dump(), title=report_title()
     )
     Test.push_testset(root)
     atexit(() -> _finalize_test_capture!(root))
-    return nothing
+    return true
 end
 
 function _finalize_test_capture!(root::PinaxTestSet)

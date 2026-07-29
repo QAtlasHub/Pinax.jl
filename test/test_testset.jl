@@ -40,6 +40,37 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         end
     end
 
+    @testset "install_test_capture!: both refusals, from inside a running suite" begin
+        # Installing actually succeeds only at depth 0, so the end-to-end paths are subprocess
+        # tests further down. These are the two REFUSALS — the guards that let the call live in a
+        # committed `runtests.jl` — and refusing is safe to reach from in here, because it is
+        # precisely the case where nothing is pushed.
+        installed = Pinax._CAPTURE_INSTALLED[]
+        try
+            withenv("PINAX_TEST_OUT" => nothing, "PINAX_TEST_DUMP" => nothing) do
+                @test !Pinax.capture_requested()
+                @test Pinax.install_test_capture!() == false   # nobody asked → no root, no report
+            end
+            withenv("PINAX_TEST_OUT" => "somewhere") do
+                @test Pinax.capture_requested()
+            end
+            withenv("PINAX_TEST_DUMP" => "s1.toml") do
+                @test Pinax.capture_requested()                # a dump alone is a request
+            end
+
+            # Asked for, but a capture is already open — under `Pinax.test`, whose preamble
+            # installed one before the suite was read. A second root would take the assertions and
+            # leave the first rendering empty and green.
+            Pinax._CAPTURE_INSTALLED[] = true
+            withenv("PINAX_TEST_OUT" => "somewhere") do
+                @test Pinax.install_test_capture!() == false
+                @test Pinax._install_test_capture!() == false  # the preamble's own way in, too
+            end
+        finally
+            Pinax._CAPTURE_INSTALLED[] = installed
+        end
+    end
+
     @testset "numbers survive both verdicts" begin
         # Pass.data is an Expr with evaluated args; Fail.data is a String. The asymmetry is the
         # whole trap: parse only the Expr and every FAILING check silently loses its numbers.
@@ -375,13 +406,18 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
             """,
         )
         runtests = repr(joinpath(dir, "runtests.jl"))
-        run_script = function (body)
+        # A capturing root can only be installed at depth 0, so the install paths necessarily run in
+        # a child — which means they are invisible to a coverage run that only measures this process.
+        # Mirror the parent's setting into the child so the lines it really does execute are counted
+        # where they happen; off locally, so a plain `Pkg.test()` is not slowed for nothing.
+        cov = Base.JLOptions().code_coverage != 0 ? `--code-coverage=user` : ``
+        run_script = function (body; env=("PINAX_TEST_OUT" => joinpath(dir, "rep"),))
             script = tempname() * ".jl"
             write(script, body)
             log = tempname()
             cmd = addenv(
-                `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) $script`,
-                "PINAX_TEST_OUT" => joinpath(dir, "rep"),
+                `$(Base.julia_cmd()) --startup-file=no $(cov) --project=$(dirname(Base.active_project())) $script`,
+                env...,
             )
             p = run(pipeline(ignorestatus(cmd); stdout=log, stderr=log))
             return (; ok=success(p), log=read(log, String))
@@ -404,6 +440,57 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         @test occursin("convergence of E against the oracle", md)  # a @desc inside a test reached it
         @test isfile(joinpath(dir, "rep_html", "test_demo_jl.html"))
         @test !occursin("noisy fixture", md)          # @pinaxignore dropped it (it still ran)
+
+        # ---- the suite-side way in: same capture, without owning the `Pkg.test` call ----
+        # `install_test_capture!` from inside the suite has to reach exactly the same result as the
+        # preamble, because the point of it is that a runner which cannot be given `-L` — an action
+        # that owns `Pkg.test` and sets coverage on it — keeps running the suite.
+        r = run_script(
+            "using Pinax, Test\nPinax.install_test_capture!()\ninclude($(runtests))\n";
+            env=("PINAX_TEST_OUT" => joinpath(dir, "suite"),),
+        )
+        @test !r.ok                                   # red suite still fails the process
+        @test occursin("Pinax test report", r.log)
+        md_suite = read(joinpath(dir, "suite_agent", "agent.md"), String)
+        @test occursin("1/2 FAIL", md_suite)          # same verdict as the preamble produced
+        @test occursin("got 0.5, want 0.9", md_suite) # same numbers
+        @test occursin("convergence of E against the oracle", md_suite)
+
+        # ---- inert unless the environment asked (so the line can be committed) ----
+        # A developer running `Pkg.test()` with the call in `runtests.jl` must get what they got
+        # before it was added: stock Test, red fails, no report anywhere.
+        r = run_script(
+            "using Pinax, Test\nPinax.install_test_capture!()\ninclude($(runtests))\n";
+            env=("PINAX_TEST_OUT" => nothing, "PINAX_TEST_DUMP" => nothing),
+        )
+        @test !r.ok                                   # the top-level DefaultTestSet throws on red
+        @test !occursin("Pinax test report", r.log)   # nothing rendered, nothing dumped
+        @test !isdir(joinpath(dir, "test-report_agent"))   # not even at the default `out`
+
+        # ---- idempotent: preamble AND suite call, still one root ----
+        # A `runtests.jl` carrying the call is still a valid target for `Pinax.test()`, so the two
+        # meet routinely. Two roots would mean two atexit hooks: the second takes every assertion
+        # and the first renders empty and green. One report line is the assertion that matters.
+        r = run_script(
+            "using Pinax, Test\nPinax._install_test_capture!()\nPinax.install_test_capture!()\ninclude($(runtests))\n";
+            env=("PINAX_TEST_OUT" => joinpath(dir, "once"),),
+        )
+        @test !r.ok
+        @test length(collect(eachmatch(r"Pinax test report", r.log))) == 1
+        md_once = read(joinpath(dir, "once_agent", "agent.md"), String)
+        @test occursin("1/2 FAIL", md_once)           # the surviving root is the one that captured
+
+        # ---- asked for, but there is no `Test` to capture: say so, do not fail silently ----
+        # `Test` is a weakdep, so without it the installer has no method at all. A report was
+        # requested and will not appear; going quiet here would reproduce the empty-and-green
+        # failure by another route.
+        r = run_script(
+            "using Pinax\nPinax.install_test_capture!()\n";
+            env=("PINAX_TEST_OUT" => joinpath(dir, "notest"),),
+        )
+        @test r.ok                                    # a warning, not an error
+        @test occursin("is not loaded", r.log)
+        @test !isdir(joinpath(dir, "notest_agent"))
     end
 
     @testset "Pinax.test renders a plain @testset suite (the interface, G)" begin
