@@ -406,12 +406,17 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
             """,
         )
         runtests = repr(joinpath(dir, "runtests.jl"))
+        # A capturing root can only be installed at depth 0, so the install paths necessarily run in
+        # a child — which means they are invisible to a coverage run that only measures this process.
+        # Mirror the parent's setting into the child so the lines it really does execute are counted
+        # where they happen; off locally, so a plain `Pkg.test()` is not slowed for nothing.
+        cov = Base.JLOptions().code_coverage != 0 ? `--code-coverage=user` : ``
         run_script = function (body; env=("PINAX_TEST_OUT" => joinpath(dir, "rep"),))
             script = tempname() * ".jl"
             write(script, body)
             log = tempname()
             cmd = addenv(
-                `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) $script`,
+                `$(Base.julia_cmd()) --startup-file=no $(cov) --project=$(dirname(Base.active_project())) $script`,
                 env...,
             )
             p = run(pipeline(ignorestatus(cmd); stdout=log, stderr=log))
@@ -474,6 +479,18 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         @test length(collect(eachmatch(r"Pinax test report", r.log))) == 1
         md_once = read(joinpath(dir, "once_agent", "agent.md"), String)
         @test occursin("1/2 FAIL", md_once)           # the surviving root is the one that captured
+
+        # ---- asked for, but there is no `Test` to capture: say so, do not fail silently ----
+        # `Test` is a weakdep, so without it the installer has no method at all. A report was
+        # requested and will not appear; going quiet here would reproduce the empty-and-green
+        # failure by another route.
+        r = run_script(
+            "using Pinax\nPinax.install_test_capture!()\n";
+            env=("PINAX_TEST_OUT" => joinpath(dir, "notest"),),
+        )
+        @test r.ok                                    # a warning, not an error
+        @test occursin("is not loaded", r.log)
+        @test !isdir(joinpath(dir, "notest_agent"))
     end
 
     @testset "Pinax.test renders a plain @testset suite (the interface, G)" begin
