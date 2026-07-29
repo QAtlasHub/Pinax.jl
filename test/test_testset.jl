@@ -40,6 +40,37 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
         end
     end
 
+    @testset "install_test_capture!: both refusals, from inside a running suite" begin
+        # Installing actually succeeds only at depth 0, so the end-to-end paths are subprocess
+        # tests further down. These are the two REFUSALS — the guards that let the call live in a
+        # committed `runtests.jl` — and refusing is safe to reach from in here, because it is
+        # precisely the case where nothing is pushed.
+        installed = Pinax._CAPTURE_INSTALLED[]
+        try
+            withenv("PINAX_TEST_OUT" => nothing, "PINAX_TEST_DUMP" => nothing) do
+                @test !Pinax.capture_requested()
+                @test Pinax.install_test_capture!() == false   # nobody asked → no root, no report
+            end
+            withenv("PINAX_TEST_OUT" => "somewhere") do
+                @test Pinax.capture_requested()
+            end
+            withenv("PINAX_TEST_DUMP" => "s1.toml") do
+                @test Pinax.capture_requested()                # a dump alone is a request
+            end
+
+            # Asked for, but a capture is already open — under `Pinax.test`, whose preamble
+            # installed one before the suite was read. A second root would take the assertions and
+            # leave the first rendering empty and green.
+            Pinax._CAPTURE_INSTALLED[] = true
+            withenv("PINAX_TEST_OUT" => "somewhere") do
+                @test Pinax.install_test_capture!() == false
+                @test Pinax._install_test_capture!() == false  # the preamble's own way in, too
+            end
+        finally
+            Pinax._CAPTURE_INSTALLED[] = installed
+        end
+    end
+
     @testset "numbers survive both verdicts" begin
         # Pass.data is an Expr with evaluated args; Fail.data is a String. The asymmetry is the
         # whole trap: parse only the Expr and every FAILING check silently loses its numbers.
