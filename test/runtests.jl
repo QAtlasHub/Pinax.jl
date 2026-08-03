@@ -4,7 +4,6 @@ using Pinax
 using Test
 using TestShards, Aqua
 
-
 # Plain `@testset`: a bare `Pkg.test()` runs stock. Running `Pinax.test()` instead captures this same
 # tree and renders/dumps it as a Pinax document (Pinax dogfooding its own bridge, no token in the file).
 
