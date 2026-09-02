@@ -119,20 +119,3 @@ that report alongside the Documenter docs is [#68](https://github.com/QAtlasHub/
 is a Node MCP server over that artifact: it serves every unit (figure / table / section) by id and
 presents a figure as its underlying data table — `npx pinax-mcp --agent <render-out>`. See its
 [README](clients/pinax-mcp/README.md).
-
-## Documentation
-
-- **[Stable docs](https://codes.sota-shimozono.com/Pinax.jl/stable/)** ·
-  **[Dev docs](https://codes.sota-shimozono.com/Pinax.jl/dev/)**
-- **[Examples](https://codes.sota-shimozono.com/Pinax.jl/stable/examples/)** — galleries built live
-  from real analysis scripts
-- **[API reference](https://codes.sota-shimozono.com/Pinax.jl/stable/api/)**
-
-## Contributing
-
-Issues and pull requests are welcome at
-[github.com/sotashimozono/Pinax.jl](https://github.com/sotashimozono/Pinax.jl/issues).
-
-## License
-
-MIT — see [LICENSE](LICENSE).
