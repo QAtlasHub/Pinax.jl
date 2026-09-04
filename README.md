@@ -114,10 +114,3 @@ alongside the Documenter docs is [#68](https://github.com/QAtlasHub/Pinax.jl/iss
 is a Node MCP server over that artifact: it serves every unit (figure / table / section) by id and
 presents a figure as its underlying data table — `npx pinax-mcp --agent <render-out>`. See its
 [README](clients/pinax-mcp/README.md).
-
-## Development
-
-This package is written with the assistance of [Claude Code](https://claude.com/claude-code). The
-design is mine — the DSL, the three faces of one document, and the test-suite bridge. The
-implementation, the test suite and the reference documentation are LLM-assisted and reviewed by me
-before merging.
