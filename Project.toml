@@ -29,7 +29,7 @@ PinaxTestShardsExt = ["TestShards", "Test"]
 
 [compat]
 Aqua = "0.8"
-Bibliography = "0.3"
+Bibliography = "0.3, 0.4"
 DataVault = "0.7"
 Documenter = "1"
 Downloads = "1"
