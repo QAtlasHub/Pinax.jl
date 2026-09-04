@@ -1,6 +1,6 @@
 name = "Pinax"
 uuid = "e782a80a-1ac9-479e-ba2b-0f3433ef5b4f"
-version = "0.39.21"
+version = "0.1.0"
 authors = ["sota shimozono <shimozono-sota631@g.ecc.u-tokyo.ac.jp>"]
 
 [deps]
@@ -50,6 +50,7 @@ Documenter = "e30172f5-a6a5-5a46-863b-614d45cd2de4"
 Downloads = "f43a241f-c20a-4ad4-852c-f6b1247861c6"
 ParamIO = "938a3ac2-d340-473c-bcf1-88af577e4ccf"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+TestShards = "acceef1d-f5e0-4fe4-a546-818dc56ce7b2"
 
 [targets]
-test = ["Test", "Aqua", "Downloads", "DataVault", "Documenter", "ParamIO"]
+test = ["Test", "Aqua", "Downloads", "DataVault", "Documenter", "ParamIO", "TestShards"]

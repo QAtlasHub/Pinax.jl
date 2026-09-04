@@ -69,9 +69,62 @@ end
 Push a capturing root `PinaxTestSet` onto the (task-local) testset stack and register an `atexit` hook
 that renders/dumps it and sets the exit code — the `Pkg.test`-delegation half of [`test`](@ref). The
 `-L` preamble the delegating `Pinax.test()` hands to `Pkg.test` calls this; the method lives in
-`PinaxTestExt` (needs `Test`).
+`PinaxTestExt` (needs `Test`). Returns whether it installed — it declines during precompilation
+and when a capture is already open.
 """
 function _install_test_capture! end
+
+"Set once a capturing root is installed in this process, so a second install declines."
+const _CAPTURE_INSTALLED = Ref(false)
+
+"""
+    capture_requested() -> Bool
+
+Whether the environment asked for a test report at all: `PINAX_TEST_OUT` or `PINAX_TEST_DUMP`
+present. **Presence** is the request — `report_out` has a default, so no particular value can be
+one — which is what lets [`install_test_capture!`](@ref) sit in a committed `runtests.jl`.
+"""
+capture_requested() = haskey(ENV, "PINAX_TEST_OUT") || haskey(ENV, "PINAX_TEST_DUMP")
+
+"""
+    install_test_capture!() -> Bool
+
+Install the capturing root from *inside* the suite, so a report comes out of a plain `Pkg.test()`
+— whoever owns that call keeps owning it, along with the sandbox, the coverage flags and
+everything else it sets.
+
+[`test`](@ref) reaches the same installer through a `-L` preamble, which is what lets it leave
+`runtests.jl` untouched. That route is not always open: a CI action that owns the `Pkg.test` call
+exposes no way to add `-L` — `julia-actions/julia-runtest` has no such input — and replacing it
+to get one costs whatever else it was setting, coverage included. This is the other way in, and
+it composes with anything that can set an environment variable.
+
+    using MyPackage, Test, Pinax
+    Pinax.install_test_capture!()
+    @testset "MyPackage" begin
+        include("a.jl")
+    end
+
+**It does nothing unless the environment asked** — see [`capture_requested`](@ref). So the line
+can be committed and a developer's `Pkg.test()` behaves exactly as it did; CI turns it on by
+setting `PINAX_TEST_OUT` or, per shard, `PINAX_TEST_DUMP`.
+
+It is also idempotent. Called when a capture is already open — under [`test`](@ref), whose
+preamble installed one before the suite was even read — it declines. A second root would take
+every assertion and leave the first to render an empty and green report, which is the exact
+failure this seam exists to prevent.
+"""
+function install_test_capture!()
+    capture_requested() || return false
+    if !applicable(_install_test_capture!)
+        # Asked for a report, and there is no `Test` to capture. Silence here would reproduce the
+        # empty-and-green failure by another route, so say so.
+        @warn "Pinax.install_test_capture!: `Test` is not loaded, so there is nothing to capture — \
+               no report will be written."
+        return false
+    end
+    return _install_test_capture!()
+end
 
 "Where the test report is written (`PINAX_TEST_OUT`, default `test-report`) → `<out>_html` + `<out>_agent`."
 report_out() = get(ENV, "PINAX_TEST_OUT", "test-report")
