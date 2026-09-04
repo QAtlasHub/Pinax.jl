@@ -19,7 +19,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-        # `--auto` + `--squash` で必要 check が green になった瞬間に squash-merge し、
-        # `--delete-branch` で bot 用の throwaway branch を即削除する。
-        # Bot PR (CompatHelper / dependabot / TagBot 等) を 1 step で完結させる。
-        run: gh pr merge --auto --squash --delete-branch "$PR_URL"
+        # `--merge`, not `--squash`: squash is disabled on this repository, so `--squash` fails
+        # with `GraphQL: Squash merges are not allowed on this repository` on every bot pull
+        # request. Measured 2026-09-04 — it had never worked, and was one of the two reasons six
+        # dependency updates sat unmerged since July.
+        run: gh pr merge --auto --merge --delete-branch "$PR_URL"
