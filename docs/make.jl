@@ -66,6 +66,11 @@ makedocs(;
     sitename="Pinax.jl",
     format=html_fmt,
     modules=[Pinax],
+    # Arms the mechanism: a `jldoctest` block whose output stops matching fails the build. Most of
+    # this documentation cannot be doctests — the galleries render to disk and `Pinax.test` runs a
+    # suite — so `docs/literate/gallery.jl` is executed by this file instead, and `test_readme.jl`
+    # executes the Quickstart.
+    doctest=true,
     pages=[
         "Home" => "index.md",
         "Examples" => "examples.md",

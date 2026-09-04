@@ -49,10 +49,22 @@ discards this browser's unsaved comments and bookmarks.
 Comments can also be read and written from Julia / the command line, which is how tooling
 participates in the channel:
 
-```julia
-using Pinax
-add_comment("comments.toml", :eq_energy, "this curve looks off below T=0.5"; author = "llm")
-comments, bookmarks = read_comments("comments.toml")
+```jldoctest
+julia> using Pinax
+
+julia> path = joinpath(mktempdir(), "comments.toml");
+
+julia> add_comment(path, :eq_energy, "this curve looks off below T=0.5"; author = "llm") == path
+true
+
+julia> comments, bookmarks = read_comments(path);
+
+julia> comments[:eq_energy]
+1-element Vector{Pinax.Comment}:
+ Pinax.Comment("llm", "this curve looks off below T=0.5")
+
+julia> bookmarks
+Set{Symbol}()
 ```
 
 `add_comment` is append-only and keyed by the node id (a figure or section anchor), the same id the
