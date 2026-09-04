@@ -39,7 +39,9 @@ Requires Julia v1.12+. Not in the General registry yet.
 ## Quickstart
 
 ```julia
-using Pinax
+using Pinax, Plots
+
+plot_energy() = plot(0.1:0.05:2, β -> 1 / β; xlabel = "β", ylabel = "E/N", legend = false)
 
 @page :results "Results" begin
     @section :energy "Energy" begin
@@ -49,11 +51,15 @@ using Pinax
     end
 end
 
-render(out = "site")               # -> site/index.html    (self-contained HTML gallery)
-serve("site")                      # preview over HTTP
+render(out = "site")               # -> site/index.html + assets/figures/…/energy_fig1.svg
+```
 
-# render(theme = :latex, out = "pdf")     # -> pdf/document.tex  -> PDF
-# render(theme = :agent, out = "agent")   # -> agent/agent.json  (machine-readable)
+Then preview it, or render the same document another way:
+
+```julia
+serve("site")                             # preview over HTTP
+render(theme = :latex, out = "pdf")       # -> pdf/document.tex  -> PDF
+render(theme = :agent, out = "agent")     # -> agent/agent.json  (machine-readable)
 ```
 
 `@figure` captures its expression lazily, so figures are computed (and cached) only when you

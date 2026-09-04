@@ -1,11 +1,15 @@
 # The README's claims, checked against the package.
 #
-# Scope: names and links, not execution. The Quickstart ends in `render` and `serve`, so running it
-# verbatim would write a site and open a socket. What shipped was not a runtime fault anyway — the
-# README taught `@pinaxtestset` and `PINAX_TEST_REPORT`, neither of which exists anywhere in the
-# source, while `docs/src/test2pinax.md` said the opposite.
+# Scope: the Quickstart is executed verbatim; every other block is checked by name. `serve` sits in
+# a separate block precisely so this one can run — it starts a blocking HTTP server.
+#
+# Two defects motivate this. The README taught `@pinaxtestset` and `PINAX_TEST_REPORT`, neither of
+# which exists anywhere in the source. And the Quickstart's figure expression was undefined, so a
+# reader following it got `UndefVarError` embedded in the rendered gallery while `render` returned
+# normally — a failure with no signal at the call site.
 
 using Pinax
+using Plots: Plots
 using Test
 
 const _README = read(joinpath(@__DIR__, "..", "README.md"), String)
@@ -78,4 +82,33 @@ end
     @test !occursin("codes.sota-shimozono.com", _README)
     @test !occursin("sotashimozono/Pinax.jl", _README)
     @test occursin("qatlashub.github.io/Pinax.jl", _README)
+end
+
+@testset "the Quickstart runs verbatim and renders a figure" begin
+    # Not "it did not throw": `render` returns normally with a crashed figure, so the assertion
+    # has to be about the artefact. A real SVG on disk, and no exception text in the page.
+    blocks = _julia_blocks(_README)
+    quickstart = blocks[2]
+    @test occursin("@page", quickstart)
+    @test occursin("render(", quickstart)
+    @test !occursin("serve(", quickstart)   # would block; it lives in the next block
+
+    dir = mktempdir()
+    m = Module(:READMEQuickstart)
+    cd(dir) do
+        Core.eval(m, :(using Pinax))
+        Pinax.reset!()
+        Core.eval(m, Meta.parseall(quickstart; filename="README.md"))
+    end
+
+    svgs = [
+        joinpath(r, f) for (r, _, fs) in walkdir(joinpath(dir, "site")) for
+        f in fs if endswith(f, ".svg")
+    ]
+    @test length(svgs) == 1
+    @test filesize(only(svgs)) > 1_000
+
+    html = read(joinpath(dir, "site", "index.html"), String)
+    @test !occursin("UndefVarError", html)
+    @test occursin(basename(only(svgs)), html)
 end

@@ -1,9 +1,10 @@
 using Pinax
 using Test
 
-# A fake backend figure that exercises the is_figure / pinax_save extension contract WITHOUT
-# pulling in a real plotting backend (Plots/Makie precompile is heavy). The shipped extensions
-# (ext/PinaxPlotsExt.jl, ext/PinaxMakieExt.jl) plug in exactly the same way.
+# A fake backend figure that exercises the is_figure / pinax_save extension contract without a
+# real backend, so the contract is covered on every shard rather than only where a backend loads.
+# The shipped extensions (ext/PinaxPlotsExt.jl, ext/PinaxMakieExt.jl) plug in exactly the same way;
+# `test_readme.jl` loads the Plots one for real when it runs the README's Quickstart.
 struct MockFig
     tag::String
 end
