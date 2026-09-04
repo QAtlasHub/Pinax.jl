@@ -6,14 +6,11 @@ using TestShards        # loading it is what triggers the extension — there is
 # so: a `@shard` suite under `Pinax.test` renders `0/0 passed` — empty AND green, indistinguishable
 # from a suite with no tests. Every assertion below is the difference between composing and not.
 #
-# This file is NOT part of the default suite, which is why it sits in `test/ext/` rather than being a
-# `test/test_*.jl` the suite globs: TestShards is not in General yet, so it cannot be an `[extras]`
-# dependency (`Pkg.test` would demand a registered package). The `testshards` CI job installs it and
-# runs this file. Once TestShards is registered, move this to `test/test_testshards.jl` — the glob
-# picks it up — and delete the job.
-#
-# Everything runs in SUBPROCESSES: a capture is installed by a root testset at depth 0, which cannot
-# be done from inside this suite, and a fixture's own results must not fold into it.
+# It IS part of the default suite now. It used to sit in `test/ext/` with a CI job of its own,
+# because TestShards was not in General and so could not be an `[extras]` dependency —
+# `Pkg.test` demands a registered package. TestShards was registered on 2026-08-03, TestShards
+# is in `[extras]` and the test target, and this file is a `test/test_*.jl` the glob picks up
+# like any other. The dedicated job is gone with it.
 
 # A fixture whose numbers are the point: a check that passes with almost no room left, and a
 # `@testset for` sweep, which Pinax folds into a convergence figure rather than three sections.
