@@ -14,7 +14,10 @@ const GALLERY_JL = joinpath(@__DIR__, "literate", "gallery.jl")
 # defined once and shared with `makedocs`, so `documenter_embed` resolves the site-root `gallery/`
 # against `examples.md` via `html_fmt.prettyurls` — correct on the deployed site AND a local build.
 const html_fmt = Documenter.HTML(;
-    canonical="https://codes.sota-shimozono.com/Pinax.jl/stable/",
+    # Measured 2026-09-03: the previous host does not resolve at all (000). This one serves
+    # `/dev/` with 200; `/stable/` is 404 until a version is tagged, and is still the right
+    # canonical target because `/dev/` is a moving target.
+    canonical="https://qatlashub.github.io/Pinax.jl/stable/",
     prettyurls=get(ENV, "CI", "false") == "true",
     mathengine=MathJax3(
         Dict(
@@ -106,9 +109,7 @@ let build = joinpath(@__DIR__, "build")
     end
 end
 
-deploydocs(;
-    versions=["stable", "dev"],
-    repo="github.com/QAtlasHub/Pinax.jl.git",
-    devbranch="main",
-    push_preview=true,
-)
+# `versions` is left at Documenter's default. Measured 2026-09-03: with `["stable", "dev"]` the
+# `gh-pages` branch holds `dev`, `previews` and `versions.js` but no `index.html`, so the site root
+# returns 404 and only `/dev/` is reachable.
+deploydocs(; repo="github.com/QAtlasHub/Pinax.jl.git", devbranch="main", push_preview=true)
