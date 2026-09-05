@@ -14,7 +14,9 @@ plots, and `render` writes the gallery.
 ## The shape of it
 
 ```julia
-using Pinax
+using Pinax, Plots
+
+plot_energy() = plot(0.1:0.05:2, β -> 1 / β; xlabel = "β", ylabel = "E/N", legend = false)
 
 @page :results "Results" begin
     @section :energy "Energy" begin
@@ -36,5 +38,6 @@ KaTeX; `serve("site")` previews it over HTTP.
 
 - **[Examples](examples.md)** — a **map of contents** across every compiled gallery (a LaTeX-style
   table of contents that spans them all), plus a source walkthrough for each. Every gallery is built
-  *live* as a Documenter `@example` and rendered by Pinax.
+  *live*: `docs/make.jl` runs `docs/literate/gallery.jl` during the build and embeds the gallery it
+  renders, so the page shows the output of the source it displays.
 - **[API Reference](api.md)** — every exported macro and function.
