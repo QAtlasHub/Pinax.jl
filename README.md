@@ -11,6 +11,8 @@
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 > *A board of figures that is also a catalogue.*
+> *πίναξ* (Ancient Greek) — "tablet / catalogue / register"; the *Pinakes* were the catalogue of the
+> Library of Alexandria.
 
 **Pinax** turns the figures and tables your analysis scripts produce into a **structured,
 self-contained catalogue** of a computational study — described once and rendered three ways:
@@ -24,9 +26,6 @@ self-contained catalogue** of a computational study — described once and rende
 It generalizes the hand-written `build_report` page an analysis pipeline grows over time: you
 describe the manuscript once with a small DSL, point each figure at the value (or data key) it
 plots, and `render` writes the artifact.
-
-> *πίναξ* (Ancient Greek) — "tablet / catalogue / register"; the *Pinakes* were the catalogue of the
-> Library of Alexandria.
 
 ## Installation
 
@@ -84,7 +83,9 @@ verdict — flows to every face. Themes are pluggable: `render(; theme = MyTheme
 pair to a project-specific `recipe` that builds the doc, and renders both the gallery and
 `agent.json` — so the same results become a human notebook and an LLM-readable artifact in one call.
 
-## Bridging a test suite
+## Bridging a test suite> 
+
+> This is an experimental feature.
 
 A test suite reports one bit: green or red. A `@test isapprox(E, oracle; rtol=1e-3)` computed `E`,
 the reference and the tolerance, then threw all three away. `Pinax.test` renders the suite instead —
