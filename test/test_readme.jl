@@ -198,3 +198,21 @@ end
     @test length(found) == 1
     @test !occursin("UndefVarError", read(joinpath(dir, "site", "index.html"), String))
 end
+
+@testset "the docs link a self-test report only if a workflow produces one" begin
+    # `test2pinax.md` linked `../test-report/`, which `docs/make.jl` fills from a CI artifact
+    # (`pinax-report-delegation`). No job uploads it, so the link 404'd on the deployed site.
+    # Tie the two together rather than pinning either: when a job does produce the report, the
+    # link may come back and this still holds.
+    docs = join(
+        [read(f, String) for f in readdir(_DOCS; join=true) if endswith(f, ".md")], "\n"
+    )
+    wf = joinpath(@__DIR__, "..", ".github", "workflows")
+    produced = any(
+        t -> occursin("upload-artifact", t) && occursin("pinax-report", t),
+        [read(joinpath(wf, f), String) for f in readdir(wf) if endswith(f, ".yml")],
+    )
+    @test !occursin("../test-report/", docs) || produced
+    # Control: the scan can see the link, so a passing test is not an empty read.
+    @test occursin("../test-report/", "see [x](../test-report/) here")
+end

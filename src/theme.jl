@@ -1,18 +1,37 @@
 # theme.jl — the theme framework (notes 06/08).
 #
-# A theme is a renderer over the presentation-neutral doc tree. This file is the SHELL: the abstract
-# `Theme` type, the renderer contract (the generic functions a theme specializes), a theme registry,
-# and resolution from a spec (a `Theme` instance, a registered `Symbol`, or a path to a user theme
-# file). Concrete themes live in `themes/` — the default `GalleryTheme` is `themes/gallery.jl`.
-#
-# Add a theme by subtyping `Theme` and implementing `emit_document` (plus any trait overrides):
-#
-#     struct MyTheme <: Pinax.Theme end
-#     Pinax.emit_document(::MyTheme, doc, out, cache; comments_file="") = ...   # write files, return path
-#     Pinax.register_theme!(:mine, MyTheme())          # optional: resolve by @pinaxsetup theme=:mine
-#
-# then `render(; out, theme=MyTheme())` (or `theme=:mine`, or `theme="path/to/mytheme.jl"`).
+# The SHELL only: the abstract `Theme` type, the generic functions a theme specializes, the registry,
+# and resolution from a spec. Concrete themes live in `themes/` — the default `GalleryTheme` is
+# `themes/gallery.jl`. How to write one is the `Theme` docstring below.
 
+"""
+    abstract type Theme
+
+A renderer over the presentation-neutral document tree: one theme is one way to write a `Document`
+out. `render(; theme = …)` resolves a `Theme` instance, a registered `Symbol`, or a path to a file
+that defines one.
+
+`emit_document` is the one required method — it receives the whole document and writes the output.
+A theme that subtypes `Theme` directly owns that traversal, so it needs nothing else:
+
+```julia
+struct MyTheme <: Pinax.Theme end
+Pinax.emit_document(::MyTheme, doc, out, cache; comments_file="") = ...   # write files, return a path
+Pinax.register_theme!(:mine, MyTheme())                                   # optional: resolve by theme=:mine
+```
+
+Then `render(; out, theme=MyTheme())`, `theme=:mine`, or `theme="path/to/mytheme.jl"`. Omitting
+`emit_document` is refused by name at the first `render`, not at subtyping time.
+
+The shipped bases — `GalleryBase` (HTML), `LaTeXBase`, `AgentBase` — instead implement
+`emit_document` as a walk that dispatches to one generic per node (`emit_page`, `emit_section`,
+`emit_figure`, `emit_table`, `emit_check`, `emit_code`, `emit_text`, `emit_view`, `emit_comments`,
+`emit_index`). Subtype one of those to change some nodes and inherit the rest; those generics have
+no fallback of their own, so they are only relevant once something calls them.
+
+Traits, which do have defaults: `output_format` (`:html` | `:latex` | `:agent`), `figure_formats`
+(which formats are requested from figure objects), `index_level`, `figure_as_table` and `number`.
+"""
 abstract type Theme end
 
 # ---- renderer contract (themes override these; only emit_document is required) ----

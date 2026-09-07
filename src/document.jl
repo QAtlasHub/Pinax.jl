@@ -53,12 +53,10 @@ end
 mutable struct DocMeta
     title::String
     theme::Any                    # theme spec: a Theme instance, a registered Symbol, or a path
-    base_url::String
-    format::Vector{Symbol}        # [:svg, :pdf]
     bib_sources::Vector{String}
     debug::Bool
     index::Union{Symbol,Nothing}  # :toc|:cards|:rich override (nothing = theme default)
-    numbering::Symbol             # numbering scope :global|:page (reset counters per page)
+    numbering::Symbol             # counter scope :global | :page | :part
     numberer::Function            # (kind, counters) -> label string; preamble-overridable
     features::Vector{Symbol}      # gallery interactive layer toggles: :comments / :bookmarks / :export
     css::Vector{String}           # user CSS overlay files (inlined after the theme's own CSS)
@@ -69,8 +67,6 @@ end
 function DocMeta(;
     title="",
     theme=:gallery,
-    base_url="",
-    format=Symbol[:svg, :pdf],
     bib_sources=String[],
     debug=false,
     index=nothing,
@@ -85,8 +81,6 @@ function DocMeta(;
     return DocMeta(
         title,
         theme,
-        base_url,
-        collect(Symbol, format),
         bib_sources,
         debug,
         index,
@@ -288,30 +282,63 @@ const _TEST_CONTAINER_PROBE = Base.RefValue{Any}(nothing)
 _probe_test_container() = (p=_TEST_CONTAINER_PROBE[]; p === nothing ? :none : p())
 
 "Reset the implicit document (fresh, empty). The preamble `@pinaxsetup` calls this."
+# Every setting `reset!` reads. A keyword outside this set is refused rather than dropped: the
+# alternative is that `@pinaxsetup katx=:local` configures nothing and says nothing.
+const _SETUP_KEYS = (
+    :title,
+    :theme,
+    :debug,
+    :index,
+    :numbering,
+    :numberer,
+    :features,
+    :css,
+    :js,
+    :katex,
+    :assets,
+)
+
 function reset!(; kwargs...)
     kw = Dict{Symbol,Any}(kwargs)
+    for k in sort!(collect(keys(kw)))
+        k in _SETUP_KEYS && continue
+        k === :format && error(
+            "Pinax: @pinaxsetup format= is not a setting — a theme decides which figure formats " *
+            "it requests, through `figure_formats(::Theme)`. Select a theme with `theme=`.",
+        )
+        error(
+            "Pinax: @pinaxsetup has no $(k)= setting. Known: " *
+            join(_SETUP_KEYS, ", ") *
+            ". Bibliography files are declared with `@bibliography`.",
+        )
+    end
     idx = get(kw, :index, nothing)
     idx === nothing ||
         idx in (:toc, :cards, :rich) ||
         error(
             "Pinax: @pinaxsetup index= must be :toc, :cards, or :rich (got $(repr(idx)))."
         )
+    num = get(kw, :numbering, :global)
+    num in (:global, :page, :part) || error(
+        "Pinax: @pinaxsetup numbering= must be :global, :page, or :part (got $(repr(num))).",
+    )
+    ktx = get(kw, :katex, :cdn)
+    ktx in (:cdn, :local) ||
+        error("Pinax: @pinaxsetup katex= must be :cdn or :local (got $(repr(ktx))).")
     ast = get(kw, :assets, :default)
     ast in (:default, :inline) ||
         error("Pinax: @pinaxsetup assets= must be :default or :inline (got $(repr(ast))).")
     meta = DocMeta(;
         title=get(kw, :title, ""),
         theme=get(kw, :theme, :gallery),
-        base_url=get(kw, :base_url, ""),
-        format=get(kw, :format, Symbol[:svg, :pdf]),
         debug=get(kw, :debug, false),
         index=idx,
-        numbering=get(kw, :numbering, :global),
+        numbering=num,
         numberer=get(kw, :numberer, _default_numberer),
         features=get(kw, :features, Symbol[:comments, :bookmarks, :export]),
         css=get(kw, :css, String[]),
         js=get(kw, :js, String[]),
-        katex=get(kw, :katex, :cdn),
+        katex=ktx,
         assets=ast,
     )
     CTX.document = Document(meta)

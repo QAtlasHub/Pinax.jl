@@ -207,4 +207,19 @@ const SIDE = Ref(0)   # for checking @figure deferral
             @figure 1
         end)                                                  # @section outside @page
     end
+
+    @testset DefaultTestSet "@pinaxsetup refuses a keyword it cannot honour" begin
+        # A setting that is accepted and then ignored is the defect this gate exists for: the caller
+        # believes they configured something. Each of these used to be silently dropped.
+        @test_throws ErrorException Pinax.reset!(; format=[:svg, :pdf])   # removed knob, by name
+        @test_throws ErrorException Pinax.reset!(; fromat=[:svg])         # a typo of it
+        @test_throws ErrorException Pinax.reset!(; bib_sources=["x.bib"]) # @bibliography's job
+        @test_throws ErrorException Pinax.reset!(; numbering=:pge)        # value outside the domain
+        @test_throws ErrorException Pinax.reset!(; katex=:locale)
+        # …and the settings it does take still go through, so the gate is not refusing everything.
+        @test Pinax.reset!(; title="t", numbering=:part, katex=:local).meta.numbering ===
+            :part
+        @test Pinax.reset!(; katex=:local).meta.katex === :local
+        Pinax.reset!()
+    end
 end

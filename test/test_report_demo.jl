@@ -1,5 +1,5 @@
-# test_report_demo.jl — a DEMONSTRATION, because Pinax's own `Pinax.test()` output IS the showcase of
-# the test-report feature (the deployed self-report). It is plain `@testset`/`@test` — no Pinax token —
+# test_report_demo.jl — a DEMONSTRATION: what `Pinax.test()` renders out of an ordinary suite. Pinax
+# does not yet publish a report of its own suite (#120). It is plain `@testset`/`@test` — no token —
 # but written so the rendered report exercises the pieces the bridge adds: a swept `@testset for` folded
 # into a convergence figure + a tolerance-margin figure, and `@caption` naming the quantity. The
 # assertions are genuine (a real convergent quadrature), so under a bare `Pkg.test()` this is an honest

@@ -48,11 +48,8 @@ export render,
     contents,
     Theme,
     GalleryBase,
-    GalleryTheme,
     LaTeXBase,
-    LaTeXTheme,
     AgentBase,
-    AgentTheme,
     register_theme!,
     pinax_save,
     is_figure,
@@ -65,6 +62,6 @@ export render,
 # comment store (CLI / LLM-loop substrate)
 export read_comments, add_comment, set_bookmark!
 export @pinaxignore
-export render_test_report, dump_test_report, load_test_dump, completeness_overview
+export render_test_report, dump_test_report, completeness_overview
 
 end # module Pinax

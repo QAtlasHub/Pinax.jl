@@ -149,6 +149,11 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
             joinpath(dir, "shard-2.toml"),
         )
 
+        # `load_test_dump` is deliberately NOT exported — it has no production caller, and an
+        # export is free to add later while removing one after a registered version is breaking.
+        @test :load_test_dump ∉ names(Pinax)
+        @test isdefined(Pinax, :load_test_dump)
+
         # round-trip: TOML keeps Float64 exactly, which is the only reason a dump is honest
         back = Pinax.load_test_dump(d1)
         @test back.children[1].description == "test_a.jl"

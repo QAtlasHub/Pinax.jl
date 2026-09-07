@@ -8,13 +8,6 @@ from red, yet the badge shows the same green as a rock-solid one.
 Pinax provides an interface that **outputs a testset directly** as a document — one page per test file,
 each check shown with the margin it passed by (`delta / tol`) — readable by a human and by an agent.
 
-```@raw html
-<p style="font-size:1.05em"><a href="../test-report/">▶ Open Pinax's own test report</a> — rendered
-from Pinax's real <code>test/runtests.jl</code> by <code>Pinax.test()</code> in CI (the delegation job
-below), carried into this site unchanged. Not a contrived demo, and not re-run for the docs: it <em>is</em>
-the CI run's output.</p>
-```
-
 ## The interface: `Pinax.test`
 
 The suite stays **plain `@testset` / `@test`** — there is no Pinax-specific macro to add to it. The one
@@ -33,10 +26,9 @@ the suite is unchanged and a red suite still fails the process — the report ne
 A suite may *also* draw in Pinax's own vocabulary (`@desc`, `@figure`, `@table`, …); that content is
 captured into the report, and is a no-op under a bare `Pkg.test()`.
 
-## Proof by dogfood: three entry points, one suite
+## Three entry points, one suite
 
-Pinax's own `test/runtests.jl` is plain `@testset` with **no token**, and its CI runs that same suite
-three ways:
+The same suite file — plain `@testset`, no Pinax token — is reachable three ways:
 
 | Entry point | What it exercises |
 |---|---|
@@ -44,10 +36,14 @@ three ways:
 | `Pinax.test()` | the `Pkg.test` **delegation** — same sandbox, plus a rendered report |
 | `Pinax.test("test/runtests.jl")` | the **in-process** (Test-level) entry — same suite, plus a report |
 
-All three green — with the **same verdict** — is the proof that Pinax adds a report without changing
-*what* the suite is, *how* it runs, or *whether* it passes. The two Pinax runs render Pinax's own test
-report (uploaded as a CI artifact); that report *is* the example, produced from Pinax's real suite
-rather than a contrived one.
+The contract is the same across all three: the report never touches the verdict, and a red suite
+still fails the process.
+
+!!! note "Pinax does not yet dogfood this"
+    Pinax's own CI runs its suite one way — a sharded `Pkg.test` — so no report is produced from
+    Pinax's own suite, and this page does not link one.
+    [#120](https://github.com/QAtlasHub/Pinax.jl/issues/120) tracks wiring it up; until it lands, the
+    three entry points above are a description of the API, not a measured agreement.
 
 ## What you get
 

@@ -79,4 +79,28 @@ struct NoEmitTheme <: Pinax.Theme end   # deliberately does not implement emit_d
         html = read(Pinax.render(; out=site("pf"), theme=tf), String)
         @test occursin("FROMFILE", html)
     end
+
+    @testset "the exported theme surface is the extension point, not the singletons" begin
+        # What a user has to name is the base to subtype. The concrete shipped themes are
+        # zero-field singletons that `register_theme!` already publishes under a Symbol, so
+        # `theme=:gallery` reaches the same object `GalleryTheme()` would construct — nothing
+        # needs the struct's name. An export is free to add later and breaking to remove, so
+        # they stay unexported until something has to write them.
+        for base in (:Theme, :GalleryBase, :LaTeXBase, :AgentBase)
+            @test base in names(Pinax)
+        end
+        for concrete in (:GalleryTheme, :LaTeXTheme, :AgentTheme)
+            @test concrete ∉ names(Pinax)
+            @test isdefined(Pinax, concrete)          # still reachable, just not exported
+        end
+        @test Pinax._resolve_theme(:gallery) isa Pinax.GalleryTheme
+        @test Pinax._resolve_theme(:latex) isa Pinax.LaTeXTheme
+        @test Pinax._resolve_theme(:agent) isa Pinax.AgentTheme
+
+        # …and the instance route a theme author actually uses still works, which is what makes
+        # the bases worth exporting: a subtype of one renders through `theme=` directly.
+        mkdoc()
+        html = read(Pinax.render(; out=site("inst"), theme=Pinax.GalleryTheme()), String)
+        @test occursin("<section class=\"section\"", html)
+    end
 end
