@@ -27,7 +27,7 @@ function resolve!(doc::Document)
 end
 
 """
-    render([doc]; out, theme=GalleryTheme(), force=false) -> path
+    render([doc]; out, theme=nothing, force=false) -> path
 
 Render the catalogue: structure (pass 1, done by macros) -> resolve (pass 2) ->
 materialize + emit (pass 3, theme). Writes into the `out` directory and returns the
