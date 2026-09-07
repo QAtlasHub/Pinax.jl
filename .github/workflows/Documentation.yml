@@ -23,9 +23,10 @@ jobs:
           version: '1'
       - name: Install dependencies
         run: julia --project=docs/ -e 'using Pkg; Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
-      # Reuse the CI run's Pinax self-test report (from the `Pinax.test() — Pkg.test delegation` job) —
-      # `make.jl` carries it into build/test-report/, linked from the "Test → Pinax" page. Waiting for
-      # the CI run (not re-running the suite) is what keeps the docs build free of a second test pass.
+      # Reuse a Pinax self-test report from the CI run, which `make.jl` carries into build/test-report/.
+      # No job produces this artifact yet (#120), so the step warns and continues; it stays here as the
+      # standing half of the wiring. Waiting for the CI run rather than re-running the suite is what
+      # keeps the docs build free of a second test pass once a job does produce it.
       - name: Download the Pinax self-test report
         uses: dawidd6/action-download-artifact@v24
         with:

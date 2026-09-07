@@ -45,13 +45,30 @@ function _urldecode(s::AbstractString)
     return String(take!(out))
 end
 
-# Containment test for a resolved path. `startswith` on the string is not a path-boundary test: it
-# admits any sibling whose name extends the root, so a gallery at `out/` would serve `out-draft/`.
-# Comparing path components is boundary-correct and separator-agnostic.
+# Containment, twice, because one test cannot see both ways out.
+#
+# `_under_root` compares path COMPONENTS. `startswith` on the string is not a path-boundary test: it
+# admits any sibling whose name extends the root, so a gallery at `out/` would also serve
+# `out-draft/`. Component comparison is boundary-correct and separator-agnostic.
+#
+# That test is lexical, so it cannot see a symlink UNDER the root pointing out of it — the target's
+# components are all still inside. `_resolves_under_root` re-runs it on the resolved paths. It has
+# to come after the `isfile` check, because `realpath` needs the path to exist, and it resolves
+# `root` as well so a gallery reached through a link (macOS `/tmp`) still passes its own test.
 function _under_root(file::AbstractString, root::AbstractString)
     fp, rp = splitpath(file), splitpath(root)
     length(fp) >= length(rp) || return false
     return view(fp, 1:length(rp)) == rp
+end
+
+function _resolves_under_root(file::AbstractString, root::AbstractString)
+    resolved = try
+        (realpath(file), realpath(root))
+    catch
+        nothing                       # broken link, or it moved under us: refuse rather than serve
+    end
+    resolved === nothing && return false
+    return _under_root(resolved[1], resolved[2])
 end
 
 function _respond(conn, status, ct, body; extra=String[])
@@ -96,12 +113,15 @@ function _serve_handle(conn, root)
         rel = lstrip(_urldecode(split(target, '?')[1]), '/')
         isempty(rel) && (rel = "index.html")
         file = normpath(joinpath(root, rel))
-        if !_under_root(file, root)                      # no escaping the served root
+        if !_under_root(file, root)                       # no `..` out of the served root
             return _respond(conn, 403, "text/plain", Vector{UInt8}("403 Forbidden"))
         end
         isdir(file) && (file = joinpath(file, "index.html"))
         if !isfile(file)
             return _respond(conn, 404, "text/plain", Vector{UInt8}("404 Not Found: $(rel)"))
+        end
+        if !_resolves_under_root(file, root)              # and no symlink out of it either
+            return _respond(conn, 403, "text/plain", Vector{UInt8}("403 Forbidden"))
         end
         data = read(file)
         ct = _mime(file)
