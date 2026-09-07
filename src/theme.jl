@@ -13,6 +13,29 @@
 #
 # then `render(; out, theme=MyTheme())` (or `theme=:mine`, or `theme="path/to/mytheme.jl"`).
 
+"""
+    abstract type Theme
+
+A renderer over the presentation-neutral document tree: one theme is one way to write a `Document`
+out. `render(; theme = …)` resolves a `Theme` instance, a registered `Symbol`, or a path to a file
+that defines one.
+
+Subtype it and implement `emit_document`; every other method of the renderer contract has a default:
+
+```julia
+struct MyTheme <: Pinax.Theme end
+Pinax.emit_document(::MyTheme, doc, out, cache; comments_file="") = ...   # write files, return a path
+Pinax.register_theme!(:mine, MyTheme())                                   # optional: resolve by theme=:mine
+```
+
+The traits a theme overrides to differ from the default are `output_format` (`:html` | `:latex`),
+`figure_formats` (which formats are requested from figure objects), `index_level`, `figure_as_table`
+and `number`.
+
+Subtyping `Theme` directly means writing every per-node method. Most themes instead subtype one of
+the shipped bases — `GalleryBase` (HTML), `LaTeXBase`, `AgentBase` — which carry those methods, so
+only the differences need writing.
+"""
 abstract type Theme end
 
 # ---- renderer contract (themes override these; only emit_document is required) ----

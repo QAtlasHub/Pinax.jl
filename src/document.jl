@@ -54,7 +54,6 @@ mutable struct DocMeta
     title::String
     theme::Any                    # theme spec: a Theme instance, a registered Symbol, or a path
     base_url::String
-    format::Vector{Symbol}        # [:svg, :pdf]
     bib_sources::Vector{String}
     debug::Bool
     index::Union{Symbol,Nothing}  # :toc|:cards|:rich override (nothing = theme default)
@@ -70,7 +69,6 @@ function DocMeta(;
     title="",
     theme=:gallery,
     base_url="",
-    format=Symbol[:svg, :pdf],
     bib_sources=String[],
     debug=false,
     index=nothing,
@@ -86,7 +84,6 @@ function DocMeta(;
         title,
         theme,
         base_url,
-        collect(Symbol, format),
         bib_sources,
         debug,
         index,
@@ -296,6 +293,10 @@ function reset!(; kwargs...)
         error(
             "Pinax: @pinaxsetup index= must be :toc, :cards, or :rich (got $(repr(idx)))."
         )
+    haskey(kw, :format) && error(
+        "Pinax: @pinaxsetup format= is not a setting — a theme decides which figure formats it " *
+        "requests, through `figure_formats(::Theme)`. Select a theme with `theme=` instead.",
+    )
     ast = get(kw, :assets, :default)
     ast in (:default, :inline) ||
         error("Pinax: @pinaxsetup assets= must be :default or :inline (got $(repr(ast))).")
@@ -303,7 +304,6 @@ function reset!(; kwargs...)
         title=get(kw, :title, ""),
         theme=get(kw, :theme, :gallery),
         base_url=get(kw, :base_url, ""),
-        format=get(kw, :format, Symbol[:svg, :pdf]),
         debug=get(kw, :debug, false),
         index=idx,
         numbering=get(kw, :numbering, :global),

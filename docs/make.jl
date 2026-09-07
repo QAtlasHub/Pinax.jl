@@ -109,7 +109,7 @@ let build = joinpath(@__DIR__, "build")
             cp(src, dst; force=true)
             @info "carried the Pinax self-test report into build/test-report/"
         else
-            @info "no Pinax self-test report to carry (CI artifact absent) — the Test → Pinax link 404s"
+            @info "no Pinax self-test report to carry (CI artifact absent) — the Test → Pinax page says so (#120)"
         end
     end
 end

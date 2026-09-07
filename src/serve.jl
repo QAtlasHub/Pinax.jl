@@ -45,6 +45,15 @@ function _urldecode(s::AbstractString)
     return String(take!(out))
 end
 
+# Containment test for a resolved path. `startswith` on the string is not a path-boundary test: it
+# admits any sibling whose name extends the root, so a gallery at `out/` would serve `out-draft/`.
+# Comparing path components is boundary-correct and separator-agnostic.
+function _under_root(file::AbstractString, root::AbstractString)
+    fp, rp = splitpath(file), splitpath(root)
+    length(fp) >= length(rp) || return false
+    return view(fp, 1:length(rp)) == rp
+end
+
 function _respond(conn, status, ct, body; extra=String[])
     reason = if status == 200
         "OK"
@@ -87,7 +96,7 @@ function _serve_handle(conn, root)
         rel = lstrip(_urldecode(split(target, '?')[1]), '/')
         isempty(rel) && (rel = "index.html")
         file = normpath(joinpath(root, rel))
-        if !startswith(file, root)                       # no escaping the served root
+        if !_under_root(file, root)                      # no escaping the served root
             return _respond(conn, 403, "text/plain", Vector{UInt8}("403 Forbidden"))
         end
         isdir(file) && (file = joinpath(file, "index.html"))

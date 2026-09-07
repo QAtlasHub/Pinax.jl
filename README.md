@@ -83,7 +83,7 @@ verdict — flows to every face. Themes are pluggable: `render(; theme = MyTheme
 pair to a project-specific `recipe` that builds the doc, and renders both the gallery and
 `agent.json` — so the same results become a human notebook and an LLM-readable artifact in one call.
 
-## Bridging a test suite> 
+## Bridging a test suite
 
 > This is an experimental feature.
 
