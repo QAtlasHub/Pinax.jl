@@ -85,7 +85,10 @@ pair to a project-specific `recipe` that builds the doc, and renders both the ga
 
 ## Bridging a test suite
 
-> This is an experimental feature.
+> This is an experimental feature, and it is **unavailable on Julia 1.13+**: the capture installs a
+> root testset that has to survive into the suite that runs after it, and 1.13 moved Test's testset
+> stack to a `ScopedValue`, which cannot outlive the block that sets it. `Pinax.test` there warns
+> once and produces no report; the suite itself runs and its verdict is unchanged.
 
 A test suite reports one bit: green or red. A `@test isapprox(E, oracle; rtol=1e-3)` computed `E`,
 the reference and the tolerance, then threw all three away. `Pinax.test` renders the suite instead —
