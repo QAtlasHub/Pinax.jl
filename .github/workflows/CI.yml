@@ -34,3 +34,27 @@ jobs:
         General
     secrets:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # The OTHER supported Julia, as a job of its own rather than a matrix leg: the required status
+  # check is the context `test / All shards passed`, and a matrix renames it to `test (1) / …`,
+  # which would leave every PR waiting on a context that no longer exists.
+  #
+  # It exists because one version is not enough to know. Julia 1.13 removed `Test.push_testset`,
+  # `julia-version: 1` started resolving to it the day it shipped, and the suite went red on a
+  # release rather than on a commit. It also makes the version branch in `PinaxTestExt`
+  # measurable: only the run on the older Julia executes its fallback, so Codecov sees both sides
+  # merged into one report.
+  compat:
+    permissions:
+      contents: write     # the reusable declares it for the timing job; a caller granting less
+                          # fails the RUN at startup, even though `record-timings: false` skips it
+    uses: QAtlasHub/TestShards.jl/.github/workflows/sharded-tests.yml@main
+    with:
+      julia-version: '1.12'
+      shards: 4
+      artifact-prefix: julia112     # artifact names are unique per run, and both legs upload
+      record-timings: false         # two legs pushing `ci-timings` would race
+      registries: |
+        General
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
