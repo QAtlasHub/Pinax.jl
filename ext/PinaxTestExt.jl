@@ -40,6 +40,30 @@ using Test: Test, AbstractTestSet
 # functions, not on VERSION: what matters is whether the stack can be pushed.
 const TESTSET_STACK = isdefined(Test, :push_testset) && isdefined(Test, :pop_testset)
 
+# Run `f` with `ts` as the current testset, leaving the previous one current afterwards. A BALANCED
+# push is expressible on either Julia: 1.13 turned the stack into a ScopedValue, and a scoped value
+# covers a block. Only the UNBALANCED root below, which has to outlive the preamble that installs
+# it, has no 1.13 form. Same shape and same reason as TestShards.jl's `_with_testset`; note that
+# `TESTSET_DEPTH` has to travel with `CURRENT_TESTSET`.
+@static if isdefined(Test, :CURRENT_TESTSET)
+    function _with_testset(f, ts)
+        return Base.ScopedValues.with(
+            f,
+            Test.CURRENT_TESTSET => ts,
+            Test.TESTSET_DEPTH => Test.get_testset_depth() + 1,
+        )
+    end
+else
+    function _with_testset(f, ts)
+        Test.push_testset(ts)
+        try
+            return f()
+        finally
+            Test.pop_testset()
+        end
+    end
+end
+
 function __init__()
     # Register the container probe (a `Ref` assignment, not a method override — no precompile clash).
     Pinax._TEST_CONTAINER_PROBE[] = _current_test_container
