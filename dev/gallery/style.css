@@ -49,6 +49,10 @@ body{font-family:system-ui,sans-serif;max-width:1180px;margin:2rem auto;padding:
   .pinax-eq{display:block}
   h3.facet{color:#555;margin:1rem 0 .3rem;font-size:1.05rem;font-weight:600}
   .pinax-meta{color:#666;margin:-.4rem 0 1rem;font-size:.95rem}
+  .pinax-stats{display:flex;flex-wrap:wrap;gap:.5rem;margin:-.4rem 0 1.4rem}
+  .pinax-stat{border:1px solid #e1e4e8;border-radius:8px;padding:.45rem .8rem;background:#fafbfc;min-width:5.5rem}
+  .pinax-stat .stat-value{display:block;font-size:1.35rem;font-weight:600;color:#24292f;line-height:1.15}
+  .pinax-stat .stat-label{display:block;font-size:.8rem;color:#57606a}
   .pinax-subtitle{color:#57606a;font-size:.95rem;margin:-.2rem 0 .8rem;font-weight:500}
   .nfig{color:#888;font-weight:normal;font-size:.85em}
   nav .nfig{color:#888}
