@@ -30,10 +30,10 @@ plots, and `render` writes the artifact.
 ## Installation
 
 ```julia
-pkg> add https://github.com/QAtlasHub/Pinax.jl
+pkg> add Pinax
 ```
 
-Requires Julia v1.12+. Not in the General registry yet.
+Requires Julia v1.12+.
 
 ## Quickstart
 
