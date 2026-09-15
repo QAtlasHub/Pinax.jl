@@ -100,3 +100,39 @@ using Test
         @test !occursin("<a class=\"pinax-card\"", html)
     end
 end
+
+@testset "contents: the collection's own numbers, above the entries" begin
+    out = mktempdir()
+    html = read(
+        Pinax.contents(
+            [(; title="A", href="a/index.html"), (; title="B", href="b/index.html")];
+            out=out,
+            title="Registry",
+            stats=["records" => 2, "projects" => 1, "unreproducible" => 0],
+        ),
+        String,
+    )
+    @test occursin("<div class=\"pinax-stats\">", html)
+    @test occursin(">records<", html)
+    @test occursin(">unreproducible<", html)
+    @test occursin(">0<", html)                       # a zero is a result, not a reason to hide the row
+
+    # no stats, no strip: the page a caller already has does not change
+    plain = read(
+        Pinax.contents([(; title="A", href="a/index.html")]; out=mktempdir()), String
+    )
+    # the class name is in the stylesheet on every page, so the claim is about the MARKUP
+    @test !occursin("<div class=\"pinax-stats\">", plain)
+
+    # values are escaped, not trusted
+    esc = read(
+        Pinax.contents(
+            [(; title="A", href="a/index.html")];
+            out=mktempdir(),
+            stats=["<b>label</b>" => "<script>x</script>"],
+        ),
+        String,
+    )
+    @test !occursin("<script>x</script>", esc)
+    @test occursin("&lt;script&gt;", esc)
+end

@@ -16,7 +16,7 @@ function _entry_str(e, k::Symbol)
 end
 
 """
-    contents(entries; out, title="Contents", level=:cards) -> path
+    contents(entries; out, title="Contents", level=:cards, stats=()) -> path
 
 Render a standalone meta-index linking to several separately rendered galleries, and return the
 written `index.html` path. Use it to put a customizable "map of contents" one level above galleries
@@ -32,6 +32,11 @@ Each entry is a `NamedTuple` describing one target gallery:
 | `thumbnail` |    no    | image path/URL for the card thumbnail (referenced as-is)      |
 | `meta`      |    no    | small caption line, e.g. `"12 pages · 540 figures"`           |
 | `items`     |    no    | list of strings, shown under the summary at `:rich` (each `string`-ified) |
+
+`stats` is an iterable of `label => value` pairs shown as a strip under the title, for the numbers
+that describe the collection rather than any one entry (how many, how recent, how many of them are
+missing something). A meta-index over many galleries is read for those first; without them the page
+answers "what is here" and not "what state is it in".
 
 `level` mirrors the gallery index verbosity: `:toc` (link list), `:cards` (thumbnail cards,
 default), `:rich` (cards + each entry's `items`). Hrefs and thumbnails are emitted verbatim, so give
@@ -50,7 +55,11 @@ Pinax.contents(
 ```
 """
 function contents(
-    entries; out::AbstractString, title::AbstractString="Contents", level::Symbol=:cards
+    entries;
+    out::AbstractString,
+    title::AbstractString="Contents",
+    level::Symbol=:cards,
+    stats=(),
 )
     level in (:toc, :cards, :rich) ||
         error("Pinax.contents: level must be :toc, :cards, or :rich (got :$(level)).")
@@ -65,6 +74,7 @@ function contents(
     println(
         io, "<div class=\"pinax-meta\">", n, n == 1 ? " gallery" : " galleries", "</div>"
     )
+    _emit_contents_stats(io, stats)
     if level === :toc
         _emit_contents_toc(io, es)
     else
@@ -74,6 +84,27 @@ function contents(
     path = joinpath(out, "index.html")
     write(path, String(take!(io)))
     return path
+end
+
+# The collection's own numbers, under the title. Values are stringified and escaped: the caller
+# supplies data, the theme supplies the look, so a meta-index cannot grow a second style vocabulary.
+function _emit_contents_stats(io, stats)
+    ss = collect(stats)
+    isempty(ss) && return nothing
+    println(io, "<div class=\"pinax-stats\">")
+    for kv in ss
+        label, value = first(kv), last(kv)
+        print(
+            io,
+            "<div class=\"pinax-stat\"><span class=\"stat-value\">",
+            _esc(string(value)),
+            "</span><span class=\"stat-label\">",
+            _esc(string(label)),
+            "</span></div>",
+        )
+    end
+    println(io, "\n</div>")
+    return nothing
 end
 
 function _emit_contents_cards(io, entries, rich::Bool)
