@@ -136,6 +136,13 @@ const _GALLERY_CSS = """
   .pinax-eq{display:block}
   h3.facet{color:#555;margin:1rem 0 .3rem;font-size:1.05rem;font-weight:600}
   .pinax-meta{color:#666;margin:-.4rem 0 1rem;font-size:.95rem}
+  .pinax-search{margin:0 0 1.2rem;--pagefind-ui-scale:.8;--pagefind-ui-primary:#24292f;--pagefind-ui-border-radius:8px}
+  .pinax-filters{display:flex;flex-wrap:wrap;gap:.35rem;margin:0 0 1rem}
+  .pinax-chip{font:inherit;font-size:.82rem;color:#57606a;background:#fff;border:1px solid #d0d7de;border-radius:999px;padding:.15rem .7rem;cursor:pointer}
+  .pinax-chip:hover{background:#f3f4f6}
+  .pinax-chip.is-on{background:#24292f;border-color:#24292f;color:#fff}
+  .card-tags{margin-top:.45rem;display:flex;flex-wrap:wrap;gap:.25rem}
+  .card-tag{font-size:.74rem;color:#57606a;background:#f3f4f6;border:1px solid #e1e4e8;border-radius:999px;padding:0 .45rem}
   .pinax-stats{display:flex;flex-wrap:wrap;gap:.5rem;margin:-.4rem 0 1.4rem}
   .pinax-stat{border:1px solid #e1e4e8;border-radius:8px;padding:.45rem .8rem;background:#fafbfc;min-width:5.5rem}
   .pinax-stat .stat-value{display:block;font-size:1.35rem;font-weight:600;color:#24292f;line-height:1.15}

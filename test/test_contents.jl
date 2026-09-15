@@ -136,3 +136,41 @@ end
     @test !occursin("<script>x</script>", esc)
     @test occursin("&lt;script&gt;", esc)
 end
+
+@testset "contents: tags are shown, filterable, and search is opt-in" begin
+    entries = [
+        (; title="A", href="a/index.html", tags=["chaos", "example"]),
+        (; title="B", href="b/index.html", tags=["example"]),
+        (; title="C", href="c/index.html"),
+    ]
+    html = read(Pinax.contents(entries; out=mktempdir()), String)
+
+    # the chips a reader clicks, one per distinct tag, and an "all" that clears
+    @test occursin("<div class=\"pinax-filters\"", html)
+    @test occursin("data-tag=\"chaos\"", html)
+    @test count("data-tag=\"example\"", html) == 1        # distinct, not once per card
+    @test occursin("data-tag=\"\"", html)
+
+    # the cards carry what the filter matches on, and show it
+    @test occursin("data-tags=\"chaos example\"", html)
+    @test occursin("<span class=\"card-tag\">chaos</span>", html)
+    @test !occursin("data-tags=\"\"", html)               # an untagged card carries no empty attr
+
+    # a collection with no tags gets no bar at all
+    plain = read(
+        Pinax.contents([(; title="A", href="a/index.html")]; out=mktempdir()), String
+    )
+    @test !occursin("<div class=\"pinax-filters\"", plain)
+
+    # the same at :toc — the bar is emitted at every level, so the rows must match on something
+    toc = read(Pinax.contents(entries; out=mktempdir(), level=:toc), String)
+    @test occursin("<li data-tags=\"chaos example\">", toc)
+    @test occursin("<div class=\"pinax-filters\"", toc)
+
+    # search is emitted only when asked: a box over an index that was never built is worse than none
+    @test !occursin("pagefind-ui.js", html)
+    withsearch = read(Pinax.contents(entries; out=mktempdir(), search=true), String)
+    @test occursin("pagefind/pagefind-ui.js", withsearch)
+    @test occursin("pagefind/pagefind-ui.css", withsearch)
+    @test occursin("id=\"pinax-search\"", withsearch)
+end
