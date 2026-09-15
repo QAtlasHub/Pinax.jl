@@ -25,1044 +25,1079 @@ _check_for(r, i) = _check_from(_result_data_expr(r), Ext._label(r), r isa Test.P
 # on a file, and `Pkg.test` delegation via a `-L` preamble) both install a capturing root that renders
 # and re-imposes the verdict; that can only be exercised at depth 0, so those cases run in a subprocess.
 # The contract that matters most: a failing suite still fails the process, report or no report.
-@testset "PinaxTestSet" begin
-    @testset "off by default — a bare @testset is stock Test" begin
-        # Test is a WEAKDEP: `using Pinax` alone must not drag it in. There is no token and no env
-        # switch — a bare `@testset` is a `DefaultTestSet`, so a plain `Pkg.test()` is untouched and
-        # produces no report; the report exists only when `Pinax.test` installs a capturing root.
-        @test Ext !== nothing                       # `using Test` above loaded the extension
-        @test PinaxTestSet <: Test.AbstractTestSet
-        withenv("PINAX_TEST_OUT" => "somewhere") do
-            @test Pinax.report_out() == "somewhere"
-        end
-        withenv("PINAX_TEST_TITLE" => "My Suite") do
-            @test Pinax.report_title() == "My Suite"
-        end
+# Julia 1.13 removed the testset stack this capture installs into (see `Ext.TESTSET_STACK`). The
+# feature is gated there, so the suite is gated here: what remains testable on such a Julia is that
+# it refuses, and refuses without touching the verdict of the suite that runs anyway.
+if !Ext.TESTSET_STACK
+    @info "Pinax test capture unavailable on Julia $(VERSION) — running the refusal case only."
+    @testset "the capture refuses where Julia removed the testset stack" begin
+        @test (@test_logs (:warn,) match_mode = :any Pinax._install_test_capture!()) ==
+            false
+        @test Pinax._CAPTURE_INSTALLED[] == false
     end
-
-    @testset "install_test_capture!: both refusals, from inside a running suite" begin
-        # Installing actually succeeds only at depth 0, so the end-to-end paths are subprocess
-        # tests further down. These are the two REFUSALS — the guards that let the call live in a
-        # committed `runtests.jl` — and refusing is safe to reach from in here, because it is
-        # precisely the case where nothing is pushed.
-        installed = Pinax._CAPTURE_INSTALLED[]
-        try
-            withenv("PINAX_TEST_OUT" => nothing, "PINAX_TEST_DUMP" => nothing) do
-                @test !Pinax.capture_requested()
-                @test Pinax.install_test_capture!() == false   # nobody asked → no root, no report
-            end
+else
+    @testset "PinaxTestSet" begin
+        @testset "off by default — a bare @testset is stock Test" begin
+            # Test is a WEAKDEP: `using Pinax` alone must not drag it in. There is no token and no env
+            # switch — a bare `@testset` is a `DefaultTestSet`, so a plain `Pkg.test()` is untouched and
+            # produces no report; the report exists only when `Pinax.test` installs a capturing root.
+            @test Ext !== nothing                       # `using Test` above loaded the extension
+            @test PinaxTestSet <: Test.AbstractTestSet
             withenv("PINAX_TEST_OUT" => "somewhere") do
-                @test Pinax.capture_requested()
+                @test Pinax.report_out() == "somewhere"
             end
-            withenv("PINAX_TEST_DUMP" => "s1.toml") do
-                @test Pinax.capture_requested()                # a dump alone is a request
+            withenv("PINAX_TEST_TITLE" => "My Suite") do
+                @test Pinax.report_title() == "My Suite"
             end
-
-            # Asked for, but a capture is already open — under `Pinax.test`, whose preamble
-            # installed one before the suite was read. A second root would take the assertions and
-            # leave the first rendering empty and green.
-            Pinax._CAPTURE_INSTALLED[] = true
-            withenv("PINAX_TEST_OUT" => "somewhere") do
-                @test Pinax.install_test_capture!() == false
-                @test Pinax._install_test_capture!() == false  # the preamble's own way in, too
-            end
-        finally
-            Pinax._CAPTURE_INSTALLED[] = installed
         end
-    end
 
-    @testset "numbers survive both verdicts" begin
-        # Pass.data is an Expr with evaluated args; Fail.data is a String. The asymmetry is the
-        # whole trap: parse only the Expr and every FAILING check silently loses its numbers.
-        pass = Test.Pass(
-            :test, :(isapprox(a, b)), :(isapprox(1.0, 1.0098; rtol=0.01)), nothing
-        )
-        @test _approx_numbers(_result_data_expr(pass)) == (1.0, 1.0098, 0.01, :rel)
-
-        fail = Test.Fail(
-            :test,
-            :(isapprox(a, b)),
-            "isapprox(0.5, 0.9; rtol = 0.01)",
-            nothing,
-            nothing,
-            LineNumberNode(1),
-            false,
-        )
-        @test _approx_numbers(_result_data_expr(fail)) == (0.5, 0.9, 0.01, :rel)
-    end
-
-    @testset "check carries the margin, not just a verdict" begin
-        pass = Test.Pass(:test, :x, :(isapprox(1.0, 1.0098; rtol=0.01)), nothing)
-        c = _check_for(pass, 1)
-        @test c.pass
-        @test c.got == 1.0 && c.want == 1.0098 && c.tol == 0.01 && c.kind === :rel
-        @test c.delta / c.tol > 0.9   # passed, but spent 97% of its budget
-
-        # `pass` comes from Julia's own verdict, never from delta <= tol: isapprox mixes atol and
-        # rtol in a way a single-kind Check cannot reproduce, and a report that disagrees with the
-        # test runner is worse than no report.
-        atol_pass = Test.Pass(
-            :test, :x, :(isapprox(0.0, 1.0e-9; atol=1.0e-8, rtol=0.01)), nothing
-        )
-        @test _check_for(atol_pass, 1).pass
-
-        # A non-numeric assertion still becomes a check — every @test must show up somewhere.
-        b = _check_for(Test.Pass(:test, :x, :(1 + 1 == 2), nothing), 2)
-        @test b.pass && b.got == 1.0
-    end
-
-    @testset "atol governs when there is no usable reference" begin
-        p = Test.Pass(:test, :x, :(isapprox(0.001, 0.0; atol=0.01)), nothing)
-        @test _approx_numbers(_result_data_expr(p)) == (0.001, 0.0, 0.01, :abs)
-    end
-
-    @testset "margin figure needs no plotting backend" begin
-        checks = [
-            Check(:t1, "tight", 1.0, 1.0098, 0.0097, 0.01, :rel, true),
-            Check(:t2, "broken", 0.5, 0.9, 0.444, 0.01, :rel, false),
-        ]
-        svg = _margin_svg(checks, joinpath(mktempdir(), "m.svg"))
-        s = read(svg, String)
-        @test startswith(s, "<svg")
-        @test occursin("#d9534f", s)          # the failing bar is red
-        @test occursin("44×", s)              # …and labelled with its real overshoot
-        @test occursin("</svg>", s)
-    end
-
-    @testset "dump → merge → one gallery (how sharded CI works)" begin
-        dir = mktempdir()
-        # Two shards, each holding a DISJOINT set of test files — which is exactly what the fleet's
-        # 8-way shard split produces. Rendering per shard would give N disconnected galleries; the
-        # shards dump their trees instead, and one later job merges and renders once.
-        shard(desc, files) = TestNode("MyPkg"; elapsed=1.0, children=files)
-        file(name, checks; nbroken=0) =
-            TestNode(name; elapsed=0.5, checks=checks, nbroken=nbroken)
-        c(label, got, want, tol, pass) =
-            Check(:t0, label, got, want, abs(got - want) / abs(want), tol, :rel, pass)
-
-        d1 = Pinax.dump_test_report(
-            shard("MyPkg", [file("test_a.jl", [c("close", 1.0, 1.0098, 0.01, true)])]),
-            joinpath(dir, "shard-1.toml"),
-        )
-        d2 = Pinax.dump_test_report(
-            shard("MyPkg", [file("test_b.jl", [c("broken", 0.5, 0.9, 0.01, false)])]),
-            joinpath(dir, "shard-2.toml"),
-        )
-
-        # `load_test_dump` is deliberately NOT exported — it has no production caller, and an
-        # export is free to add later while removing one after a registered version is breaking.
-        @test :load_test_dump ∉ names(Pinax)
-        @test isdefined(Pinax, :load_test_dump)
-
-        # round-trip: TOML keeps Float64 exactly, which is the only reason a dump is honest
-        back = Pinax.load_test_dump(d1)
-        @test back.children[1].description == "test_a.jl"
-        @test back.children[1].checks[1].want === 1.0098
-
-        Pinax.render_test_report([d1, d2]; out=joinpath(dir, "m"), title="Merged")
-        md = read(joinpath(dir, "m_agent", "agent.md"), String)
-        # ONE gallery, one page per test FILE — the shard boundary is invisible in the output…
-        @test occursin("test_a.jl", md) && occursin("test_b.jl", md)
-        @test !occursin("shard", lowercase(md))
-        # …and the check ids are renumbered across the merge rather than colliding at t1
-        @test occursin("t1 —", md) && occursin("t2 —", md)
-    end
-
-    @testset "a dump carries everything but the figure closure (issue #67)" begin
-        # Sharded and unsharded must be the SAME document. Everything a test captures is plain data
-        # except a `@figure` (its generator is a closure), so `@desc` / `@table` / `@raw` and the
-        # DECLARATION ORDER all cross the dump — otherwise a merged shard silently re-orders and
-        # drops its own content.
-        dir = mktempdir()
-        tbl = Pinax.Table(
-            :tb,
-            "tb",
-            "a caption",
-            ["N", "E"],
-            Vector{Any}[Any[10, -0.1], Any[20, missing]],
-            "tc",
-            nothing,
-        )
-        n = TestNode(
-            "f.jl";
-            checks=[Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
-            codes=[CodeBlock(:c1, "c1", "E = f(x)", "", "", "julia")],
-            tables=[tbl],
-            panels=["<p>raw panel</p>"],
-            desc=Pinax.Desc("a description"),
-            content=Pair{Symbol,Int}[:code => 1, :check => 1, :table => 1, :panel => 1],
-        )
-        p = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
-        back = Pinax.load_test_dump(p).children[1]
-        @test back.desc.source == "a description"
-        @test back.tables[1].caption == "a caption"
-        @test back.tables[1].rows == Vector{Any}[Any[10, -0.1], Any[20, ""]]  # missing → its cell text
-        @test back.panels == ["<p>raw panel</p>"]
-        @test back.content ==
-            Pair{Symbol,Int}[:code => 1, :check => 1, :table => 1, :panel => 1]
-        render_test_report([p]; out=joinpath(dir, "rep"))
-        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
-        @test all(
-            occursin(k, html) for
-            k in ("a description", "a caption", "raw panel", "E = f(x)")
-        )
-        # a captured `@figure` is the one exception, and it is LOUD rather than silent
-        fig = Pinax.Figure(
-            :f, "f", "", nothing, () -> "x.svg", "code", false, String[], nothing
-        )
-        @test_logs (:warn, r"cannot cross a shard dump") Pinax.dump_test_report(
-            TestNode("g.jl"; figures=[fig]), joinpath(dir, "g.toml")
-        )
-    end
-
-    @testset "the overview hook: what CI knows and the tree does not" begin
-        # A sharded report that is missing a shard looks like a smaller suite. The verdict on that
-        # lives in the JOB, not in the tree, so the hook lets the caller write it INTO the artifact —
-        # in Pinax's own vocabulary, on the overview page, in every backend.
-        dir = mktempdir()
-        node = TestNode("f.jl"; checks=[Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)])
-        render_test_report(
-            TestNode("T"; children=[node]);
-            out=joinpath(dir, "rep"),
-            overview=() -> begin
-                @desc md"**Every unit ran exactly once** — 2 observed, 2 run."
-                @table (; metric=["units observed", "units run"], value=[2, 2]) caption = "Completeness"
-                @raw "<p id=\"cinote\">from the merge job</p>"
-            end,
-        )
-        html = read(joinpath(dir, "rep_html", "overview.html"), String)
-        @test occursin("Every unit ran exactly once", html)
-        @test occursin("units observed", html) && occursin("Completeness", html)
-        @test occursin("id=\"cinote\"", html)
-        # …and it is DATA in agent.json, not only pixels — the table rows are native
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
-        @test occursin("units observed", agent) &&
-            occursin("\"caption\":\"Completeness\"", agent)
-        # the fixed tables are still there, and the hook's desc sits above them
-        @test occursin("Provenance", html) && occursin("Per-file result profile", html)
-
-        # A throwing hook is a DIAGNOSTIC, never a failed render: the report machinery may not turn a
-        # green run red (invariant IV) — and it says so in the artifact rather than swallowing it.
-        d2 = mktempdir()
-        render_test_report(
-            TestNode("T"; children=[node]);
-            out=joinpath(d2, "rep"),
-            overview=() -> error("boom"),
-        )
-        # diagnostics are document-level, so they land on the gallery's index, not on the page
-        h2 = read(joinpath(d2, "rep_html", "index.html"), String)
-        @test occursin("Diagnostics", h2) && occursin("boom", h2)   # named, with the cause
-        @test isfile(joinpath(d2, "rep_html", "overview.html"))     # …and the report still rendered
-    end
-
-    @testset "a broken test is counted, never painted red" begin
-        # Test.Broken is not a Pass, so encoding it as a Check would give pass=false — a red bar and
-        # a FAIL verdict for a test the runner is perfectly happy about.
-        n = TestNode(
-            "test_x.jl";
-            checks=[Check(:t0, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
-            nbroken=1,
-        )
-        @test Pinax._ntests(n) == 2
-        @test Pinax._nfail(n) == 0
-        @test occursin("1 broken", Pinax._summary_line(n))
-        @test occursin("1/2 passed", Pinax._summary_line(n))
-    end
-
-    @testset "the seam: content macros route into the open testset (A)" begin
-        # A PinaxTestSet on the stack IS the container — @figure/@desc land in it, in declaration
-        # order, through the one seam Pinax._current_container(). No @page/@section, no CTX; the
-        # gens are deferred, so nothing is plotted here.
-        root = PinaxTestSet("cap-root")
-        captured = nothing
-        Test.push_testset(root)
-        try
-            captured = Pinax._current_container()
-            @figure "plotA"
-            @desc md"a description"
-            @figure "plotB"
-        finally
-            Test.pop_testset()
-        end
-        @test captured === root
-        @test length(root.figures) == 2
-        @test root.desc !== nothing && occursin("a description", root.desc.source)
-        @test root.content == [:figure => 1, :figure => 2]   # @desc sets desc, not content order
-    end
-
-    @testset "the seam is inert inside a stock testset, report off (invariant V)" begin
-        # A DefaultTestSet is the innermost and no manuscript is open → :inert → @figure no-ops, and
-        # its argument (a deferred gen) is never evaluated. It must neither error nor capture.
-        @testset DefaultTestSet "stock inner" begin
-            @test Pinax._current_container() === :inert
-            ## every content macro is inert here — none stores anything, none errors
-            @figure error("this gen must never run")   # gen deferred + inert → never evaluated
-            @table (; N=[1, 2], E=[3, 4])
-            @raw "<b>x</b>"
-            @desc md"d"
-            @caption "c"
-        end
-    end
-
-    @testset "fold places captured tables / panels / figures; dump warns on a figure" begin
-        # Drive the fold over a node carrying every content kind (a live PinaxTestSet and a merged
-        # TestNode share this duck-typed shape), so the :table / :panel / :figure branches all run and
-        # land on the page in declaration order.
-        fig = Pinax.Figure(
-            :f,
-            "f",
-            "cap",
-            nothing,
-            () -> (p=tempname() * ".svg"; write(p, "<svg/>"); p),
-            "code",
-            false,
-            String[],
-            nothing,
-        )
-        tbl = Pinax.Table(
-            :tb,
-            "tb",
-            "a table caption",
-            ["N", "E"],
-            [Any[10, -0.1], Any[20, -0.11]],
-            "tc",
-            nothing,
-        )
-        node = TestNode(
-            "test_x.jl";
-            elapsed=0.1,
-            checks=[Check(:t0, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true)],
-            figures=[fig],
-            tables=[tbl],
-            panels=["<p>hand built</p>"],
-            content=[:panel => 1, :table => 1, :figure => 1, :check => 1],
-        )
-        root = TestNode("Pkg"; children=[node])
-        dir = mktempdir()
-        Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
-        html = read(joinpath(dir, "r_html", "test_x_jl.html"), String)
-        @test occursin("a table caption", html)   # the @table folded onto the page
-        @test occursin("hand built", html)         # the @raw panel folded onto the page
-        # the dump carries checks + structure and WARNS (never silently drops) a test's figure
-        @test isfile(Pinax.dump_test_report(root, joinpath(dir, "d.toml")))
-    end
-
-    @testset "hierarchical + collision-free ids (B)" begin
-        # A flat `_slug(desc)` would collide for same-named files or sections. Page ids are made
-        # globally unique, section ids page-qualified, and any true collision gets a `-2` suffix + a
-        # loud diagnostic — never a silent overwrite / duplicate `agent.json` id.
-        sec(name) = TestNode(name; checks=[Check(:t0, "c", 1.0, 1.0, 0.0, 0.5, :abs, true)])
-        file(name, secs) = TestNode(name; children=secs)
-        root = TestNode(
-            "Pkg";
-            children=[
-                file("test_a.jl", [sec("basics"), sec("basics")]),  # sibling collision within one page
-                file("test_a.jl", [sec("basics")]),                 # duplicate FILE (page) name
-            ],
-        )
-        dir = mktempdir()
-        Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
-        # duplicate page ids disambiguated → both files render (no silent overwrite)
-        @test isfile(joinpath(dir, "r_html", "test_a_jl.html"))
-        @test isfile(joinpath(dir, "r_html", "test_a_jl-2.html"))
-        # section ids are page-qualified; the sibling collision within test_a.jl took the `-2` suffix
-        html = read(joinpath(dir, "r_html", "test_a_jl.html"), String)
-        @test occursin("test_a_jl_basics", html) && occursin("test_a_jl_basics-2", html)
-        # both collisions are surfaced as loud diagnostics (never silent)
-        dups = count(
-            e -> occursin("duplicate id", e.message), Pinax.current_document().diag.entries
-        )
-        @test dups >= 2
-    end
-
-    @testset "a manuscript built inside a test still writes to CTX, not :inert (A)" begin
-        # Pinax's own suite builds manuscripts inside @testset. An open CTX container must win over
-        # the enclosing stock testset — otherwise every manuscript test would silently go inert.
-        doc = Pinax.document() do
-            @page :p "P" begin
-                @section :s "S" begin
-                    @figure "fig-in-manuscript"
+        @testset "install_test_capture!: both refusals, from inside a running suite" begin
+            # Installing actually succeeds only at depth 0, so the end-to-end paths are subprocess
+            # tests further down. These are the two REFUSALS — the guards that let the call live in a
+            # committed `runtests.jl` — and refusing is safe to reach from in here, because it is
+            # precisely the case where nothing is pushed.
+            installed = Pinax._CAPTURE_INSTALLED[]
+            try
+                withenv("PINAX_TEST_OUT" => nothing, "PINAX_TEST_DUMP" => nothing) do
+                    @test !Pinax.capture_requested()
+                    @test Pinax.install_test_capture!() == false   # nobody asked → no root, no report
                 end
-            end
-        end
-        @test length(doc.pages[1].sections[1].figures) == 1
-    end
-
-    @testset "Pkg.test delegation: the -L preamble captures a plain suite, fails on red (G)" begin
-        # Mimic what `Pinax.test()` sets up in a `Pkg.test` subprocess: the `-L` preamble runs
-        # `_install_test_capture!()` (an unbalanced capturing root), THEN the runner `include`s the
-        # runtests — a plain `@testset` tree that inherits the root — and an `atexit` hook renders and
-        # imposes the exit code. Contrast with a bare run (no preamble): stock Test, no report.
-        dir = mktempdir()
-        write(
-            joinpath(dir, "runtests.jl"),
-            """
-            @testset "tests" begin            # a grouping wrapper — flattened, like a real runtests.jl
-                @testset "test_demo.jl" begin
-                    @desc md"convergence of E against the oracle"
-                    @test isapprox(-0.10203402715213993, -0.10242223073749557; rtol=0.01)
-                    @test isapprox(0.5, 0.9; rtol=0.01)
+                withenv("PINAX_TEST_OUT" => "somewhere") do
+                    @test Pinax.capture_requested()
                 end
-                @testset "noisy fixture" begin
-                    @pinaxignore
-                    @test true
+                withenv("PINAX_TEST_DUMP" => "s1.toml") do
+                    @test Pinax.capture_requested()                # a dump alone is a request
                 end
+
+                # Asked for, but a capture is already open — under `Pinax.test`, whose preamble
+                # installed one before the suite was read. A second root would take the assertions and
+                # leave the first rendering empty and green.
+                Pinax._CAPTURE_INSTALLED[] = true
+                withenv("PINAX_TEST_OUT" => "somewhere") do
+                    @test Pinax.install_test_capture!() == false
+                    @test Pinax._install_test_capture!() == false  # the preamble's own way in, too
+                end
+            finally
+                Pinax._CAPTURE_INSTALLED[] = installed
             end
-            """,
-        )
-        runtests = repr(joinpath(dir, "runtests.jl"))
-        # A capturing root can only be installed at depth 0, so the install paths necessarily run in
-        # a child — which means they are invisible to a coverage run that only measures this process.
-        # Mirror the parent's setting into the child so the lines it really does execute are counted
-        # where they happen; off locally, so a plain `Pkg.test()` is not slowed for nothing.
-        cov = Base.JLOptions().code_coverage != 0 ? `--code-coverage=user` : ``
-        run_script = function (body; env=("PINAX_TEST_OUT" => joinpath(dir, "rep"),))
-            script = tempname() * ".jl"
-            write(script, body)
-            log = tempname()
-            cmd = addenv(
-                `$(Base.julia_cmd()) --startup-file=no $(cov) --project=$(dirname(Base.active_project())) $script`,
-                env...,
-            )
-            p = run(pipeline(ignorestatus(cmd); stdout=log, stderr=log))
-            return (; ok=success(p), log=read(log, String))
         end
 
-        # ---- bare run (no preamble): stock Test, red fails, nothing rendered ----
-        r = run_script("using Pinax, Test\ninclude($(runtests))\n")
-        @test !r.ok                                   # the top-level DefaultTestSet throws on red
-        @test !isdir(joinpath(dir, "rep_agent"))      # no report — a bare run is untouched
+        @testset "numbers survive both verdicts" begin
+            # Pass.data is an Expr with evaluated args; Fail.data is a String. The asymmetry is the
+            # whole trap: parse only the Expr and every FAILING check silently loses its numbers.
+            pass = Test.Pass(
+                :test, :(isapprox(a, b)), :(isapprox(1.0, 1.0098; rtol=0.01)), nothing
+            )
+            @test _approx_numbers(_result_data_expr(pass)) == (1.0, 1.0098, 0.01, :rel)
 
-        # ---- delegation preamble: capture + render + exit code + @pinaxignore ----
-        r = run_script(
-            "using Pinax, Test\nPinax._install_test_capture!()\ninclude($(runtests))\n"
-        )
-        @test !r.ok                                   # red suite fails the process (atexit exit(1))
-        @test occursin("Pinax test report", r.log)
-        md = read(joinpath(dir, "rep_agent", "agent.md"), String)
-        @test occursin("1/2 FAIL", md)                # verdict preserved on the file's page
-        @test occursin("got 0.5, want 0.9", md)       # the failing check kept its real numbers
-        @test occursin("convergence of E against the oracle", md)  # a @desc inside a test reached it
-        @test isfile(joinpath(dir, "rep_html", "test_demo_jl.html"))
-        @test !occursin("noisy fixture", md)          # @pinaxignore dropped it (it still ran)
+            fail = Test.Fail(
+                :test,
+                :(isapprox(a, b)),
+                "isapprox(0.5, 0.9; rtol = 0.01)",
+                nothing,
+                nothing,
+                LineNumberNode(1),
+                false,
+            )
+            @test _approx_numbers(_result_data_expr(fail)) == (0.5, 0.9, 0.01, :rel)
+        end
 
-        # ---- the suite-side way in: same capture, without owning the `Pkg.test` call ----
-        # `install_test_capture!` from inside the suite has to reach exactly the same result as the
-        # preamble, because the point of it is that a runner which cannot be given `-L` — an action
-        # that owns `Pkg.test` and sets coverage on it — keeps running the suite.
-        r = run_script(
-            "using Pinax, Test\nPinax.install_test_capture!()\ninclude($(runtests))\n";
-            env=("PINAX_TEST_OUT" => joinpath(dir, "suite"),),
-        )
-        @test !r.ok                                   # red suite still fails the process
-        @test occursin("Pinax test report", r.log)
-        md_suite = read(joinpath(dir, "suite_agent", "agent.md"), String)
-        @test occursin("1/2 FAIL", md_suite)          # same verdict as the preamble produced
-        @test occursin("got 0.5, want 0.9", md_suite) # same numbers
-        @test occursin("convergence of E against the oracle", md_suite)
+        @testset "check carries the margin, not just a verdict" begin
+            pass = Test.Pass(:test, :x, :(isapprox(1.0, 1.0098; rtol=0.01)), nothing)
+            c = _check_for(pass, 1)
+            @test c.pass
+            @test c.got == 1.0 && c.want == 1.0098 && c.tol == 0.01 && c.kind === :rel
+            @test c.delta / c.tol > 0.9   # passed, but spent 97% of its budget
 
-        # ---- inert unless the environment asked (so the line can be committed) ----
-        # A developer running `Pkg.test()` with the call in `runtests.jl` must get what they got
-        # before it was added: stock Test, red fails, no report anywhere.
-        r = run_script(
-            "using Pinax, Test\nPinax.install_test_capture!()\ninclude($(runtests))\n";
-            env=("PINAX_TEST_OUT" => nothing, "PINAX_TEST_DUMP" => nothing),
-        )
-        @test !r.ok                                   # the top-level DefaultTestSet throws on red
-        @test !occursin("Pinax test report", r.log)   # nothing rendered, nothing dumped
-        @test !isdir(joinpath(dir, "test-report_agent"))   # not even at the default `out`
+            # `pass` comes from Julia's own verdict, never from delta <= tol: isapprox mixes atol and
+            # rtol in a way a single-kind Check cannot reproduce, and a report that disagrees with the
+            # test runner is worse than no report.
+            atol_pass = Test.Pass(
+                :test, :x, :(isapprox(0.0, 1.0e-9; atol=1.0e-8, rtol=0.01)), nothing
+            )
+            @test _check_for(atol_pass, 1).pass
 
-        # ---- idempotent: preamble AND suite call, still one root ----
-        # A `runtests.jl` carrying the call is still a valid target for `Pinax.test()`, so the two
-        # meet routinely. Two roots would mean two atexit hooks: the second takes every assertion
-        # and the first renders empty and green. One report line is the assertion that matters.
-        r = run_script(
-            "using Pinax, Test\nPinax._install_test_capture!()\nPinax.install_test_capture!()\ninclude($(runtests))\n";
-            env=("PINAX_TEST_OUT" => joinpath(dir, "once"),),
-        )
-        @test !r.ok
-        @test length(collect(eachmatch(r"Pinax test report", r.log))) == 1
-        md_once = read(joinpath(dir, "once_agent", "agent.md"), String)
-        @test occursin("1/2 FAIL", md_once)           # the surviving root is the one that captured
+            # A non-numeric assertion still becomes a check — every @test must show up somewhere.
+            b = _check_for(Test.Pass(:test, :x, :(1 + 1 == 2), nothing), 2)
+            @test b.pass && b.got == 1.0
+        end
 
-        # ---- asked for, but there is no `Test` to capture: say so, do not fail silently ----
-        # `Test` is a weakdep, so without it the installer has no method at all. A report was
-        # requested and will not appear; going quiet here would reproduce the empty-and-green
-        # failure by another route.
-        r = run_script(
-            "using Pinax\nPinax.install_test_capture!()\n";
-            env=("PINAX_TEST_OUT" => joinpath(dir, "notest"),),
-        )
-        @test r.ok                                    # a warning, not an error
-        @test occursin("is not loaded", r.log)
-        @test !isdir(joinpath(dir, "notest_agent"))
-    end
+        @testset "atol governs when there is no usable reference" begin
+            p = Test.Pass(:test, :x, :(isapprox(0.001, 0.0; atol=0.01)), nothing)
+            @test _approx_numbers(_result_data_expr(p)) == (0.001, 0.0, 0.01, :abs)
+        end
 
-    @testset "Pinax.test renders a plain @testset suite (the interface, G)" begin
-        # The featured entry point: a suite with NO Pinax token — plain `@testset`/`@test` (it may
-        # also `@desc`) — rendered by calling `Pinax.test` instead of `include`. Runs at depth 0 in a
-        # subprocess so the root actually renders (and, for a red suite, re-throws).
-        dir = mktempdir()
-        write(
-            joinpath(dir, "suite.jl"),
-            """
-            using Pinax, Test
-            @testset "ok.jl" begin
-                @desc md"a description written inside a plain @testset"
-                @test isapprox(1.0, 1.0009; rtol=0.01)
+        @testset "margin figure needs no plotting backend" begin
+            checks = [
+                Check(:t1, "tight", 1.0, 1.0098, 0.0097, 0.01, :rel, true),
+                Check(:t2, "broken", 0.5, 0.9, 0.444, 0.01, :rel, false),
+            ]
+            svg = _margin_svg(checks, joinpath(mktempdir(), "m.svg"))
+            s = read(svg, String)
+            @test startswith(s, "<svg")
+            @test occursin("#d9534f", s)          # the failing bar is red
+            @test occursin("44×", s)              # …and labelled with its real overshoot
+            @test occursin("</svg>", s)
+        end
+
+        @testset "dump → merge → one gallery (how sharded CI works)" begin
+            dir = mktempdir()
+            # Two shards, each holding a DISJOINT set of test files — which is exactly what the fleet's
+            # 8-way shard split produces. Rendering per shard would give N disconnected galleries; the
+            # shards dump their trees instead, and one later job merges and renders once.
+            shard(desc, files) = TestNode("MyPkg"; elapsed=1.0, children=files)
+            file(name, checks; nbroken=0) =
+                TestNode(name; elapsed=0.5, checks=checks, nbroken=nbroken)
+            c(label, got, want, tol, pass) =
+                Check(:t0, label, got, want, abs(got - want) / abs(want), tol, :rel, pass)
+
+            d1 = Pinax.dump_test_report(
+                shard("MyPkg", [file("test_a.jl", [c("close", 1.0, 1.0098, 0.01, true)])]),
+                joinpath(dir, "shard-1.toml"),
+            )
+            d2 = Pinax.dump_test_report(
+                shard("MyPkg", [file("test_b.jl", [c("broken", 0.5, 0.9, 0.01, false)])]),
+                joinpath(dir, "shard-2.toml"),
+            )
+
+            # `load_test_dump` is deliberately NOT exported — it has no production caller, and an
+            # export is free to add later while removing one after a registered version is breaking.
+            @test :load_test_dump ∉ names(Pinax)
+            @test isdefined(Pinax, :load_test_dump)
+
+            # round-trip: TOML keeps Float64 exactly, which is the only reason a dump is honest
+            back = Pinax.load_test_dump(d1)
+            @test back.children[1].description == "test_a.jl"
+            @test back.children[1].checks[1].want === 1.0098
+
+            Pinax.render_test_report([d1, d2]; out=joinpath(dir, "m"), title="Merged")
+            md = read(joinpath(dir, "m_agent", "agent.md"), String)
+            # ONE gallery, one page per test FILE — the shard boundary is invisible in the output…
+            @test occursin("test_a.jl", md) && occursin("test_b.jl", md)
+            @test !occursin("shard", lowercase(md))
+            # …and the check ids are renumbered across the merge rather than colliding at t1
+            @test occursin("t1 —", md) && occursin("t2 —", md)
+        end
+
+        @testset "a dump carries everything but the figure closure (issue #67)" begin
+            # Sharded and unsharded must be the SAME document. Everything a test captures is plain data
+            # except a `@figure` (its generator is a closure), so `@desc` / `@table` / `@raw` and the
+            # DECLARATION ORDER all cross the dump — otherwise a merged shard silently re-orders and
+            # drops its own content.
+            dir = mktempdir()
+            tbl = Pinax.Table(
+                :tb,
+                "tb",
+                "a caption",
+                ["N", "E"],
+                Vector{Any}[Any[10, -0.1], Any[20, missing]],
+                "tc",
+                nothing,
+            )
+            n = TestNode(
+                "f.jl";
+                checks=[Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+                codes=[CodeBlock(:c1, "c1", "E = f(x)", "", "", "julia")],
+                tables=[tbl],
+                panels=["<p>raw panel</p>"],
+                desc=Pinax.Desc("a description"),
+                content=Pair{Symbol,Int}[:code => 1, :check => 1, :table => 1, :panel => 1],
+            )
+            p = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
+            back = Pinax.load_test_dump(p).children[1]
+            @test back.desc.source == "a description"
+            @test back.tables[1].caption == "a caption"
+            @test back.tables[1].rows == Vector{Any}[Any[10, -0.1], Any[20, ""]]  # missing → its cell text
+            @test back.panels == ["<p>raw panel</p>"]
+            @test back.content ==
+                Pair{Symbol,Int}[:code => 1, :check => 1, :table => 1, :panel => 1]
+            render_test_report([p]; out=joinpath(dir, "rep"))
+            html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+            @test all(
+                occursin(k, html) for
+                k in ("a description", "a caption", "raw panel", "E = f(x)")
+            )
+            # a captured `@figure` is the one exception, and it is LOUD rather than silent
+            fig = Pinax.Figure(
+                :f, "f", "", nothing, () -> "x.svg", "code", false, String[], nothing
+            )
+            @test_logs (:warn, r"cannot cross a shard dump") Pinax.dump_test_report(
+                TestNode("g.jl"; figures=[fig]), joinpath(dir, "g.toml")
+            )
+        end
+
+        @testset "the overview hook: what CI knows and the tree does not" begin
+            # A sharded report that is missing a shard looks like a smaller suite. The verdict on that
+            # lives in the JOB, not in the tree, so the hook lets the caller write it INTO the artifact —
+            # in Pinax's own vocabulary, on the overview page, in every backend.
+            dir = mktempdir()
+            node = TestNode(
+                "f.jl"; checks=[Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)]
+            )
+            render_test_report(
+                TestNode("T"; children=[node]);
+                out=joinpath(dir, "rep"),
+                overview=() -> begin
+                    @desc md"**Every unit ran exactly once** — 2 observed, 2 run."
+                    @table (; metric=["units observed", "units run"], value=[2, 2]) caption = "Completeness"
+                    @raw "<p id=\"cinote\">from the merge job</p>"
+                end,
+            )
+            html = read(joinpath(dir, "rep_html", "overview.html"), String)
+            @test occursin("Every unit ran exactly once", html)
+            @test occursin("units observed", html) && occursin("Completeness", html)
+            @test occursin("id=\"cinote\"", html)
+            # …and it is DATA in agent.json, not only pixels — the table rows are native
+            agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+            @test occursin("units observed", agent) &&
+                occursin("\"caption\":\"Completeness\"", agent)
+            # the fixed tables are still there, and the hook's desc sits above them
+            @test occursin("Provenance", html) && occursin("Per-file result profile", html)
+
+            # A throwing hook is a DIAGNOSTIC, never a failed render: the report machinery may not turn a
+            # green run red (invariant IV) — and it says so in the artifact rather than swallowing it.
+            d2 = mktempdir()
+            render_test_report(
+                TestNode("T"; children=[node]);
+                out=joinpath(d2, "rep"),
+                overview=() -> error("boom"),
+            )
+            # diagnostics are document-level, so they land on the gallery's index, not on the page
+            h2 = read(joinpath(d2, "rep_html", "index.html"), String)
+            @test occursin("Diagnostics", h2) && occursin("boom", h2)   # named, with the cause
+            @test isfile(joinpath(d2, "rep_html", "overview.html"))     # …and the report still rendered
+        end
+
+        @testset "a broken test is counted, never painted red" begin
+            # Test.Broken is not a Pass, so encoding it as a Check would give pass=false — a red bar and
+            # a FAIL verdict for a test the runner is perfectly happy about.
+            n = TestNode(
+                "test_x.jl";
+                checks=[Check(:t0, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+                nbroken=1,
+            )
+            @test Pinax._ntests(n) == 2
+            @test Pinax._nfail(n) == 0
+            @test occursin("1 broken", Pinax._summary_line(n))
+            @test occursin("1/2 passed", Pinax._summary_line(n))
+        end
+
+        @testset "the seam: content macros route into the open testset (A)" begin
+            # A PinaxTestSet on the stack IS the container — @figure/@desc land in it, in declaration
+            # order, through the one seam Pinax._current_container(). No @page/@section, no CTX; the
+            # gens are deferred, so nothing is plotted here.
+            root = PinaxTestSet("cap-root")
+            captured = nothing
+            Test.push_testset(root)
+            try
+                captured = Pinax._current_container()
+                @figure "plotA"
+                @desc md"a description"
+                @figure "plotB"
+            finally
+                Test.pop_testset()
             end
-            """,
-        )
-        write(
-            joinpath(dir, "bad.jl"),
-            """
-            using Pinax, Test
-            @testset "bad.jl" begin
-                @test isapprox(0.5, 0.9; rtol=0.01)
+            @test captured === root
+            @test length(root.figures) == 2
+            @test root.desc !== nothing && occursin("a description", root.desc.source)
+            @test root.content == [:figure => 1, :figure => 2]   # @desc sets desc, not content order
+        end
+
+        @testset "the seam is inert inside a stock testset, report off (invariant V)" begin
+            # A DefaultTestSet is the innermost and no manuscript is open → :inert → @figure no-ops, and
+            # its argument (a deferred gen) is never evaluated. It must neither error nor capture.
+            @testset DefaultTestSet "stock inner" begin
+                @test Pinax._current_container() === :inert
+                ## every content macro is inert here — none stores anything, none errors
+                @figure error("this gen must never run")   # gen deferred + inert → never evaluated
+                @table (; N=[1, 2], E=[3, 4])
+                @raw "<b>x</b>"
+                @desc md"d"
+                @caption "c"
             end
-            """,
-        )
-        run_it = function (suite, out)
-            script = joinpath(dir, "run_" * basename(out) * ".jl")
-            write(
-                script,
-                "using Pinax, Test\nPinax.test($(repr(suite)); out=$(repr(out)), title=\"demo\")\n",
+        end
+
+        @testset "fold places captured tables / panels / figures; dump warns on a figure" begin
+            # Drive the fold over a node carrying every content kind (a live PinaxTestSet and a merged
+            # TestNode share this duck-typed shape), so the :table / :panel / :figure branches all run and
+            # land on the page in declaration order.
+            fig = Pinax.Figure(
+                :f,
+                "f",
+                "cap",
+                nothing,
+                () -> (p=tempname() * ".svg"; write(p, "<svg/>"); p),
+                "code",
+                false,
+                String[],
+                nothing,
             )
-            cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) $script`
-            return success(run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=devnull)))
-        end
-
-        # green suite → Pinax.test succeeds and renders, from a suite with no @pinaxtestset in sight
-        out = joinpath(dir, "rep")
-        @test run_it(joinpath(dir, "suite.jl"), out)
-        @test isfile(joinpath(out * "_html", "ok_jl.html"))
-        md = read(joinpath(out * "_agent", "agent.md"), String)
-        @test occursin("a description written inside a plain @testset", md)
-
-        # red suite → Pinax.test re-throws (process fails): a report never turns a red suite green
-        @test !run_it(joinpath(dir, "bad.jl"), joinpath(dir, "badrep"))
-    end
-
-    @testset "a `@testset for` is a SAMPLE, not a section — the sweep fold (C)" begin
-        # An unnamed `@testset for χ in …` is not N sections; it is a sweep. We read the axis ONLY from
-        # the canonical string Test itself generates ("χ = 8"), fold the iterations into a convergence +
-        # margin figure keyed by the test expression, and never touch the verdict. Tested on the
-        # Test-free `TestNode` shape (the fold walks the live `PinaxTestSet` and a merged dump the same).
-        mkchk(g, w, rt) = Check(
-            :t,
-            "isapprox(E, oracle; rtol = $(rt))",
-            g,
-            w,
-            abs(g - w) / abs(w),
-            rt,
-            :rel,
-            abs(g - w) / abs(w) <= rt,
-        )
-
-        @testset "the binding parser reads ONLY the canonical form (invariant III)" begin
-            @test _parse_binding("χ = 8") == [:χ => "8"]            # Unicode loop var
-            @test _parse_binding("χ = 8, β = 0.1") == [:χ => "8", :β => "0.1"]
-            @test _parse_binding("N = (1, 2)") == [:N => "(1, 2)"]  # a comma inside a tuple value
-            @test _parse_binding("a plain sentence") === nothing    # a human description does not fold
-            @test _parse_binding("MyPkg") === nothing               # a grouping name has no binding
-            @test _parse_binding("x == y") === nothing              # a comparison is not a binding
-        end
-
-        @testset "numeric sweep → one convergence + margin figure, verdict preserved" begin
-            samp(χ, got) = TestNode("χ = $(χ)"; checks=[mkchk(got, 1.0, 0.05)])
-            file = TestNode(
-                "test_conv.jl"; children=[samp(8, 1.2), samp(16, 1.05), samp(32, 1.01)]
+            tbl = Pinax.Table(
+                :tb,
+                "tb",
+                "a table caption",
+                ["N", "E"],
+                [Any[10, -0.1], Any[20, -0.11]],
+                "tc",
+                nothing,
             )
-            @test _is_swept(file, _looks_like_a_file)
-            out = joinpath(mktempdir(), "rep")
-            render_test_report(TestNode("Test report"; children=[file]); out=out)
-            html = read(joinpath(out * "_html", "test_conv_jl.html"), String)
-            md = read(joinpath(out * "_agent", "agent.md"), String)
-            @test occursin("Convergence of", html)                 # the derived figure
-            @test occursin("test_conv_jl_conv_1", md)              # convergence fig id
-            @test occursin("test_conv_jl_swpmargin_1", md)         # margin-vs-axis fig id
-            @test occursin("1/3 FAIL", md)                         # verdict untouched (2 of 3 fail)
-            @test occursin("[χ = 8]", md) && occursin("[χ = 32]", md)  # checks binding-tagged
-            @test !occursin("[id: test_conv_jl_8]", md)            # NOT rendered as a per-value section
+            node = TestNode(
+                "test_x.jl";
+                elapsed=0.1,
+                checks=[Check(:t0, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+                figures=[fig],
+                tables=[tbl],
+                panels=["<p>hand built</p>"],
+                content=[:panel => 1, :table => 1, :figure => 1, :check => 1],
+            )
+            root = TestNode("Pkg"; children=[node])
+            dir = mktempdir()
+            Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
+            html = read(joinpath(dir, "r_html", "test_x_jl.html"), String)
+            @test occursin("a table caption", html)   # the @table folded onto the page
+            @test occursin("hand built", html)         # the @raw panel folded onto the page
+            # the dump carries checks + structure and WARNS (never silently drops) a test's figure
+            @test isfile(Pinax.dump_test_report(root, joinpath(dir, "d.toml")))
         end
 
-        @testset "nested loops: innermost = x-axis, outer = legend (C3)" begin
-            inner(β, got) = TestNode("β = $(β)"; checks=[mkchk(got, 1.0, 0.05)])
-            outer(χ, gots) = TestNode("χ = $(χ)"; children=[inner(b, g) for (b, g) in gots])
-            file = TestNode(
-                "test_nest.jl";
+        @testset "hierarchical + collision-free ids (B)" begin
+            # A flat `_slug(desc)` would collide for same-named files or sections. Page ids are made
+            # globally unique, section ids page-qualified, and any true collision gets a `-2` suffix + a
+            # loud diagnostic — never a silent overwrite / duplicate `agent.json` id.
+            sec(name) =
+                TestNode(name; checks=[Check(:t0, "c", 1.0, 1.0, 0.0, 0.5, :abs, true)])
+            file(name, secs) = TestNode(name; children=secs)
+            root = TestNode(
+                "Pkg";
                 children=[
-                    outer(8, [(0.1, 1.2), (0.2, 1.1)]),
-                    outer(16, [(0.1, 1.05), (0.2, 1.02)]),
+                    file("test_a.jl", [sec("basics"), sec("basics")]),  # sibling collision within one page
+                    file("test_a.jl", [sec("basics")]),                 # duplicate FILE (page) name
                 ],
             )
-            @test _is_swept(file, _looks_like_a_file)
-            out = joinpath(mktempdir(), "rep")
-            render_test_report(TestNode("Test report"; children=[file]); out=out)
-            html = read(joinpath(out * "_html", "test_nest_jl.html"), String)
-            @test occursin("χ = 8", html) && occursin("χ = 16", html)   # the two legend series
+            dir = mktempdir()
+            Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
+            # duplicate page ids disambiguated → both files render (no silent overwrite)
+            @test isfile(joinpath(dir, "r_html", "test_a_jl.html"))
+            @test isfile(joinpath(dir, "r_html", "test_a_jl-2.html"))
+            # section ids are page-qualified; the sibling collision within test_a.jl took the `-2` suffix
+            html = read(joinpath(dir, "r_html", "test_a_jl.html"), String)
+            @test occursin("test_a_jl_basics", html) && occursin("test_a_jl_basics-2", html)
+            # both collisions are surfaced as loud diagnostics (never silent)
+            dups = count(
+                e -> occursin("duplicate id", e.message),
+                Pinax.current_document().diag.entries,
+            )
+            @test dups >= 2
         end
 
-        @testset "non-numeric axis → categorical ticks (C1)" begin
-            csamp(m, got) = TestNode("model = $(m)"; checks=[mkchk(got, 1.0, 0.05)])
-            file = TestNode(
-                "test_cat.jl"; children=[csamp("TFIM", 1.01), csamp("Heisenberg", 1.03)]
-            )
-            @test _is_swept(file, _looks_like_a_file)
-            out = joinpath(mktempdir(), "rep")
-            render_test_report(TestNode("Test report"; children=[file]); out=out)
-            html = read(joinpath(out * "_html", "test_cat_jl.html"), String)
-            @test occursin("TFIM", html) && occursin("Heisenberg", html) # string ticks, not numbers
+        @testset "a manuscript built inside a test still writes to CTX, not :inert (A)" begin
+            # Pinax's own suite builds manuscripts inside @testset. An open CTX container must win over
+            # the enclosing stock testset — otherwise every manuscript test would silently go inert.
+            doc = Pinax.document() do
+                @page :p "P" begin
+                    @section :s "S" begin
+                        @figure "fig-in-manuscript"
+                    end
+                end
+            end
+            @test length(doc.pages[1].sections[1].figures) == 1
         end
 
-        @testset "mixed / inconsistent siblings do NOT fold — kept as sections, warned (III)" begin
-            file = TestNode(
-                "test_mix.jl";
-                children=[
-                    TestNode("χ = 8"; checks=[mkchk(1.01, 1.0, 0.05)]),
-                    TestNode("a smoke check"; checks=[mkchk(1.0, 1.0, 0.05)]),
-                ],
-            )
-            @test !_is_swept(file, _looks_like_a_file)              # not a consistent sweep
-            out = joinpath(mktempdir(), "rep")
-            render_test_report(TestNode("Test report"; children=[file]); out=out)
-            files = readdir(out * "_html")
-            txt = join(
-                read(joinpath(out * "_html", f), String) for
-                f in files if endswith(f, ".html")
-            )
-            @test occursin("a smoke check", txt)                   # rendered as an ordinary section
-            @test occursin("could not be folded", txt)             # never silent (a loud diagnostic)
-        end
-
-        @testset "a real `@testset for` folds through the delegation preamble (end-to-end)" begin
-            # The same fold, but driven by Test's own `testset_forloop` (the canonical descriptions are
-            # machine-generated, not hand-written) through the capturing root — at depth 0, so subprocess.
+        @testset "Pkg.test delegation: the -L preamble captures a plain suite, fails on red (G)" begin
+            # Mimic what `Pinax.test()` sets up in a `Pkg.test` subprocess: the `-L` preamble runs
+            # `_install_test_capture!()` (an unbalanced capturing root), THEN the runner `include`s the
+            # runtests — a plain `@testset` tree that inherits the root — and an `atexit` hook renders and
+            # imposes the exit code. Contrast with a bare run (no preamble): stock Test, no report.
             dir = mktempdir()
             write(
                 joinpath(dir, "runtests.jl"),
                 """
-                @testset "test_sweep.jl" begin
-                    @testset for χ in (8, 16, 32)
-                        E = 1.0 + 1.0 / χ            # → 1.0 as χ grows
-                        @test isapprox(E, 1.0; rtol=0.05)
+                @testset "tests" begin            # a grouping wrapper — flattened, like a real runtests.jl
+                    @testset "test_demo.jl" begin
+                        @desc md"convergence of E against the oracle"
+                        @test isapprox(-0.10203402715213993, -0.10242223073749557; rtol=0.01)
+                        @test isapprox(0.5, 0.9; rtol=0.01)
+                    end
+                    @testset "noisy fixture" begin
+                        @pinaxignore
+                        @test true
                     end
                 end
                 """,
             )
-            script = tempname() * ".jl"
-            write(
-                script,
-                "using Pinax, Test\nPinax._install_test_capture!()\ninclude($(repr(joinpath(dir, "runtests.jl"))))\n",
+            runtests = repr(joinpath(dir, "runtests.jl"))
+            # A capturing root can only be installed at depth 0, so the install paths necessarily run in
+            # a child — which means they are invisible to a coverage run that only measures this process.
+            # Mirror the parent's setting into the child so the lines it really does execute are counted
+            # where they happen; off locally, so a plain `Pkg.test()` is not slowed for nothing.
+            cov = Base.JLOptions().code_coverage != 0 ? `--code-coverage=user` : ``
+            run_script = function (body; env=("PINAX_TEST_OUT" => joinpath(dir, "rep"),))
+                script = tempname() * ".jl"
+                write(script, body)
+                log = tempname()
+                cmd = addenv(
+                    `$(Base.julia_cmd()) --startup-file=no $(cov) --project=$(dirname(Base.active_project())) $script`,
+                    env...,
+                )
+                p = run(pipeline(ignorestatus(cmd); stdout=log, stderr=log))
+                return (; ok=success(p), log=read(log, String))
+            end
+
+            # ---- bare run (no preamble): stock Test, red fails, nothing rendered ----
+            r = run_script("using Pinax, Test\ninclude($(runtests))\n")
+            @test !r.ok                                   # the top-level DefaultTestSet throws on red
+            @test !isdir(joinpath(dir, "rep_agent"))      # no report — a bare run is untouched
+
+            # ---- delegation preamble: capture + render + exit code + @pinaxignore ----
+            r = run_script(
+                "using Pinax, Test\nPinax._install_test_capture!()\ninclude($(runtests))\n"
             )
-            cmd = addenv(
-                `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) $script`,
-                "PINAX_TEST_OUT" => joinpath(dir, "rep"),
-            )
-            run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=devnull))
+            @test !r.ok                                   # red suite fails the process (atexit exit(1))
+            @test occursin("Pinax test report", r.log)
             md = read(joinpath(dir, "rep_agent", "agent.md"), String)
-            @test occursin("Convergence of", md)                   # the sweep figure, from a real forloop
-            @test occursin("[χ = 8]", md) && occursin("[χ = 32]", md)
-            @test occursin("1/3", md)                              # verdict preserved (only χ=32 passes)
+            @test occursin("1/2 FAIL", md)                # verdict preserved on the file's page
+            @test occursin("got 0.5, want 0.9", md)       # the failing check kept its real numbers
+            @test occursin("convergence of E against the oracle", md)  # a @desc inside a test reached it
+            @test isfile(joinpath(dir, "rep_html", "test_demo_jl.html"))
+            @test !occursin("noisy fixture", md)          # @pinaxignore dropped it (it still ran)
+
+            # ---- the suite-side way in: same capture, without owning the `Pkg.test` call ----
+            # `install_test_capture!` from inside the suite has to reach exactly the same result as the
+            # preamble, because the point of it is that a runner which cannot be given `-L` — an action
+            # that owns `Pkg.test` and sets coverage on it — keeps running the suite.
+            r = run_script(
+                "using Pinax, Test\nPinax.install_test_capture!()\ninclude($(runtests))\n";
+                env=("PINAX_TEST_OUT" => joinpath(dir, "suite"),),
+            )
+            @test !r.ok                                   # red suite still fails the process
+            @test occursin("Pinax test report", r.log)
+            md_suite = read(joinpath(dir, "suite_agent", "agent.md"), String)
+            @test occursin("1/2 FAIL", md_suite)          # same verdict as the preamble produced
+            @test occursin("got 0.5, want 0.9", md_suite) # same numbers
+            @test occursin("convergence of E against the oracle", md_suite)
+
+            # ---- inert unless the environment asked (so the line can be committed) ----
+            # A developer running `Pkg.test()` with the call in `runtests.jl` must get what they got
+            # before it was added: stock Test, red fails, no report anywhere.
+            r = run_script(
+                "using Pinax, Test\nPinax.install_test_capture!()\ninclude($(runtests))\n";
+                env=("PINAX_TEST_OUT" => nothing, "PINAX_TEST_DUMP" => nothing),
+            )
+            @test !r.ok                                   # the top-level DefaultTestSet throws on red
+            @test !occursin("Pinax test report", r.log)   # nothing rendered, nothing dumped
+            @test !isdir(joinpath(dir, "test-report_agent"))   # not even at the default `out`
+
+            # ---- idempotent: preamble AND suite call, still one root ----
+            # A `runtests.jl` carrying the call is still a valid target for `Pinax.test()`, so the two
+            # meet routinely. Two roots would mean two atexit hooks: the second takes every assertion
+            # and the first renders empty and green. One report line is the assertion that matters.
+            r = run_script(
+                "using Pinax, Test\nPinax._install_test_capture!()\nPinax.install_test_capture!()\ninclude($(runtests))\n";
+                env=("PINAX_TEST_OUT" => joinpath(dir, "once"),),
+            )
+            @test !r.ok
+            @test length(collect(eachmatch(r"Pinax test report", r.log))) == 1
+            md_once = read(joinpath(dir, "once_agent", "agent.md"), String)
+            @test occursin("1/2 FAIL", md_once)           # the surviving root is the one that captured
+
+            # ---- asked for, but there is no `Test` to capture: say so, do not fail silently ----
+            # `Test` is a weakdep, so without it the installer has no method at all. A report was
+            # requested and will not appear; going quiet here would reproduce the empty-and-green
+            # failure by another route.
+            r = run_script(
+                "using Pinax\nPinax.install_test_capture!()\n";
+                env=("PINAX_TEST_OUT" => joinpath(dir, "notest"),),
+            )
+            @test r.ok                                    # a warning, not an error
+            @test occursin("is not loaded", r.log)
+            @test !isdir(joinpath(dir, "notest_agent"))
         end
-    end
 
-    @testset "provenance — the report records WHEN / WHAT / WHERE it ran (H)" begin
-        # A green report with no commit or date is indistinguishable from a stale one. Provenance is
-        # captured non-fatally (any unreadable field is omitted, never an error), with CI variables
-        # preferred over a local `git` probe (reliable inside the `Pkg.test` sandbox).
-        withenv(
-            "GITHUB_SHA" => "0123456789abcdef",
-            "GITHUB_REF_NAME" => "feat/x",
-            "GITHUB_REPOSITORY" => "Org/Pkg.jl",
-        ) do
-            rows = Pinax._provenance_rows()
-            @test any(r -> r.field == "generated", rows)
-            @test any(r -> r.field == "julia" && r.value == string(VERSION), rows)
-            @test any(r -> r.field == "commit" && r.value == "0123456789ab", rows)  # 12 chars, from CI
-            @test any(r -> r.field == "repo" && r.value == "Org/Pkg.jl", rows)
+        @testset "Pinax.test renders a plain @testset suite (the interface, G)" begin
+            # The featured entry point: a suite with NO Pinax token — plain `@testset`/`@test` (it may
+            # also `@desc`) — rendered by calling `Pinax.test` instead of `include`. Runs at depth 0 in a
+            # subprocess so the root actually renders (and, for a red suite, re-throws).
+            dir = mktempdir()
+            write(
+                joinpath(dir, "suite.jl"),
+                """
+                using Pinax, Test
+                @testset "ok.jl" begin
+                    @desc md"a description written inside a plain @testset"
+                    @test isapprox(1.0, 1.0009; rtol=0.01)
+                end
+                """,
+            )
+            write(
+                joinpath(dir, "bad.jl"),
+                """
+                using Pinax, Test
+                @testset "bad.jl" begin
+                    @test isapprox(0.5, 0.9; rtol=0.01)
+                end
+                """,
+            )
+            run_it = function (suite, out)
+                script = joinpath(dir, "run_" * basename(out) * ".jl")
+                write(
+                    script,
+                    "using Pinax, Test\nPinax.test($(repr(suite)); out=$(repr(out)), title=\"demo\")\n",
+                )
+                cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) $script`
+                return success(
+                    run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=devnull))
+                )
+            end
 
-            # …and it reaches the rendered overview + agent.json
-            n = TestNode(
-                "Test report";
+            # green suite → Pinax.test succeeds and renders, from a suite with no @pinaxtestset in sight
+            out = joinpath(dir, "rep")
+            @test run_it(joinpath(dir, "suite.jl"), out)
+            @test isfile(joinpath(out * "_html", "ok_jl.html"))
+            md = read(joinpath(out * "_agent", "agent.md"), String)
+            @test occursin("a description written inside a plain @testset", md)
+
+            # red suite → Pinax.test re-throws (process fails): a report never turns a red suite green
+            @test !run_it(joinpath(dir, "bad.jl"), joinpath(dir, "badrep"))
+        end
+
+        @testset "a `@testset for` is a SAMPLE, not a section — the sweep fold (C)" begin
+            # An unnamed `@testset for χ in …` is not N sections; it is a sweep. We read the axis ONLY from
+            # the canonical string Test itself generates ("χ = 8"), fold the iterations into a convergence +
+            # margin figure keyed by the test expression, and never touch the verdict. Tested on the
+            # Test-free `TestNode` shape (the fold walks the live `PinaxTestSet` and a merged dump the same).
+            mkchk(g, w, rt) = Check(
+                :t,
+                "isapprox(E, oracle; rtol = $(rt))",
+                g,
+                w,
+                abs(g - w) / abs(w),
+                rt,
+                :rel,
+                abs(g - w) / abs(w) <= rt,
+            )
+
+            @testset "the binding parser reads ONLY the canonical form (invariant III)" begin
+                @test _parse_binding("χ = 8") == [:χ => "8"]            # Unicode loop var
+                @test _parse_binding("χ = 8, β = 0.1") == [:χ => "8", :β => "0.1"]
+                @test _parse_binding("N = (1, 2)") == [:N => "(1, 2)"]  # a comma inside a tuple value
+                @test _parse_binding("a plain sentence") === nothing    # a human description does not fold
+                @test _parse_binding("MyPkg") === nothing               # a grouping name has no binding
+                @test _parse_binding("x == y") === nothing              # a comparison is not a binding
+            end
+
+            @testset "numeric sweep → one convergence + margin figure, verdict preserved" begin
+                samp(χ, got) = TestNode("χ = $(χ)"; checks=[mkchk(got, 1.0, 0.05)])
+                file = TestNode(
+                    "test_conv.jl"; children=[samp(8, 1.2), samp(16, 1.05), samp(32, 1.01)]
+                )
+                @test _is_swept(file, _looks_like_a_file)
+                out = joinpath(mktempdir(), "rep")
+                render_test_report(TestNode("Test report"; children=[file]); out=out)
+                html = read(joinpath(out * "_html", "test_conv_jl.html"), String)
+                md = read(joinpath(out * "_agent", "agent.md"), String)
+                @test occursin("Convergence of", html)                 # the derived figure
+                @test occursin("test_conv_jl_conv_1", md)              # convergence fig id
+                @test occursin("test_conv_jl_swpmargin_1", md)         # margin-vs-axis fig id
+                @test occursin("1/3 FAIL", md)                         # verdict untouched (2 of 3 fail)
+                @test occursin("[χ = 8]", md) && occursin("[χ = 32]", md)  # checks binding-tagged
+                @test !occursin("[id: test_conv_jl_8]", md)            # NOT rendered as a per-value section
+            end
+
+            @testset "nested loops: innermost = x-axis, outer = legend (C3)" begin
+                inner(β, got) = TestNode("β = $(β)"; checks=[mkchk(got, 1.0, 0.05)])
+                outer(χ, gots) =
+                    TestNode("χ = $(χ)"; children=[inner(b, g) for (b, g) in gots])
+                file = TestNode(
+                    "test_nest.jl";
+                    children=[
+                        outer(8, [(0.1, 1.2), (0.2, 1.1)]),
+                        outer(16, [(0.1, 1.05), (0.2, 1.02)]),
+                    ],
+                )
+                @test _is_swept(file, _looks_like_a_file)
+                out = joinpath(mktempdir(), "rep")
+                render_test_report(TestNode("Test report"; children=[file]); out=out)
+                html = read(joinpath(out * "_html", "test_nest_jl.html"), String)
+                @test occursin("χ = 8", html) && occursin("χ = 16", html)   # the two legend series
+            end
+
+            @testset "non-numeric axis → categorical ticks (C1)" begin
+                csamp(m, got) = TestNode("model = $(m)"; checks=[mkchk(got, 1.0, 0.05)])
+                file = TestNode(
+                    "test_cat.jl"; children=[csamp("TFIM", 1.01), csamp("Heisenberg", 1.03)]
+                )
+                @test _is_swept(file, _looks_like_a_file)
+                out = joinpath(mktempdir(), "rep")
+                render_test_report(TestNode("Test report"; children=[file]); out=out)
+                html = read(joinpath(out * "_html", "test_cat_jl.html"), String)
+                @test occursin("TFIM", html) && occursin("Heisenberg", html) # string ticks, not numbers
+            end
+
+            @testset "mixed / inconsistent siblings do NOT fold — kept as sections, warned (III)" begin
+                file = TestNode(
+                    "test_mix.jl";
+                    children=[
+                        TestNode("χ = 8"; checks=[mkchk(1.01, 1.0, 0.05)]),
+                        TestNode("a smoke check"; checks=[mkchk(1.0, 1.0, 0.05)]),
+                    ],
+                )
+                @test !_is_swept(file, _looks_like_a_file)              # not a consistent sweep
+                out = joinpath(mktempdir(), "rep")
+                render_test_report(TestNode("Test report"; children=[file]); out=out)
+                files = readdir(out * "_html")
+                txt = join(
+                    read(joinpath(out * "_html", f), String) for
+                    f in files if endswith(f, ".html")
+                )
+                @test occursin("a smoke check", txt)                   # rendered as an ordinary section
+                @test occursin("could not be folded", txt)             # never silent (a loud diagnostic)
+            end
+
+            @testset "a real `@testset for` folds through the delegation preamble (end-to-end)" begin
+                # The same fold, but driven by Test's own `testset_forloop` (the canonical descriptions are
+                # machine-generated, not hand-written) through the capturing root — at depth 0, so subprocess.
+                dir = mktempdir()
+                write(
+                    joinpath(dir, "runtests.jl"),
+                    """
+                    @testset "test_sweep.jl" begin
+                        @testset for χ in (8, 16, 32)
+                            E = 1.0 + 1.0 / χ            # → 1.0 as χ grows
+                            @test isapprox(E, 1.0; rtol=0.05)
+                        end
+                    end
+                    """,
+                )
+                script = tempname() * ".jl"
+                write(
+                    script,
+                    "using Pinax, Test\nPinax._install_test_capture!()\ninclude($(repr(joinpath(dir, "runtests.jl"))))\n",
+                )
+                cmd = addenv(
+                    `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) $script`,
+                    "PINAX_TEST_OUT" => joinpath(dir, "rep"),
+                )
+                run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=devnull))
+                md = read(joinpath(dir, "rep_agent", "agent.md"), String)
+                @test occursin("Convergence of", md)                   # the sweep figure, from a real forloop
+                @test occursin("[χ = 8]", md) && occursin("[χ = 32]", md)
+                @test occursin("1/3", md)                              # verdict preserved (only χ=32 passes)
+            end
+        end
+
+        @testset "provenance — the report records WHEN / WHAT / WHERE it ran (H)" begin
+            # A green report with no commit or date is indistinguishable from a stale one. Provenance is
+            # captured non-fatally (any unreadable field is omitted, never an error), with CI variables
+            # preferred over a local `git` probe (reliable inside the `Pkg.test` sandbox).
+            withenv(
+                "GITHUB_SHA" => "0123456789abcdef",
+                "GITHUB_REF_NAME" => "feat/x",
+                "GITHUB_REPOSITORY" => "Org/Pkg.jl",
+            ) do
+                rows = Pinax._provenance_rows()
+                @test any(r -> r.field == "generated", rows)
+                @test any(r -> r.field == "julia" && r.value == string(VERSION), rows)
+                @test any(r -> r.field == "commit" && r.value == "0123456789ab", rows)  # 12 chars, from CI
+                @test any(r -> r.field == "repo" && r.value == "Org/Pkg.jl", rows)
+
+                # …and it reaches the rendered overview + agent.json
+                n = TestNode(
+                    "Test report";
+                    children=[
+                        TestNode(
+                            "test_a.jl";
+                            checks=[Check(:t, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+                        ),
+                    ],
+                )
+                out = joinpath(mktempdir(), "rep")
+                render_test_report(n; out=out)
+                md = read(joinpath(out * "_agent", "agent.md"), String)
+                @test occursin("Provenance", md) && occursin("feat/x", md)
+            end
+
+            # the package line reads name@version from a project file; empty/absent → "" (never an error)
+            proj = joinpath(mktempdir(), "Project.toml")
+            write(proj, "name = \"Demo\"\nversion = \"1.2.3\"\n")
+            @test Pinax._package_line(proj) == "Demo v1.2.3"
+            @test Pinax._package_line(nothing) == ""
+            @test Pinax._package_line(joinpath(tempdir(), "nope-missing.toml")) == ""
+            write(proj, "version = \"1.2.3\"\n")   # no name → ""
+            @test Pinax._package_line(proj) == ""
+
+            # with the CI variables unset, the local `git` probe runs and empty CI fields are omitted
+            withenv(
+                "GITHUB_SHA" => nothing,
+                "GITHUB_REPOSITORY" => nothing,
+                "GITHUB_REF_NAME" => nothing,
+            ) do
+                rows = Pinax._provenance_rows()
+                @test any(r -> r.field == "generated", rows)
+                @test !any(r -> r.field == "repo", rows)   # an empty CI repo is omitted, not blank
+            end
+        end
+
+        @testset "@caption after a @test names the check's quantity (C follow-up)" begin
+            # A swept `@testset for` folds by the check's label; `@caption` sets that label to a human name,
+            # so a convergence figure is titled `energy` rather than the raw `isapprox(...)` expression.
+            root = PinaxTestSet("cap")
+            Test.push_testset(root)
+            try
+                @test isapprox(1.0, 1.0009; rtol=0.01)   # records a check into the captured testset
+                @caption "energy"
+            finally
+                Test.pop_testset()
+            end
+            @test root.checks[end].label == "energy"     # the caption renamed the quantity
+
+            # …and with nothing before it (no figure, no check) it is a loud diagnostic, not an error
+            Pinax.reset!()
+            @page :orphan "P" begin
+                @caption "nothing to name"
+            end
+            @test any(
+                e -> occursin("no preceding", e.message),
+                Pinax.current_document().diag.entries,
+            )
+        end
+
+        @testset "@expect inside a captured test is forbidden — @test is the assertion (F)" begin
+            # `@expect` is manuscript vocabulary. Directly inside a test — here a captured `PinaxTestSet`,
+            # the report-ON path — it errors and points to `@test`, so a check can never be recorded but
+            # left unenforced (which under a bare `Pkg.test()` would be a green run for a failing check).
+            root = PinaxTestSet("cap")
+            Test.push_testset(root)
+            try
+                @test_throws "manuscript check" Pinax._push_check!(;
+                    id=:E, label="energy", got=1.0, want=1.0, tol=1e-3
+                )
+            finally
+                Test.pop_testset()
+            end
+        end
+
+        @testset "a failing check carries file:line — the failure payload (I)" begin
+            # A failing @test records WHERE it failed (its LineNumberNode), so the report says where to
+            # look, not just what failed. Captured duck-typed (a Pass may carry no source), carried through
+            # a shard dump, and emitted as a structured field in agent.json.
+            fail = Test.Fail(
+                :test,
+                :(isapprox(a, b)),
+                "isapprox(0.5, 0.9; rtol = 0.01)",
+                nothing,
+                nothing,
+                LineNumberNode(42, Symbol("/proj/test/test_x.jl")),
+                false,
+            )
+            @test Ext._source_str(fail) == "test_x.jl:42"          # basename:line, not the full path
+            @test Ext._source_str(Test.Pass(:test, :x, :(1 == 1), nothing)) == ""   # no usable source → ""
+
+            # recorded onto the check, alongside its (failing) verdict…
+            root = PinaxTestSet("cap")
+            Test.push_testset(root)
+            try
+                Test.record(root, fail)
+            finally
+                Test.pop_testset()
+            end
+            @test root.checks[end].source == "test_x.jl:42" && !root.checks[end].pass
+
+            # …round-trips through a shard dump…
+            dir = mktempdir()
+            srcchk() = Check(:t, "e", 0.5, 0.9, 0.44, 0.01, :rel, false, "test_x.jl:42")
+            d = Pinax.dump_test_report(
+                TestNode("test_x.jl"; checks=[srcchk()]), joinpath(dir, "s.toml")
+            )
+            @test Pinax.load_test_dump(d).checks[1].source == "test_x.jl:42"
+
+            # …and is emitted as a structured field in agent.json (an agent reads WHERE, not just what).
+            render_test_report(
+                TestNode(
+                    "Test report"; children=[TestNode("test_x.jl"; checks=[srcchk()])]
+                );
+                out=joinpath(dir, "rep"),
+            )
+            aj = read(joinpath(dir, "rep_agent", "agent.json"), String)
+            @test occursin("\"source\":\"test_x.jl:42\"", aj)
+        end
+
+        @testset "at scale the human gallery caps rows; agent.json stays complete (J)" begin
+            # A 10k-check page is an unusable HTML table, so the gallery caps rows — FAILURES first and
+            # never silently (a summary row counts the hidden) — while agent.json and the shard dump stay
+            # complete and the verdict is over ALL checks.
+            mk(i, pass) = Check(
+                Symbol("t", i),
+                "chk $(i)",
+                pass ? 1.0 : 2.0,
+                1.0,
+                pass ? 0.0 : 1.0,
+                0.5,
+                :abs,
+                pass,
+            )
+            fails = (3, 50, 480)
+            checks = [mk(i, !(i in fails)) for i in 1:500]
+
+            shown, hf, hp = Pinax._cap_gallery_checks(checks, Pinax._MAX_CHECK_ROWS)
+            @test length(shown) == Pinax._MAX_CHECK_ROWS
+            @test count(c -> !c.pass, shown) == length(fails)          # every failure survives the cap
+            @test hf == 0 && hp == 500 - Pinax._MAX_CHECK_ROWS
+            small = checks[1:10]
+            @test Pinax._cap_gallery_checks(small, Pinax._MAX_CHECK_ROWS) == (small, 0, 0)  # small = all
+
+            out = joinpath(mktempdir(), "rep")
+            render_test_report(
+                TestNode("Test report"; children=[TestNode("big.jl"; checks=checks)]);
+                out=out,
+            )
+            html = read(joinpath(out * "_html", "big_jl.html"), String)
+            @test occursin("more not shown", html)                     # the loud summary row
+            @test occursin("$(500 - length(fails))/500", html)         # verdict over ALL 500
+            @test count("pinax-pass\"", html) + count("pinax-fail\"", html) <=
+                Pinax._MAX_CHECK_ROWS
+            @test occursin("worst of 500", html)                       # the margin figure capped too
+            aj = read(joinpath(out * "_agent", "agent.json"), String)
+            @test count("\"pass\":", aj) >= 500                        # agent.json enumerates every check
+        end
+
+        @testset "a CI matrix merges as parts, not shards — the cell is a binding (K)" begin
+            # A matrix runs the SAME files in every cell (unlike shards, which partition files), so merging
+            # by concatenation would fold the cells away. Each cell is a `@part` instead: one report, file
+            # structure preserved, page ids qualified per cell, per-cell verdicts, cell = the provenance.
+            dir = mktempdir()
+            cellnode(pass) = TestNode(
+                "root";
                 children=[
                     TestNode(
-                        "test_a.jl";
-                        checks=[Check(:t, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+                        "test_foo.jl";
+                        checks=[
+                            Check(
+                                :t,
+                                "chk",
+                                pass ? 1.0 : 2.0,
+                                1.0,
+                                pass ? 0.0 : 1.0,
+                                0.5,
+                                :abs,
+                                pass,
+                            ),
+                        ],
                     ),
                 ],
             )
-            out = joinpath(mktempdir(), "rep")
-            render_test_report(n; out=out)
+            dA = withenv("PINAX_TEST_MATRIX" => "julia 1.11 · ubuntu") do
+                Pinax.dump_test_report(cellnode(true), joinpath(dir, "a.toml"))
+            end
+            dB = withenv("PINAX_TEST_MATRIX" => "julia 1.10 · ubuntu") do
+                Pinax.dump_test_report(cellnode(false), joinpath(dir, "b.toml"))
+            end
+            @test occursin("matrix", read(dA, String))              # the cell rides in the dump
+
+            out = joinpath(dir, "m")
+            render_test_report([dA, dB]; out=out, title="Matrix")
+            idx = read(joinpath(out * "_html", "index.html"), String)
             md = read(joinpath(out * "_agent", "agent.md"), String)
-            @test occursin("Provenance", md) && occursin("feat/x", md)
+            files = readdir(out * "_html")
+            @test occursin("julia 1.11 · ubuntu", idx) &&
+                occursin("julia 1.10 · ubuntu", idx)  # both parts
+            # the SAME file in two cells → two pages, ids qualified per cell (no collision)
+            @test count(f -> occursin("test_foo_jl", f) && endswith(f, ".html"), files) == 2
+            @test occursin("1/1 PASS", md) && occursin("0/1 FAIL", md)   # per-cell verdict, not merged
+
+            # a single-cell (non-matrix) run is self-identifying: the cell is a provenance row
+            withenv("PINAX_TEST_MATRIX" => "julia 1.11 · ubuntu") do
+                @test any(
+                    r -> r.field == "matrix" && r.value == "julia 1.11 · ubuntu",
+                    Pinax._provenance_rows(),
+                )
+            end
         end
 
-        # the package line reads name@version from a project file; empty/absent → "" (never an error)
-        proj = joinpath(mktempdir(), "Project.toml")
-        write(proj, "name = \"Demo\"\nversion = \"1.2.3\"\n")
-        @test Pinax._package_line(proj) == "Demo v1.2.3"
-        @test Pinax._package_line(nothing) == ""
-        @test Pinax._package_line(joinpath(tempdir(), "nope-missing.toml")) == ""
-        write(proj, "version = \"1.2.3\"\n")   # no name → ""
-        @test Pinax._package_line(proj) == ""
+        @testset "derived figures are data-keyed — no stale figure on rebuild (L)" begin
+            # The margin / convergence SVGs fold a fingerprint of the checks they draw into the figure
+            # `code`, so the render cache (keyed on code+params, computed without calling `gen`) re-draws a
+            # figure iff its numbers changed — a docs rebuild with unchanged checks reuses the SVG, and a
+            # stale figure can never survive a real change (which `code=""` used to allow: a constant key).
+            c1 = [Check(:t, "c", 1.0, 1.0, 0.0, 0.5, :abs, true)]
+            c2 = [Check(:t, "c", 5.0, 1.0, 4.0, 0.5, :abs, false)]
+            @test Pinax._checks_fingerprint(c1) == Pinax._checks_fingerprint(c1)   # stable
+            @test Pinax._checks_fingerprint(c1) != Pinax._checks_fingerprint(c2)   # data-dependent
 
-        # with the CI variables unset, the local `git` probe runs and empty CI fields are omitted
-        withenv(
-            "GITHUB_SHA" => nothing,
-            "GITHUB_REPOSITORY" => nothing,
-            "GITHUB_REF_NAME" => nothing,
-        ) do
-            rows = Pinax._provenance_rows()
-            @test any(r -> r.field == "generated", rows)
-            @test !any(r -> r.field == "repo", rows)   # an empty CI repo is omitted, not blank
-        end
-    end
-
-    @testset "@caption after a @test names the check's quantity (C follow-up)" begin
-        # A swept `@testset for` folds by the check's label; `@caption` sets that label to a human name,
-        # so a convergence figure is titled `energy` rather than the raw `isapprox(...)` expression.
-        root = PinaxTestSet("cap")
-        Test.push_testset(root)
-        try
-            @test isapprox(1.0, 1.0009; rtol=0.01)   # records a check into the captured testset
-            @caption "energy"
-        finally
-            Test.pop_testset()
-        end
-        @test root.checks[end].label == "energy"     # the caption renamed the quantity
-
-        # …and with nothing before it (no figure, no check) it is a loud diagnostic, not an error
-        Pinax.reset!()
-        @page :orphan "P" begin
-            @caption "nothing to name"
-        end
-        @test any(
-            e -> occursin("no preceding", e.message), Pinax.current_document().diag.entries
-        )
-    end
-
-    @testset "@expect inside a captured test is forbidden — @test is the assertion (F)" begin
-        # `@expect` is manuscript vocabulary. Directly inside a test — here a captured `PinaxTestSet`,
-        # the report-ON path — it errors and points to `@test`, so a check can never be recorded but
-        # left unenforced (which under a bare `Pkg.test()` would be a green run for a failing check).
-        root = PinaxTestSet("cap")
-        Test.push_testset(root)
-        try
-            @test_throws "manuscript check" Pinax._push_check!(;
-                id=:E, label="energy", got=1.0, want=1.0, tol=1e-3
+            out = joinpath(mktempdir(), "rep")
+            rep(chk) = render_test_report(
+                TestNode("T"; children=[TestNode("f.jl"; checks=chk)]); out=out
             )
-        finally
-            Test.pop_testset()
-        end
-    end
-
-    @testset "a failing check carries file:line — the failure payload (I)" begin
-        # A failing @test records WHERE it failed (its LineNumberNode), so the report says where to
-        # look, not just what failed. Captured duck-typed (a Pass may carry no source), carried through
-        # a shard dump, and emitted as a structured field in agent.json.
-        fail = Test.Fail(
-            :test,
-            :(isapprox(a, b)),
-            "isapprox(0.5, 0.9; rtol = 0.01)",
-            nothing,
-            nothing,
-            LineNumberNode(42, Symbol("/proj/test/test_x.jl")),
-            false,
-        )
-        @test Ext._source_str(fail) == "test_x.jl:42"          # basename:line, not the full path
-        @test Ext._source_str(Test.Pass(:test, :x, :(1 == 1), nothing)) == ""   # no usable source → ""
-
-        # recorded onto the check, alongside its (failing) verdict…
-        root = PinaxTestSet("cap")
-        Test.push_testset(root)
-        try
-            Test.record(root, fail)
-        finally
-            Test.pop_testset()
-        end
-        @test root.checks[end].source == "test_x.jl:42" && !root.checks[end].pass
-
-        # …round-trips through a shard dump…
-        dir = mktempdir()
-        srcchk() = Check(:t, "e", 0.5, 0.9, 0.44, 0.01, :rel, false, "test_x.jl:42")
-        d = Pinax.dump_test_report(
-            TestNode("test_x.jl"; checks=[srcchk()]), joinpath(dir, "s.toml")
-        )
-        @test Pinax.load_test_dump(d).checks[1].source == "test_x.jl:42"
-
-        # …and is emitted as a structured field in agent.json (an agent reads WHERE, not just what).
-        render_test_report(
-            TestNode("Test report"; children=[TestNode("test_x.jl"; checks=[srcchk()])]);
-            out=joinpath(dir, "rep"),
-        )
-        aj = read(joinpath(dir, "rep_agent", "agent.json"), String)
-        @test occursin("\"source\":\"test_x.jl:42\"", aj)
-    end
-
-    @testset "at scale the human gallery caps rows; agent.json stays complete (J)" begin
-        # A 10k-check page is an unusable HTML table, so the gallery caps rows — FAILURES first and
-        # never silently (a summary row counts the hidden) — while agent.json and the shard dump stay
-        # complete and the verdict is over ALL checks.
-        mk(i, pass) = Check(
-            Symbol("t", i),
-            "chk $(i)",
-            pass ? 1.0 : 2.0,
-            1.0,
-            pass ? 0.0 : 1.0,
-            0.5,
-            :abs,
-            pass,
-        )
-        fails = (3, 50, 480)
-        checks = [mk(i, !(i in fails)) for i in 1:500]
-
-        shown, hf, hp = Pinax._cap_gallery_checks(checks, Pinax._MAX_CHECK_ROWS)
-        @test length(shown) == Pinax._MAX_CHECK_ROWS
-        @test count(c -> !c.pass, shown) == length(fails)          # every failure survives the cap
-        @test hf == 0 && hp == 500 - Pinax._MAX_CHECK_ROWS
-        small = checks[1:10]
-        @test Pinax._cap_gallery_checks(small, Pinax._MAX_CHECK_ROWS) == (small, 0, 0)  # small = all
-
-        out = joinpath(mktempdir(), "rep")
-        render_test_report(
-            TestNode("Test report"; children=[TestNode("big.jl"; checks=checks)]); out=out
-        )
-        html = read(joinpath(out * "_html", "big_jl.html"), String)
-        @test occursin("more not shown", html)                     # the loud summary row
-        @test occursin("$(500 - length(fails))/500", html)         # verdict over ALL 500
-        @test count("pinax-pass\"", html) + count("pinax-fail\"", html) <=
-            Pinax._MAX_CHECK_ROWS
-        @test occursin("worst of 500", html)                       # the margin figure capped too
-        aj = read(joinpath(out * "_agent", "agent.json"), String)
-        @test count("\"pass\":", aj) >= 500                        # agent.json enumerates every check
-    end
-
-    @testset "a CI matrix merges as parts, not shards — the cell is a binding (K)" begin
-        # A matrix runs the SAME files in every cell (unlike shards, which partition files), so merging
-        # by concatenation would fold the cells away. Each cell is a `@part` instead: one report, file
-        # structure preserved, page ids qualified per cell, per-cell verdicts, cell = the provenance.
-        dir = mktempdir()
-        cellnode(pass) = TestNode(
-            "root";
-            children=[
-                TestNode(
-                    "test_foo.jl";
-                    checks=[
-                        Check(
-                            :t,
-                            "chk",
-                            pass ? 1.0 : 2.0,
-                            1.0,
-                            pass ? 0.0 : 1.0,
-                            0.5,
-                            :abs,
-                            pass,
+            svgfor() = read(
+                only(
+                    filter(
+                        p -> occursin("margins", p),
+                        readdir(
+                            joinpath(out * "_html", "assets", "figures", "f_jl");
+                            join=true,
                         ),
-                    ],
-                ),
-            ],
-        )
-        dA = withenv("PINAX_TEST_MATRIX" => "julia 1.11 · ubuntu") do
-            Pinax.dump_test_report(cellnode(true), joinpath(dir, "a.toml"))
-        end
-        dB = withenv("PINAX_TEST_MATRIX" => "julia 1.10 · ubuntu") do
-            Pinax.dump_test_report(cellnode(false), joinpath(dir, "b.toml"))
-        end
-        @test occursin("matrix", read(dA, String))              # the cell rides in the dump
-
-        out = joinpath(dir, "m")
-        render_test_report([dA, dB]; out=out, title="Matrix")
-        idx = read(joinpath(out * "_html", "index.html"), String)
-        md = read(joinpath(out * "_agent", "agent.md"), String)
-        files = readdir(out * "_html")
-        @test occursin("julia 1.11 · ubuntu", idx) && occursin("julia 1.10 · ubuntu", idx)  # both parts
-        # the SAME file in two cells → two pages, ids qualified per cell (no collision)
-        @test count(f -> occursin("test_foo_jl", f) && endswith(f, ".html"), files) == 2
-        @test occursin("1/1 PASS", md) && occursin("0/1 FAIL", md)   # per-cell verdict, not merged
-
-        # a single-cell (non-matrix) run is self-identifying: the cell is a provenance row
-        withenv("PINAX_TEST_MATRIX" => "julia 1.11 · ubuntu") do
-            @test any(
-                r -> r.field == "matrix" && r.value == "julia 1.11 · ubuntu",
-                Pinax._provenance_rows(),
-            )
-        end
-    end
-
-    @testset "derived figures are data-keyed — no stale figure on rebuild (L)" begin
-        # The margin / convergence SVGs fold a fingerprint of the checks they draw into the figure
-        # `code`, so the render cache (keyed on code+params, computed without calling `gen`) re-draws a
-        # figure iff its numbers changed — a docs rebuild with unchanged checks reuses the SVG, and a
-        # stale figure can never survive a real change (which `code=""` used to allow: a constant key).
-        c1 = [Check(:t, "c", 1.0, 1.0, 0.0, 0.5, :abs, true)]
-        c2 = [Check(:t, "c", 5.0, 1.0, 4.0, 0.5, :abs, false)]
-        @test Pinax._checks_fingerprint(c1) == Pinax._checks_fingerprint(c1)   # stable
-        @test Pinax._checks_fingerprint(c1) != Pinax._checks_fingerprint(c2)   # data-dependent
-
-        out = joinpath(mktempdir(), "rep")
-        rep(chk) = render_test_report(
-            TestNode("T"; children=[TestNode("f.jl"; checks=chk)]); out=out
-        )
-        svgfor() = read(
-            only(
-                filter(
-                    p -> occursin("margins", p),
-                    readdir(
-                        joinpath(out * "_html", "assets", "figures", "f_jl"); join=true
                     ),
                 ),
-            ),
-            String,
-        )
-        rep(c1)
-        s1 = svgfor()
-        rep(c1)
-        @test svgfor() == s1        # unchanged checks → identical SVG (cache-consistent)
-        rep(c2)
-        @test svgfor() != s1        # changed checks → the SVG reflects the new numbers (never stale)
-    end
-
-    @testset "@code shows the computation behind a figure/check" begin
-        # `@code` renders source (+ optional captured output) as a snippet — a sibling to
-        # `@figure`/`@table`. A simple assignment leaks + shows its value; a pure expression shows its
-        # value; a definition runs BARE (natural scoping, no wrapper that would relocalise it).
-        Pinax.reset!()
-        @page :p "P" begin
-            @code y = 6 * 7
-            @code 2^10
-            @code midpoint(x) = 2x
-            @code run = false z = boom()
-            @assert y == 42 && midpoint(3) == 6      # the assignment + definition leaked to here
+                String,
+            )
+            rep(c1)
+            s1 = svgfor()
+            rep(c1)
+            @test svgfor() == s1        # unchanged checks → identical SVG (cache-consistent)
+            rep(c2)
+            @test svgfor() != s1        # changed checks → the SVG reflects the new numbers (never stale)
         end
-        codes = Pinax.current_document().pages[1].codes
-        @test [c.output for c in codes] == ["42", "1024", "", ""]  # value / value / defn / show-only
-        @test codes[1].source == "y = 6 * 7" && codes[4].source == "z = boom()"
 
-        # it renders in every backend (gallery/agent covered below; here the LaTeX verbatim)
-        tex = read(Pinax.render(; out=joinpath(mktempdir(), "tex"), theme=:latex), String)
-        @test occursin("y = 6 * 7", tex) && occursin("\\begin{verbatim}", tex)
-
-        # the source is what was WRITTEN, not the deparsed normal form: `string(::Expr)` re-emits a
-        # one-line definition with a `begin` block and drops the file's own formatting.
-        Pinax.reset!()
-        @page :v "V" begin
-            @code caption = "quadrature" mid(n) =
-                sum(k -> 4 / (1 + ((k - 0.5) / n)^2), 1:n) / n
-            @code begin
-                s = 0                          # a comment survives, because this is the file's text
-                s += 1
+        @testset "@code shows the computation behind a figure/check" begin
+            # `@code` renders source (+ optional captured output) as a snippet — a sibling to
+            # `@figure`/`@table`. A simple assignment leaks + shows its value; a pure expression shows its
+            # value; a definition runs BARE (natural scoping, no wrapper that would relocalise it).
+            Pinax.reset!()
+            @page :p "P" begin
+                @code y = 6 * 7
+                @code 2^10
+                @code midpoint(x) = 2x
+                @code run = false z = boom()
+                @assert y == 42 && midpoint(3) == 6      # the assignment + definition leaked to here
             end
-        end
-        vcodes = Pinax.current_document().pages[1].codes
-        @test startswith(vcodes[1].source, "mid(n) =")   # the `@code` + kwargs prefix is peeled off
-        @test occursin("sum(k -> 4 / (1 + ((k - 0.5) / n)^2), 1:n) / n", vcodes[1].source)
-        @test !occursin("begin", vcodes[1].source)      # the deparse would have introduced one
-        @test occursin("# a comment survives", vcodes[2].source)
-        # …and the deparse is still the fallback where there is no readable source file
-        @test Pinax._verbatim_code("/nonexistent/x.jl", 1, :(a = 1)) === nothing
+            codes = Pinax.current_document().pages[1].codes
+            @test [c.output for c in codes] == ["42", "1024", "", ""]  # value / value / defn / show-only
+            @test codes[1].source == "y = 6 * 7" && codes[4].source == "z = boom()"
 
-        # captured into a test (a PinaxTestSet), rides a dump, and renders in every backend
-        root = PinaxTestSet("cap")
-        Test.push_testset(root)
-        try
-            @code E = 1.0 + 1.0 / 8
-            @assert E ≈ 1.125
-        finally
-            Test.pop_testset()
-        end
-        @test length(root.codes) == 1 && root.codes[1].output == "1.125"
+            # it renders in every backend (gallery/agent covered below; here the LaTeX verbatim)
+            tex = read(
+                Pinax.render(; out=joinpath(mktempdir(), "tex"), theme=:latex), String
+            )
+            @test occursin("y = 6 * 7", tex) && occursin("\\begin{verbatim}", tex)
 
-        dir = mktempdir()
-        n = TestNode(
-            "f.jl"; codes=[CodeBlock(:c1, "c1", "E = f(x)", "1.125", "energy", "julia")]
-        )
-        d = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
-        @test Pinax.load_test_dump(d).children[1].codes[1].source == "E = f(x)"   # round-trips a shard
-        render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
-        @test occursin("E = f(x)", read(joinpath(dir, "rep_html", "f_jl.html"), String))
-        @test occursin(
-            "\"source\":\"E = f(x)\"",
-            read(joinpath(dir, "rep_agent", "agent.json"), String),
-        )
-    end
-
-    @testset "each @test captures the code that produced it, as a @code artifact (default)" begin
-        # The region is read SYNTACTICALLY: the statements of the innermost block leading up to the
-        # assertion, from just after the previous assertion (so consecutive checks never repeat each
-        # other's setup), and Pinax content macros are dropped because each renders itself.
-        f = joinpath(mktempdir(), "t.jl")
-        write(
-            f,
-            """
-            @testset "s" begin
-                a = 1
-                @desc md"noise"
-                b = 2
-                @test a + b == 3
-                c = 4
-                @test c == 4
+            # the source is what was WRITTEN, not the deparsed normal form: `string(::Expr)` re-emits a
+            # one-line definition with a `begin` block and drops the file's own formatting.
+            Pinax.reset!()
+            @page :v "V" begin
+                @code caption = "quadrature" mid(n) =
+                    sum(k -> 4 / (1 + ((k - 0.5) / n)^2), 1:n) / n
+                @code begin
+                    s = 0                          # a comment survives, because this is the file's text
+                    s += 1
+                end
             end
-            """,
-        )
-        b5 = Pinax._test_code_block(f, 5)
-        b7 = Pinax._test_code_block(f, 7)
-        @test occursin("a = 1", b5.source) && occursin("@test a + b == 3", b5.source)
-        @test !occursin("@desc", b5.source)                  # a self-rendering macro is not code
-        @test occursin("c = 4", b7.source) && !occursin("a = 1", b7.source)  # no bleed from the first
-        @test b5.id !== b7.id                                # distinct regions, distinct artifacts
-        @test startswith(b5.source, "a = 1")                 # dedented
+            vcodes = Pinax.current_document().pages[1].codes
+            @test startswith(vcodes[1].source, "mid(n) =")   # the `@code` + kwargs prefix is peeled off
+            @test occursin(
+                "sum(k -> 4 / (1 + ((k - 0.5) / n)^2), 1:n) / n", vcodes[1].source
+            )
+            @test !occursin("begin", vcodes[1].source)      # the deparse would have introduced one
+            @test occursin("# a comment survives", vcodes[2].source)
+            # …and the deparse is still the fallback where there is no readable source file
+            @test Pinax._verbatim_code("/nonexistent/x.jl", 1, :(a = 1)) === nothing
 
-        # A `@testset for`'s samples share ONE snippet — the loop header plus the assertion, which is
-        # the sweep's specification — so the id is the same for every iteration.
-        g = joinpath(mktempdir(), "s.jl")
-        write(
-            g,
-            "@testset \"s\" begin\n    @testset for n in (8, 32)\n        @test n > 0\n    end\nend\n",
-        )
-        bs = Pinax._test_code_block(g, 3)
-        @test occursin("@testset for n in (8, 32)", bs.source) && endswith(bs.source, "end")
-        @test Pinax._test_code_block(g, 3).id === bs.id
-        @test Pinax._test_code_block(g, 99) === nothing       # not a statement line: no code, no error
-        @test Pinax._test_code_block(joinpath(dirname(g), "nope.jl"), 1) === nothing
+            # captured into a test (a PinaxTestSet), rides a dump, and renders in every backend
+            root = PinaxTestSet("cap")
+            Test.push_testset(root)
+            try
+                @code E = 1.0 + 1.0 / 8
+                @assert E ≈ 1.125
+            finally
+                Test.pop_testset()
+            end
+            @test length(root.codes) == 1 && root.codes[1].output == "1.125"
 
-        # It renders as the ONE code format (`emit_code`), the check table LINKS to it, and both the
-        # block and the reference ride a shard dump.
-        dir = mktempdir()
-        blk = CodeBlock(:code_f_jl_1_2, "code_f_jl_1_2", "x = compute()", "", "", "julia")
-        chk = Check(:t, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true, "", blk.anchor)
-        n = TestNode("f.jl"; checks=[chk], codes=[blk])
-        d = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
-        back = Pinax.load_test_dump(d).children[1]
-        @test back.checks[1].code_anchor == blk.anchor &&
-            back.codes[1].source == "x = compute()"
-        render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
-        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
-        @test occursin("pinax-code-src", html) && occursin("x = compute()", html)
-        @test occursin("class=\"pinax-codelink\" href=\"#code_f_jl_1_2\"", html)
-        @test !occursin("pinax-code-row", html)               # no second code renderer
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
-        @test occursin("\"code_anchor\":\"code_f_jl_1_2\"", agent)
-        @test occursin("\"anchor\":\"code_f_jl_1_2\"", agent)  # resolvable against the code object
+            dir = mktempdir()
+            n = TestNode(
+                "f.jl"; codes=[CodeBlock(:c1, "c1", "E = f(x)", "1.125", "energy", "julia")]
+            )
+            d = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
+            @test Pinax.load_test_dump(d).children[1].codes[1].source == "E = f(x)"   # round-trips a shard
+            render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
+            @test occursin("E = f(x)", read(joinpath(dir, "rep_html", "f_jl.html"), String))
+            @test occursin(
+                "\"source\":\"E = f(x)\"",
+                read(joinpath(dir, "rep_agent", "agent.json"), String),
+            )
+        end
+
+        @testset "each @test captures the code that produced it, as a @code artifact (default)" begin
+            # The region is read SYNTACTICALLY: the statements of the innermost block leading up to the
+            # assertion, from just after the previous assertion (so consecutive checks never repeat each
+            # other's setup), and Pinax content macros are dropped because each renders itself.
+            f = joinpath(mktempdir(), "t.jl")
+            write(
+                f,
+                """
+                @testset "s" begin
+                    a = 1
+                    @desc md"noise"
+                    b = 2
+                    @test a + b == 3
+                    c = 4
+                    @test c == 4
+                end
+                """,
+            )
+            b5 = Pinax._test_code_block(f, 5)
+            b7 = Pinax._test_code_block(f, 7)
+            @test occursin("a = 1", b5.source) && occursin("@test a + b == 3", b5.source)
+            @test !occursin("@desc", b5.source)                  # a self-rendering macro is not code
+            @test occursin("c = 4", b7.source) && !occursin("a = 1", b7.source)  # no bleed from the first
+            @test b5.id !== b7.id                                # distinct regions, distinct artifacts
+            @test startswith(b5.source, "a = 1")                 # dedented
+
+            # A `@testset for`'s samples share ONE snippet — the loop header plus the assertion, which is
+            # the sweep's specification — so the id is the same for every iteration.
+            g = joinpath(mktempdir(), "s.jl")
+            write(
+                g,
+                "@testset \"s\" begin\n    @testset for n in (8, 32)\n        @test n > 0\n    end\nend\n",
+            )
+            bs = Pinax._test_code_block(g, 3)
+            @test occursin("@testset for n in (8, 32)", bs.source) &&
+                endswith(bs.source, "end")
+            @test Pinax._test_code_block(g, 3).id === bs.id
+            @test Pinax._test_code_block(g, 99) === nothing       # not a statement line: no code, no error
+            @test Pinax._test_code_block(joinpath(dirname(g), "nope.jl"), 1) === nothing
+
+            # It renders as the ONE code format (`emit_code`), the check table LINKS to it, and both the
+            # block and the reference ride a shard dump.
+            dir = mktempdir()
+            blk = CodeBlock(
+                :code_f_jl_1_2, "code_f_jl_1_2", "x = compute()", "", "", "julia"
+            )
+            chk = Check(:t, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true, "", blk.anchor)
+            n = TestNode("f.jl"; checks=[chk], codes=[blk])
+            d = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
+            back = Pinax.load_test_dump(d).children[1]
+            @test back.checks[1].code_anchor == blk.anchor &&
+                back.codes[1].source == "x = compute()"
+            render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
+            html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+            @test occursin("pinax-code-src", html) && occursin("x = compute()", html)
+            @test occursin("class=\"pinax-codelink\" href=\"#code_f_jl_1_2\"", html)
+            @test !occursin("pinax-code-row", html)               # no second code renderer
+            agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+            @test occursin("\"code_anchor\":\"code_f_jl_1_2\"", agent)
+            @test occursin("\"anchor\":\"code_f_jl_1_2\"", agent)  # resolvable against the code object
+        end
+
+        @testset "one code artifact per region: a sweep's samples and N shards collapse onto it" begin
+            # Deduplication by id is what makes the snippet appear once rather than once per sample (live)
+            # and once per shard (merged) — the same rule on both paths.
+            dir = mktempdir()
+            blk() =
+                CodeBlock(:code_s_jl_2_3, "code_s_jl_2_3", "@test n > 0", "", "", "julia")
+            samples = [
+                TestNode(
+                    "n = $(v)";
+                    checks=[
+                        Check(:c, "n > 0", Float64(v), 0.0, Float64(v), 1.0, :abs, true)
+                    ],
+                    codes=[blk()],
+                ) for v in (8, 32)
+            ]
+            node = TestNode("f.jl"; children=samples)
+            render_test_report(TestNode("T"; children=[node]); out=joinpath(dir, "rep"))
+            html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+            @test count("@test n &gt; 0", html) == 1               # ONE block, not one per sample
+            agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+            @test count("\"anchor\":\"code_s_jl_2_3\"", agent) == 1   # one code object in `codes`
+        end
     end
-
-    @testset "one code artifact per region: a sweep's samples and N shards collapse onto it" begin
-        # Deduplication by id is what makes the snippet appear once rather than once per sample (live)
-        # and once per shard (merged) — the same rule on both paths.
-        dir = mktempdir()
-        blk() = CodeBlock(:code_s_jl_2_3, "code_s_jl_2_3", "@test n > 0", "", "", "julia")
-        samples = [
-            TestNode(
-                "n = $(v)";
-                checks=[Check(:c, "n > 0", Float64(v), 0.0, Float64(v), 1.0, :abs, true)],
-                codes=[blk()],
-            ) for v in (8, 32)
-        ]
-        node = TestNode("f.jl"; children=samples)
-        render_test_report(TestNode("T"; children=[node]); out=joinpath(dir, "rep"))
-        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
-        @test count("@test n &gt; 0", html) == 1               # ONE block, not one per sample
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
-        @test count("\"anchor\":\"code_s_jl_2_3\"", agent) == 1   # one code object in `codes`
-    end
-end
+end  # if Ext.TESTSET_STACK

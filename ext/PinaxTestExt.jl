@@ -33,6 +33,13 @@ using Pinax:
     report_title
 using Test: Test, AbstractTestSet
 
+# Julia 1.13 removed `Test.push_testset` / `Test.pop_testset`: the testset stack became a
+# ScopedValue (`Test.CURRENT_TESTSET`), which cannot outlive the block that sets it. This capture
+# installs a root and needs it to survive into a suite that runs AFTERWARDS (the `-L` preamble runs
+# before `Pkg.test` includes anything), so the mechanism is gone rather than renamed. Gate on the
+# functions, not on VERSION: what matters is whether the stack can be pushed.
+const TESTSET_STACK = isdefined(Test, :push_testset) && isdefined(Test, :pop_testset)
+
 function __init__()
     # Register the container probe (a `Ref` assignment, not a method override — no precompile clash).
     Pinax._TEST_CONTAINER_PROBE[] = _current_test_container
@@ -240,6 +247,14 @@ function Pinax._install_test_capture!()
     # they meet routinely. A second root would take every assertion and leave the first to render an
     # empty, green report.
     Pinax._CAPTURE_INSTALLED[] && return false
+    if !TESTSET_STACK
+        @warn """
+        Pinax: the test report needs `Test.push_testset` / `Test.pop_testset`, which Julia \
+        $(VERSION) no longer has (1.13 moved the testset stack to a ScopedValue, which cannot \
+        outlive the block that sets it). The suite runs normally and its verdict is unchanged; \
+        no report is produced.""" maxlog = 1
+        return false
+    end
     Pinax._CAPTURE_INSTALLED[] = true
     empty!(Pinax._FILE_AST)
     root = PinaxTestSet(
@@ -251,7 +266,7 @@ function Pinax._install_test_capture!()
 end
 
 function _finalize_test_capture!(root::PinaxTestSet)
-    Test.get_testset_depth() > 0 && Test.pop_testset()
+    TESTSET_STACK && Test.get_testset_depth() > 0 && Test.pop_testset()
     # A `-L` preamble runs in EVERY `Pkg.test` subprocess — the cache-flags probe and precompile, not
     # just the test run — and those capture nothing. An empty root therefore means "not the test run":
     # do nothing (no render, no print, no exit) so their stdout stays clean for `Pkg` to parse.
