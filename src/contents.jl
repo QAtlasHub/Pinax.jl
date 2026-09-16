@@ -16,7 +16,7 @@ function _entry_str(e, k::Symbol)
 end
 
 """
-    contents(entries; out, title="Contents", level=:cards, stats=()) -> path
+    contents(entries; out, title="Contents", level=:cards, stats=(), search=false) -> path
 
 Render a standalone meta-index linking to several separately rendered galleries, and return the
 written `index.html` path. Use it to put a customizable "map of contents" one level above galleries
@@ -32,11 +32,20 @@ Each entry is a `NamedTuple` describing one target gallery:
 | `thumbnail` |    no    | image path/URL for the card thumbnail (referenced as-is)      |
 | `meta`      |    no    | small caption line, e.g. `"12 pages · 540 figures"`           |
 | `items`     |    no    | list of strings, shown under the summary at `:rich` (each `string`-ified) |
+| `tags`      |    no    | list of strings, shown as chips and used by the filter bar     |
 
 `stats` is an iterable of `label => value` pairs shown as a strip under the title, for the numbers
 that describe the collection rather than any one entry (how many, how recent, how many of them are
 missing something). A meta-index over many galleries is read for those first; without them the page
 answers "what is here" and not "what state is it in".
+
+Entries carrying `tags` also get a filter bar above the cards: clicking a chip narrows the page to
+the entries that carry it. The filtering is a few lines of inline JavaScript over `data-tags`, so a
+reader without a server, and a reader without JavaScript, both still get the whole list.
+
+`search=true` mounts the [Pagefind](https://pagefind.app/) UI from `pagefind/` NEXT TO the generated
+page, which is where `add_search` puts it. It is emitted only when asked, because a search box over
+an index that was never built is worse than no box.
 
 `level` mirrors the gallery index verbosity: `:toc` (link list), `:cards` (thumbnail cards,
 default), `:rich` (cards + each entry's `items`). Hrefs and thumbnails are emitted verbatim, so give
@@ -60,6 +69,7 @@ function contents(
     title::AbstractString="Contents",
     level::Symbol=:cards,
     stats=(),
+    search::Bool=false,
 )
     level in (:toc, :cards, :rich) ||
         error("Pinax.contents: level must be :toc, :cards, or :rich (got :$(level)).")
@@ -75,6 +85,8 @@ function contents(
         io, "<div class=\"pinax-meta\">", n, n == 1 ? " gallery" : " galleries", "</div>"
     )
     _emit_contents_stats(io, stats)
+    search && _emit_contents_search(io)
+    _emit_contents_filters(io, es)
     if level === :toc
         _emit_contents_toc(io, es)
     else
@@ -107,6 +119,61 @@ function _emit_contents_stats(io, stats)
     return nothing
 end
 
+# Pagefind's own UI, served from the bundle `add_search` writes beside this page. Self-hosted: no
+# CDN, nothing to resolve at read time, and a registry read off a laptop behaves like the published
+# one.
+function _emit_contents_search(io)
+    println(io, "<link rel=\"stylesheet\" href=\"pagefind/pagefind-ui.css\">")
+    println(io, "<div class=\"pinax-search\" id=\"pinax-search\"></div>")
+    println(io, "<script src=\"pagefind/pagefind-ui.js\"></script>")
+    println(
+        io,
+        "<script>window.addEventListener('DOMContentLoaded',function(){",
+        "if(window.PagefindUI){new PagefindUI({element:'#pinax-search',showImages:false});}",
+        "else{document.getElementById('pinax-search').remove();}});</script>",
+    )
+    return nothing
+end
+
+# Every tag that appears, as a row of toggles. The cards carry `data-tags`, so the filter is a
+# string match in the page rather than a query anywhere.
+function _emit_contents_filters(io, entries)
+    tags = String[]
+    for e in entries
+        for t in _entry_get(e, :tags, ())
+            st = string(t)
+            (isempty(st) || st in tags) || push!(tags, st)
+        end
+    end
+    isempty(tags) && return nothing
+    sort!(tags)
+    println(io, "<div class=\"pinax-filters\" id=\"pinax-filters\">")
+    print(io, "<button class=\"pinax-chip is-on\" data-tag=\"\">all</button>")
+    for t in tags
+        print(
+            io,
+            "<button class=\"pinax-chip\" data-tag=\"",
+            _esc(t),
+            "\">",
+            _esc(t),
+            "</button>",
+        )
+    end
+    println(io, "\n</div>")
+    println(
+        io,
+        "<script>(function(){var bar=document.getElementById('pinax-filters');",
+        "if(!bar)return;bar.addEventListener('click',function(ev){",
+        "var b=ev.target.closest('.pinax-chip');if(!b)return;",
+        "var t=b.getAttribute('data-tag');",
+        "bar.querySelectorAll('.pinax-chip').forEach(function(c){c.classList.toggle('is-on',c===b);});",
+        "document.querySelectorAll('.pinax-card,.pinax-toc>li').forEach(function(card){",
+        "var ts=(card.getAttribute('data-tags')||'').split(' ');",
+        "card.style.display=(!t||ts.indexOf(t)>=0)?'':'none';});});})();</script>",
+    )
+    return nothing
+end
+
 function _emit_contents_cards(io, entries, rich::Bool)
     println(io, "<div class=\"pinax-cards\">")
     for e in entries
@@ -114,7 +181,10 @@ function _emit_contents_cards(io, entries, rich::Bool)
         summary = _entry_get(e, :summary, nothing)
         metaline = _entry_get(e, :meta, nothing)
         items = _entry_get(e, :items, nothing)
-        print(io, "<a class=\"pinax-card\" href=\"", _esc(_entry_str(e, :href)), "\">")
+        tags = String[string(t) for t in _entry_get(e, :tags, ())]
+        print(io, "<a class=\"pinax-card\"")
+        isempty(tags) || print(io, " data-tags=\"", _esc(join(tags, " ")), "\"")
+        print(io, " href=\"", _esc(_entry_str(e, :href)), "\">")
         if thumb === nothing
             print(io, "<div class=\"card-thumb card-thumb-empty\"></div>")
         else
@@ -140,6 +210,13 @@ function _emit_contents_cards(io, entries, rich::Bool)
             end
             print(io, "</div>")
         end
+        if !isempty(tags)
+            print(io, "<div class=\"card-tags\">")
+            for t in tags
+                print(io, "<span class=\"card-tag\">", _esc(t), "</span>")
+            end
+            print(io, "</div>")
+        end
         metaline === nothing ||
             print(io, "<div class=\"card-meta\">", _esc(string(metaline)), "</div>")
         print(io, "</div></a>")
@@ -152,9 +229,14 @@ function _emit_contents_toc(io, entries)
     for e in entries
         summary = _entry_get(e, :summary, nothing)
         metaline = _entry_get(e, :meta, nothing)
+        tags = String[string(t) for t in _entry_get(e, :tags, ())]
+        # The filter bar is emitted at every level, so a `:toc` row has to carry what it matches on
+        # or a click would empty the page.
+        print(io, "<li")
+        isempty(tags) || print(io, " data-tags=\"", _esc(join(tags, " ")), "\"")
         print(
             io,
-            "<li><a href=\"",
+            "><a href=\"",
             _esc(_entry_str(e, :href)),
             "\">",
             _esc(_entry_str(e, :title)),
