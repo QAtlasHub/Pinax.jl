@@ -110,3 +110,57 @@ end
     @test Pinax.report(ro, recipe; title="R", out=joinpath(tmp, "b")).render_observation ===
         nothing
 end
+
+@testset "report: a render observation that fails is warned about, not fatal" begin
+    tmp = mktempdir()
+    cfg = report_reads_vault(tmp)
+    vault = DataVault.Vault(cfg; run="phase1")
+    for k in ParamIO.expand(ParamIO.load(cfg))
+        save_done!(vault, k, 1.0)
+    end
+    store = joinpath(vault.outdir, ".datavault", "reads")
+    mkpath(store)
+    write(joinpath(store, "sources"), "a file where the snapshot store should be")
+    recipe = pairs -> (@page :p "P" begin
+        @desc md"no figures"
+    end)
+    res = @test_logs (:warn, r"observe_sources failed") match_mode = :any Pinax.report(
+        vault, recipe; title="R", out=joinpath(tmp, "c")
+    )
+    @test res.render_observation === nothing && length(res.reads) == 2
+end
+
+@testset "render(; vault) outside a report keys on the digest the marker recorded" begin
+    tmp = mktempdir()
+    cfg = report_reads_vault(tmp)
+    vault = DataVault.Vault(cfg; run="phase1")
+    key = first(ParamIO.expand(ParamIO.load(cfg)))
+    saved = save_done!(vault, key, 1.0)
+    calls = Ref(0)
+    svg = joinpath(tmp, "fig.svg")
+    build() = (
+        Pinax.reset!();
+        @page :p "P" begin
+            @section :s "S" begin
+                @figure params = key begin
+                    calls[] += 1
+                    write(svg, "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>")
+                    svg
+                end
+            end
+        end
+    )
+    out = joinpath(tmp, "site")
+    build()
+    Pinax.render(; out=out, vault=vault)
+    @test calls[] == 1
+    sleep(1.1)
+    DataVault.mark_done!(vault, key; result=saved)      # the marker rewritten, same digest
+    build()
+    Pinax.render(; out=out, vault=vault)
+    @test calls[] == 1
+    save_done!(vault, key, 2.0)                          # a new digest recorded
+    build()
+    Pinax.render(; out=out, vault=vault)
+    @test calls[] == 2
+end
