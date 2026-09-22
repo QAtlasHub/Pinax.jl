@@ -7,7 +7,8 @@
 # deleted (orphan cleanup).
 #
 # Data-content tracking: pass a DataVault `vault` to `render` and the key also folds in a fingerprint
-# of each `params::DataKey` figure's `.done` marker, so recomputing the data re-materializes it (see
+# of each `params::DataKey` figure's data — inside `report`, the digest of the bytes it read; else the
+# digest the `.done` marker recorded — so new data re-materializes the figure (see
 # `_data_fingerprint`). Without a vault, a pre-made file figure whose CONTENTS change but whose
 # manuscript does not is still not detected — pass `force=true` (or edit the manuscript).
 
