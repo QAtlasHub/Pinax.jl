@@ -60,7 +60,7 @@ end
     @test res.n == 2 && length(res.reads) == 2
     @test all(r -> r.read_sha256 == r.result_sha256, res.reads)
     @test Set(r.key for r in res.reads) == Set(ParamIO.canonical(k) for k in keys)
-    @test res.render_observation isa String && startswith(res.render_observation, "obs1-")
+    @test res.render_observation isa String && startswith(res.render_observation, "obs2-")
     obs = joinpath(
         vault.outdir,
         ".datavault",
@@ -68,7 +68,14 @@ end
         "observations",
         "$(res.render_observation).toml",
     )
-    @test TOML.parsefile(obs)["phase"] == "render"
+    rec = TOML.parsefile(obs)
+    @test rec["phase"] == "render"
+    # The recipe is the render's entry code. Written here rather than in a package, it cannot be
+    # checked, and the render observation says so instead of claiming a match.
+    @test length(rec["code"]) == 1 && rec["binding"] == "unverified"
+    @test any(
+        contains(r"defined in Main|no readable precompile cache"), rec["binding_reasons"]
+    )
     @test calls[] == 2                                  # gallery + agent each materialize once
 
     Pinax.report(vault, recipe; title="Reads", out=out)
