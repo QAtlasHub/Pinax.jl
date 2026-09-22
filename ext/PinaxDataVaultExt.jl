@@ -47,12 +47,14 @@ function Pinax._record_provenance(vault::DataVault.Vault, study)
 end
 
 # The render process's own source observation, next to the compute processes' ones: the report's
-# code is part of what produced it. A readonly vault cannot store one, and a failure is not fatal.
-function _observe_render(vault::DataVault.Vault)
+# code is part of what produced it, and `recipe` is its entry code, so the binding vouches for the
+# recipe or says why not (one written in the driving script cannot be checked). A readonly vault
+# cannot store one, and a failure is not fatal.
+function _observe_render(vault::DataVault.Vault, recipe)
     vault.readonly && return nothing
     try
         return DataVault.observe_sources(
-            vault; phase="render", process=Dict("role" => "render")
+            vault; phase="render", process=Dict("role" => "render"), code=(recipe,)
         )
     catch e
         e isa InterruptException && rethrow()
@@ -87,7 +89,7 @@ function Pinax.report(
     isempty(loaded) && error("Pinax.report: no :done keys in vault (run=$(vault.run)).")
     pairs = [(k, data) for (k, (data, _)) in loaded]
     reads = [rec for (_, (_, rec)) in loaded]
-    render_observation = observe ? _observe_render(vault) : nothing
+    render_observation = observe ? _observe_render(vault, recipe) : nothing
     Pinax.reset!(; title=String(title))
     recipe(pairs)
     _READS[] = Dict(r.key => r.read_sha256 for r in reads)
