@@ -1,7 +1,7 @@
 [source]
 config = "../../../../../../../../../../tmp/ising.toml"
 git_hash = "unknown"
-generated_at = "2026-09-16"
+generated_at = "2026-09-22"
 data_dir = "../../data/mc"
 
 [scripts]
