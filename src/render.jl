@@ -72,15 +72,23 @@ function render(
 end
 
 """
-    report(vault, recipe; title, out, study=nothing, kwargs...) -> (; gallery, agent, n)
+    report(vault, recipe; title, out, study=nothing, observe=true, kwargs...)
+        -> (; gallery, agent, n, reads, render_observation)
 
 Bridge a DataVault `vault` to rendered artifacts. Discovers the vault's completed keys,
-loads each result `Dict`, hands the `(key, dict)` pairs to the project-supplied `recipe`
+reads each result with `DataVault.load_recorded` (one copy, hashed, then loaded, so the digest
+names the bytes the recipe saw), hands the `(key, dict)` pairs to the project-supplied `recipe`
 (which builds the doc with `@page`/`@figure`/`@table`), then renders the human gallery
 **and** the agent.json with the vault wired in (data-fingerprint cache tracking +
 provenance). The driver — discover, load, render, lineage — is project-independent; only
 `recipe` is project-specific. Requires `using DataVault` (which also loads ParamIO); the
 core method errors with a hint when the extension is not loaded.
+
+`reads` has one record per key — its canonical id, file, `read_sha256`, and what the key's
+`.done` recorded (`result_sha256`, `observation`, `completed_at`) — so a registry can say which
+bytes the report used and which computation produced them. With `observe=true` this process also
+observes its own sources (`DataVault.observe_sources(…; phase = "render")`);
+`render_observation` is that token, or `nothing` for a readonly vault or a failed observation.
 """
 function report(vault, recipe::Function; kwargs...)
     return error(
