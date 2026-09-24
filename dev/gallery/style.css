@@ -152,7 +152,17 @@
   nav details.pinax-group{margin:.3rem 0;padding:.1rem .5rem;background:var(--bg)}
   nav details.pinax-group>summary{font-size:.98rem;padding:.25rem .2rem}
 /* pinax.css — styling for the interactive comment layer (notes 01 §4).
-   Inlined into the gallery by the GalleryTheme when interactive features are enabled. */
+   Inlined into the gallery by the GalleryTheme when interactive features are enabled.
+
+   Every colour here is a token from the gallery's palette, and that is not housekeeping: this
+   file is loaded into the same document as the theme's own stylesheet, so the tokens are in
+   scope and the dark block that redefines them reaches these rules too. Spelled as hex, they
+   did not — the comment bar stayed white on a dark page, which is what a reader saw and
+   reported. The form controls follow through `color-scheme`, which `:root` declares.
+
+   `color: var(--bg)` on the save button is deliberate and not a mistake for `--card`: it is the
+   label on a filled accent, so it has to invert with the page. White on the dark accent measures
+   3.1:1, under what text needs; `--bg` gives 5.4 in light and 6.1 in dark. */
 
 #pinax-bar {
   position: sticky;
@@ -162,8 +172,8 @@
   flex-wrap: wrap;
   gap: 0.4rem;
   align-items: center;
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--card);
+  border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.4rem 0.6rem;
   margin: 0.6rem 0;
@@ -173,30 +183,30 @@
 #pinax-bar .pinax-file {
   font: inherit;
   cursor: pointer;
-  background: #f6f8fa;
-  border: 1px solid #d0d7de;
+  background: var(--soft);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.2rem 0.55rem;
-  color: #24292f;
+  color: var(--fg);
 }
 #pinax-bar button:hover,
 #pinax-bar .pinax-file:hover {
-  background: #eef1f4;
+  background: var(--line);
 }
 #pinax-bar button.on {
-  background: #fff8e1;
-  border-color: #e3b341;
+  background: var(--warn-bg);
+  border-color: var(--warn);
 }
 #pinax-bar .pinax-file input {
   display: none;
 }
 #pinax-bar .pinax-note {
-  color: #8b949e;
+  color: var(--faint);
   font-size: 0.82rem;
 }
 
 #pinax-bar .pinax-status {
-  color: #57606a;
+  color: var(--mut);
   margin-left: auto;
 }
 
@@ -219,17 +229,17 @@ figcaption .pinax-ctl {
 
 /* a comment turn typed in the browser but not yet exported to comments.toml */
 .pinax-cmt.local {
-  border-left: 2px solid #e3b341;
+  border-left: 2px solid var(--warn);
   padding-left: 0.5rem;
 }
 .pinax-cmt .unsaved {
-  color: #9a6700;
+  color: var(--warn);
   font-size: 0.8em;
   margin-left: 0.3rem;
 }
 .pinax-cmt .del {
   cursor: pointer;
-  color: #cf222e;
+  color: var(--bad);
   margin-left: 0.4rem;
   opacity: 0.6;
 }
@@ -246,7 +256,7 @@ figcaption .pinax-ctl {
   min-height: 3.5rem;
   font: inherit;
   box-sizing: border-box;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.4rem;
 }
@@ -259,7 +269,7 @@ figcaption .pinax-ctl {
 .pinax-editor input.author {
   font: inherit;
   width: 7rem;
-  border: 1px solid #d0d7de;
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.15rem 0.4rem;
 }
@@ -268,13 +278,13 @@ figcaption .pinax-ctl {
   cursor: pointer;
   border-radius: 6px;
   padding: 0.2rem 0.6rem;
-  border: 1px solid #d0d7de;
-  background: #f6f8fa;
+  border: 1px solid var(--line);
+  background: var(--soft);
 }
 .pinax-editor button.save {
-  background: #1f6feb;
-  border-color: #1f6feb;
-  color: #fff;
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--bg);
 }
 
 /* bookmark-only filter: hide non-bookmarked sections */
