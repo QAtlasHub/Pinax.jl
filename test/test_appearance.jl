@@ -131,6 +131,27 @@ end
         @test occursin("border:1px solid var(--mut)", rule)
     end
 
+    @testset "every sheet in the document draws with tokens, or it cannot follow" begin
+        # This is the bug that was reported, in its general form. The dark block redefines the tokens;
+        # a colour spelled as hex is not a token and nothing redefines it, so it stays exactly as
+        # light as it was written. `pinax.css` — the interactive layer — was thirteen such colours,
+        # and the comment bar sat white across the top of a dark page.
+        #
+        # It is loaded into the same document as the theme's own stylesheet, in both asset modes, so
+        # the tokens are in scope there. Nothing stopped it using them except that nobody had.
+        literals(css) = [m.match for m in eachmatch(r"#[0-9a-fA-F]{3,6}\b", css)]
+
+        @test isempty(literals(Pinax._asset("pinax.css")))
+
+        # The theme's own sheet, minus the blocks whose job is to *define* the tokens. What is left is
+        # the documented exception: a figure is drawn on white whatever the page around it is.
+        body = replace(Pinax._GALLERY_CSS, r":root[^{]*\{[^}]*\}"s => "")
+        @test all(==("#fff"), literals(body))
+        for rule in ("iframe.pinax-pdf", "card-thumb-pdf")
+            @test occursin(rule, Pinax._GALLERY_CSS)             # the exception is those two, named
+        end
+    end
+
     @testset "the control does not depend on an external script" begin
         # A report is archived as a directory and read again years later, possibly without the
         # `app.js` that did not travel with it. Under `assets=:default` everything else is
