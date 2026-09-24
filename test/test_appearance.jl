@@ -139,7 +139,13 @@ end
         #
         # It is loaded into the same document as the theme's own stylesheet, in both asset modes, so
         # the tokens are in scope there. Nothing stopped it using them except that nobody had.
-        literals(css) = [m.match for m in eachmatch(r"#[0-9a-fA-F]{3,6}\b", css)]
+        # Comments first. A palette worth reading is a palette worth annotating, and a colour named in
+        # a `/* … */` — "brightness(.85) makes the paper #d9d9d9" — is not a colour the sheet draws
+        # with. Archeion's equivalent check learned this before this one did.
+        literals(css) = [
+            m.match for
+            m in eachmatch(r"#[0-9a-fA-F]{3,6}\b", replace(css, r"/\*.*?\*/"s => ""))
+        ]
 
         @test isempty(literals(Pinax._asset("pinax.css")))
 
