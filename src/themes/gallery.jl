@@ -83,6 +83,18 @@ function _emit_committed_json(io, comments, bookmarks, features)
     return nothing
 end
 
+# The same palette after dark, written once and used twice below — the media query and the explicit
+# choice have to say the same thing, and two copies of fourteen hex codes would not stay that way.
+# GitHub's dark canvas, because the light side is GitHub's light one: a reader who knows one knows
+# the other. Archeion's `src/dark.jl` recolours frozen stylesheets to these same values, so a report
+# rendered before this existed and one rendered after do not sit side by side in different darks.
+const _DARK_TOKENS = """
+    color-scheme:dark;
+    --bg:#0d1117; --fg:#e6edf3; --mut:#9198a1; --faint:#6e7681;
+    --line:#30363d; --card:#161b22; --acc:#4493f8; --soft:#1c2128;
+    --ok:#3fb950; --ok-bg:#12261e; --bad:#f85149; --bad-bg:#25171c;
+    --warn:#d29922; --warn-bg:#272115;"""
+
 const _GALLERY_CSS = """
 <style>
   /* One palette. A page that wants another sets these, and nothing else. */
@@ -101,7 +113,24 @@ const _GALLERY_CSS = """
     --bad-bg:#ffebe9;
     --warn:#9a6700;      /* look at this */
     --warn-bg:#fff8c5;
+    color-scheme:light;  /* scrollbars and form controls, so they match the page */
   }
+  /* Three states, not two. The reader's system decides unless the page has been told otherwise,
+     and `data-theme` on <html> is that telling: `appearance=` writes it before first paint and the
+     control below rewrites it. The media query steps aside for an explicit light so that a reader
+     on a dark desktop can still ask one page to stay light. */
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){$_DARK_TOKENS
+    }
+  }
+  :root[data-theme="dark"]{$_DARK_TOKENS
+  }
+  /* The control itself. Out of the flow, out of the way, and out of print. */
+  .pinax-appearance{position:fixed;top:.55rem;right:.55rem;z-index:99;font:600 12px/1 system-ui,sans-serif;
+    color:var(--mut);background:var(--card);border:1px solid var(--line);border-radius:999px;
+    padding:.42rem .72rem;cursor:pointer;opacity:.75}
+  .pinax-appearance:hover,.pinax-appearance:focus-visible{color:var(--fg);border-color:var(--faint);opacity:1}
+  @media print{.pinax-appearance{display:none}}
   body{font-family:system-ui,sans-serif;max-width:1180px;margin:2rem auto;padding:0 1rem;line-height:1.5;background:var(--bg);color:var(--fg)}
   h1,h2{border-bottom:1px solid var(--line);padding-bottom:.2rem}
   nav{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem;margin:1rem 0}
@@ -707,18 +736,65 @@ function _emit_scripts(::GalleryBase, ::Val{:default}, io, doc, interactive, rdi
     return _has_js(doc, interactive) && print(io, "<script src=\"app.js\"></script>")
 end
 
+# The colour scheme, in three pieces. `appearance=` is only the *default* — what a reader gets
+# before they have said anything; their own choice is remembered under this key and outranks it for
+# every page served from the same origin.
+#
+# All three are inline, in every asset mode, and that is deliberate: a report is archived as a
+# directory of files and read again years later, possibly from a copy whose `app.js` did not travel
+# with it. A control that depends on an external script is a control that stops working exactly
+# when the page has become worth keeping.
+const _APPEARANCE_KEY = "pinax-appearance"
+
+# Before the stylesheet is parsed, so a reader whose choice is dark never sees the page flash white
+# on its way there. This is the one part that cannot be deferred to the end of the body.
+function _appearance_head(default)
+    return """
+<script>(function(){var d="$default",v;try{v=localStorage.getItem("$_APPEARANCE_KEY")}catch(e){}\
+if(v!=="light"&&v!=="dark"&&v!=="system")v=d;\
+if(v!=="system")document.documentElement.setAttribute("data-theme",v);})()</script>"""
+end
+
+# Hidden until the script below unhides it: without JavaScript there is nothing for it to do, and a
+# dead button in the corner of every page is worse than no button. The media query still applies.
+const _APPEARANCE_BUTTON = """
+<button class="pinax-appearance" type="button" hidden></button>
+"""
+
+# The control, at the end of the body because that is when the button exists. Three states rather
+# than a toggle: "system" is a real answer, and a reader who lands on a page defaulted to dark needs
+# a way back to it, not just to light.
+function _appearance_foot(default)
+    return """
+<script>(function(){var d="$default",K="$_APPEARANCE_KEY",r=document.documentElement,
+b=document.querySelector(".pinax-appearance");if(!b)return;
+function read(){var v;try{v=localStorage.getItem(K)}catch(e){}
+return (v==="light"||v==="dark"||v==="system")?v:d}
+function next(v){return v==="system"?"light":v==="light"?"dark":"system"}
+function show(v){if(v==="system"){r.removeAttribute("data-theme")}else{r.setAttribute("data-theme",v)}
+b.textContent=v==="dark"?"\\u263e dark":v==="light"?"\\u2600 light":"\\u25d0 system";
+b.setAttribute("aria-label","Colour scheme: "+v+". Click for "+next(v)+".");b.hidden=false}
+show(read());
+b.addEventListener("click",function(){var v=next(read());try{localStorage.setItem(K,v)}catch(e){}show(v)})})()</script>"""
+end
+
 # Shared <head> … <body> opener for every emitted file — a dispatch point (a variant theme can
 # override the shell). KaTeX is its own asset system (`katex=`); `assets=` governs the gallery CSS/JS.
 function emit_head(theme::GalleryBase, io, title, doc, katex_mode, interactive, rdiag)
     print(io, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">")
     print(io, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">")
-    print(io, "<title>", _esc(title), "</title>", _katex_head(katex_mode))
+    print(io, "<title>", _esc(title), "</title>")
+    # Ahead of every stylesheet, KaTeX's from a CDN included: a blocking sheet in front of this
+    # would hold the reader's colour scheme behind a network round trip.
+    print(io, _appearance_head(doc.meta.appearance))
+    print(io, _katex_head(katex_mode))
     _emit_styles(theme, Val(doc.meta.assets), io, doc, interactive, rdiag)
-    return print(io, "</head><body>\n")
+    return print(io, "</head><body>\n", _APPEARANCE_BUTTON)
 end
 
 # Shared scripts + </body></html> closer — a dispatch point.
 function emit_foot(theme::GalleryBase, io, doc, katex_mode, interactive, rdiag)
+    print(io, _appearance_foot(doc.meta.appearance))
     _emit_scripts(theme, Val(doc.meta.assets), io, doc, interactive, rdiag)
     print(io, _katex_foot(doc.newcommands, katex_mode))   # @newcommand -> KaTeX macros (notes 08 §2)
     return println(io, "</body></html>")

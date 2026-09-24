@@ -63,6 +63,7 @@ mutable struct DocMeta
     js::Vector{String}            # user JS overlay files (inlined after the theme's own JS)
     katex::Symbol                 # gallery math assets: :cdn (default) | :local (vendored, offline)
     assets::Symbol                # theme CSS/JS: :default (separate style.css/app.js) | :inline (embedded)
+    appearance::Symbol            # the palette a reader who has not chosen one gets: :system | :light | :dark
 end
 function DocMeta(;
     title="",
@@ -77,6 +78,7 @@ function DocMeta(;
     js=String[],
     katex=:cdn,
     assets=:default,
+    appearance=:system,
 )
     return DocMeta(
         title,
@@ -91,6 +93,7 @@ function DocMeta(;
         collect(String, js),
         katex,
         assets,
+        appearance,
     )
 end
 
@@ -296,6 +299,7 @@ const _SETUP_KEYS = (
     :js,
     :katex,
     :assets,
+    :appearance,
 )
 
 function reset!(; kwargs...)
@@ -328,6 +332,14 @@ function reset!(; kwargs...)
     ast = get(kw, :assets, :default)
     ast in (:default, :inline) ||
         error("Pinax: @pinaxsetup assets= must be :default or :inline (got $(repr(ast))).")
+    # `theme=` is which theme renders the page; `appearance=` is which of that theme's two palettes
+    # a reader sees before choosing. `:system` — the default, and what every page did before this
+    # setting existed — leaves the choice to the reader's operating system.
+    app = get(kw, :appearance, :system)
+    app in (:system, :light, :dark) || error(
+        "Pinax: @pinaxsetup appearance= must be :system, :light, or :dark (got $(repr(app))). " *
+        "It is the colour scheme, not the theme — `theme=` selects the theme.",
+    )
     meta = DocMeta(;
         title=get(kw, :title, ""),
         theme=get(kw, :theme, :gallery),
@@ -340,6 +352,7 @@ function reset!(; kwargs...)
         js=get(kw, :js, String[]),
         katex=ktx,
         assets=ast,
+        appearance=app,
     )
     CTX.document = Document(meta)
     CTX.part = nothing
