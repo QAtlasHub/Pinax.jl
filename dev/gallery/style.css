@@ -34,6 +34,25 @@
 --ok:#3fb950; --ok-bg:#12261e; --bad:#f85149; --bad-bg:#25171c;
 --warn:#d29922; --warn-bg:#272115;
   }
+  /* A figure carries its own white, inside the SVG, where no stylesheet can reach it — and it
+     should: the axes and labels are dark ink, and taking the paper away would leave them on a dark
+     page unreadable. So the page does not take it away, it turns the lamp down. `brightness(.85)`
+     makes the paper #d9d9d9, which still reads as paper and stops being a light source.
+
+     Measured at that value: inside the figure, ink/paper 14.9, axis/paper 7.2, a plotted line
+     4.4 — all still clear (a line is a graphical object, which wants 3). Against the card it sits
+     on, 12.3. It is a mitigation and not a fix; the fix would be figures that are not drawn on
+     white in the first place, and that is the report author's to choose. */
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]) figure img,
+    :root:not([data-theme="light"]) .card-thumb img,
+    :root:not([data-theme="light"]) iframe.pinax-pdf,
+    :root:not([data-theme="light"]) .card-thumb-pdf{filter:brightness(.85)}
+  }
+  :root[data-theme="dark"] figure img,
+  :root[data-theme="dark"] .card-thumb img,
+  :root[data-theme="dark"] iframe.pinax-pdf,
+  :root[data-theme="dark"] .card-thumb-pdf{filter:brightness(.85)}
   /* The control itself. Out of the flow, out of the way, and out of print.
 
      Measured, and the measurement changed it. The pill's fill is --card on a --bg page: 1.04:1 in
