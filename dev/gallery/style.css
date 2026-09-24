@@ -14,7 +14,32 @@
     --bad-bg:#ffebe9;
     --warn:#9a6700;      /* look at this */
     --warn-bg:#fff8c5;
+    color-scheme:light;  /* scrollbars and form controls, so they match the page */
   }
+  /* Three states, not two. The reader's system decides unless the page has been told otherwise,
+     and `data-theme` on <html> is that telling: `appearance=` writes it before first paint and the
+     control below rewrites it. The media query steps aside for an explicit light so that a reader
+     on a dark desktop can still ask one page to stay light. */
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){color-scheme:dark;
+--bg:#0d1117; --fg:#e6edf3; --mut:#9198a1; --faint:#6e7681;
+--line:#30363d; --card:#161b22; --acc:#4493f8; --soft:#1c2128;
+--ok:#3fb950; --ok-bg:#12261e; --bad:#f85149; --bad-bg:#25171c;
+--warn:#d29922; --warn-bg:#272115;
+    }
+  }
+  :root[data-theme="dark"]{color-scheme:dark;
+--bg:#0d1117; --fg:#e6edf3; --mut:#9198a1; --faint:#6e7681;
+--line:#30363d; --card:#161b22; --acc:#4493f8; --soft:#1c2128;
+--ok:#3fb950; --ok-bg:#12261e; --bad:#f85149; --bad-bg:#25171c;
+--warn:#d29922; --warn-bg:#272115;
+  }
+  /* The control itself. Out of the flow, out of the way, and out of print. */
+  .pinax-appearance{position:fixed;top:.55rem;right:.55rem;z-index:99;font:600 12px/1 system-ui,sans-serif;
+    color:var(--mut);background:var(--card);border:1px solid var(--line);border-radius:999px;
+    padding:.42rem .72rem;cursor:pointer;opacity:.75}
+  .pinax-appearance:hover,.pinax-appearance:focus-visible{color:var(--fg);border-color:var(--faint);opacity:1}
+  @media print{.pinax-appearance{display:none}}
   body{font-family:system-ui,sans-serif;max-width:1180px;margin:2rem auto;padding:0 1rem;line-height:1.5;background:var(--bg);color:var(--fg)}
   h1,h2{border-bottom:1px solid var(--line);padding-bottom:.2rem}
   nav{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:.6rem .9rem;margin:1rem 0}

@@ -1,6 +1,16 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pinax example gallery</title><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><link rel="stylesheet" href="style.css"></head><body>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pinax example gallery</title><script>(function(){var d="system",v;try{v=localStorage.getItem("pinax-appearance")}catch(e){}if(v!=="light"&&v!=="dark"&&v!=="system")v=d;if(v!=="system")document.documentElement.setAttribute("data-theme",v);})()</script><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"><link rel="stylesheet" href="style.css"></head><body>
+<button class="pinax-appearance" type="button" hidden></button>
 <h1>Pinax example gallery</h1>
 <div class="pinax-meta">3 pages · 13 figures</div>
 <div class="pinax-cards">
 <a class="pinax-card" href="attractors.html"><div class="card-thumb"><img src="assets/figures/attractors/lorenz/lorenz_fig1.svg" alt=""></div><div class="card-body"><div class="card-title">Chaotic attractors</div><div class="card-meta">2 sections · 5 figures</div></div></a><a class="pinax-card" href="fractals.html"><div class="card-thumb"><img src="assets/figures/fractals/koch/koch_fig1.svg" alt=""></div><div class="card-body"><div class="card-title">L-system fractals</div><div class="card-meta">2 sections · 6 figures</div></div></a><a class="pinax-card" href="ising.html"><div class="card-thumb"><img src="assets/figures/ising/magnetization/magnetization_fig1.svg" alt=""></div><div class="card-body"><div class="card-title">Ising model (Monte Carlo, via DataVault)</div><div class="card-meta">2 sections · 2 figures</div></div></a></div>
-<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script><script>window.addEventListener("load",function(){renderMathInElement(document.body,{delimiters:[{left:"$$",right:"$$",display:true},{left:"$",right:"$",display:false}],macros:{},throwOnError:false});});</script></body></html>
+<script>(function(){var d="system",K="pinax-appearance",r=document.documentElement,
+b=document.querySelector(".pinax-appearance");if(!b)return;
+function read(){var v;try{v=localStorage.getItem(K)}catch(e){}
+return (v==="light"||v==="dark"||v==="system")?v:d}
+function next(v){return v==="system"?"light":v==="light"?"dark":"system"}
+function show(v){if(v==="system"){r.removeAttribute("data-theme")}else{r.setAttribute("data-theme",v)}
+b.textContent=v==="dark"?"\u263e dark":v==="light"?"\u2600 light":"\u25d0 system";
+b.setAttribute("aria-label","Colour scheme: "+v+". Click for "+next(v)+".");b.hidden=false}
+show(read());
+b.addEventListener("click",function(){var v=next(read());try{localStorage.setItem(K,v)}catch(e){}show(v)})})()</script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script><script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script><script>window.addEventListener("load",function(){renderMathInElement(document.body,{delimiters:[{left:"$$",right:"$$",display:true},{left:"$",right:"$",display:false}],macros:{},throwOnError:false});});</script></body></html>
