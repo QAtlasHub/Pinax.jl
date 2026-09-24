@@ -34,11 +34,18 @@
 --ok:#3fb950; --ok-bg:#12261e; --bad:#f85149; --bad-bg:#25171c;
 --warn:#d29922; --warn-bg:#272115;
   }
-  /* The control itself. Out of the flow, out of the way, and out of print. */
+  /* The control itself. Out of the flow, out of the way, and out of print.
+
+     Measured, and the measurement changed it. The pill's fill is --card on a --bg page: 1.04:1 in
+     light, 1.09:1 in dark, which is invisible — so the border is what says a control is there, and
+     it has to carry the 3:1 WCAG 1.4.11 asks of a boundary. --line gives 1.21 and 1.55, --faint
+     2.95 (missing in light), --mut 6.12 and 6.50. The opacity:.75 this started with was not free
+     either: composited, it took the label from 6.39/5.94 down to 3.62/3.88, under the 4.5 text
+     wants. The quiet belongs in --mut, which is the role for it, not in a transparency. */
   .pinax-appearance{position:fixed;top:.55rem;right:.55rem;z-index:99;font:600 12px/1 system-ui,sans-serif;
-    color:var(--mut);background:var(--card);border:1px solid var(--line);border-radius:999px;
-    padding:.42rem .72rem;cursor:pointer;opacity:.75}
-  .pinax-appearance:hover,.pinax-appearance:focus-visible{color:var(--fg);border-color:var(--faint);opacity:1}
+    color:var(--mut);background:var(--card);border:1px solid var(--mut);border-radius:999px;
+    padding:.42rem .72rem;cursor:pointer}
+  .pinax-appearance:hover,.pinax-appearance:focus-visible{color:var(--fg);border-color:var(--fg)}
   @media print{.pinax-appearance{display:none}}
   body{font-family:system-ui,sans-serif;max-width:1180px;margin:2rem auto;padding:0 1rem;line-height:1.5;background:var(--bg);color:var(--fg)}
   h1,h2{border-bottom:1px solid var(--line);padding-bottom:.2rem}
