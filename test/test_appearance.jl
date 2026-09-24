@@ -89,6 +89,48 @@ end
         @test blocks[1] == blocks[2]
     end
 
+    # Relative luminance and contrast, as WCAG 2.1 defines them.
+    _lin(c) = c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055)^2.4
+    function _lum(hex)
+        h = lstrip(hex, '#')
+        length(h) == 3 && (h = join(c^2 for c in h))
+        r, g, b = (parse(Int, h[i:(i + 1)]; base=16) / 255 for i in (1, 3, 5))
+        return 0.2126_lin(r) + 0.7152_lin(g) + 0.0722_lin(b)
+    end
+    function contrast(a, b)
+        lo, hi = extrema((_lum(a) + 0.05, _lum(b) + 0.05))
+        return hi / lo
+    end
+
+    # The tokens as the sheet that ships defines them, light and dark, so this measures what a reader
+    # gets rather than what a table in a test says they get.
+    function tokens(block)
+        return Dict(
+            m[1] => m[2] for
+            m in eachmatch(r"--([a-z0-9-]+)\s*:\s*(#[0-9a-fA-F]{3,6})", block)
+        )
+    end
+
+    @testset "the control can be found as well as read" begin
+        # A button is not text, and the rule for it is different: WCAG 1.4.11 asks 3:1 of the boundary
+        # that says a control is there. The fill cannot do that job — `--card` on `--bg` is 1.04:1 in
+        # light and 1.09:1 in dark — so the border carries it, and both palettes are measured, because
+        # a control visible in one and not the other is one half the readers never find.
+        light = tokens(match(r":root\{(.*?)\}"s, Pinax._GALLERY_CSS)[1])
+        dark = tokens(Pinax._DARK_TOKENS)
+        for P in (light, dark)
+            @test contrast(P["card"], P["bg"]) < 1.5           # the fill really is no boundary
+            @test contrast(P["mut"], P["bg"]) >= 3.0           # …so the border is, against the page
+            @test contrast(P["mut"], P["card"]) >= 4.5         # the label, on its own fill
+            @test contrast(P["fg"], P["card"]) >= 4.5          # and on hover
+        end
+        # …and nothing in the rule dims it back down. `opacity` composites the button toward the page:
+        # at .75 it took the label to 3.62 in light and 3.88 in dark, under the 4.5 text wants.
+        rule = match(r"\.pinax-appearance\{(.*?)\}"s, Pinax._GALLERY_CSS)[1]
+        @test !occursin("opacity", rule)
+        @test occursin("border:1px solid var(--mut)", rule)
+    end
+
     @testset "the control does not depend on an external script" begin
         # A report is archived as a directory and read again years later, possibly without the
         # `app.js` that did not travel with it. Under `assets=:default` everything else is
