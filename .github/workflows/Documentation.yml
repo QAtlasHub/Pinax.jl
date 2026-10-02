@@ -28,7 +28,7 @@ jobs:
       # standing half of the wiring. Waiting for the CI run rather than re-running the suite is what
       # keeps the docs build free of a second test pass once a job does produce it.
       - name: Download the Pinax self-test report
-        uses: dawidd6/action-download-artifact@v24
+        uses: dawidd6/action-download-artifact@v27
         with:
           workflow: CI.yml
           name: pinax-report-delegation
