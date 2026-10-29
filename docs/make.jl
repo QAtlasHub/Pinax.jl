@@ -73,6 +73,7 @@ makedocs(;
     doctest=true,
     pages=[
         "Home" => "index.md",
+        "Conventions" => "conventions.md",
         "Examples" => "examples.md",
         "Test → Pinax" => "test2pinax.md",
         "Comments" => "comments.md",
