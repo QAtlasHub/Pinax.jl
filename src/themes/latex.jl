@@ -162,7 +162,7 @@ end
 
 # Emit a container's figures + tables in declaration order (@raw panels are HTML, skipped in LaTeX;
 # @expect checks are rendered by the benchmark report, not inline).
-function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx)
+function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx; page=nothing)
     for (kind, item) in _content_items(c)
         if kind === :figure
             _latex_emit_fig!(theme, item, assetdir, ctx)
@@ -170,6 +170,8 @@ function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx)
             emit_table(theme, item, ctx)
         elseif kind === :code
             emit_code(theme, item, ctx)
+        elseif kind === :section   # a nested section, in declaration order
+            emit_section(theme, item, page, ctx)
         end
     end
     return nothing
@@ -259,12 +261,32 @@ function emit_table(theme::LaTeXBase, tbl, ctx)
     return println(io, "\\end{table}")
 end
 
+# The one place a section's depth becomes a LaTeX heading. A page is `\\section` (depth 1), so a
+# top-level section is `\\subsection`; past `\\subparagraph` the level is kept as a bold run-in
+# heading, with a diagnostic (never flattened).
+const _LATEX_HEADINGS = ("subsection", "subsubsection", "paragraph", "subparagraph")
+function _latex_heading(sec, ctx)
+    i = sec.depth - 1
+    t = _texesc(sec.title)
+    i <= length(_LATEX_HEADINGS) &&
+        return string("\\", _LATEX_HEADINGS[i], "{", t, "}\\label{", sec.anchor, "}")
+    push!(
+        ctx.rdiag,
+        DiagEntry(
+            WARNING,
+            sec.anchor,
+            "section at depth $(sec.depth) is deeper than \\subparagraph; rendered as a bold run-in heading",
+        ),
+    )
+    return string("\\par\\noindent\\textbf{", t, "}\\label{", sec.anchor, "}")
+end
+
 function emit_section(theme::LaTeXBase, sec, pg, ctx)
     io = ctx.io
-    println(io, "\\subsection{", _texesc(sec.title), "}\\label{", sec.anchor, "}")
+    println(io, _latex_heading(sec, ctx))
     sec.desc === nothing || println(io, emit_text(theme, sec.desc.source, sec.anchor, ctx))
     _latex_emit_content!(
-        theme, sec, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx
+        theme, sec, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx; page=pg
     )
     emit_comments(theme, sec.anchor, ctx)
     return nothing

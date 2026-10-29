@@ -190,7 +190,13 @@ mutable struct Section
     tables::Vector{Table}            # @table artifacts
     checks::Vector{Check}            # @expect PASS/FAIL checks (a @benchmark test set)
     codes::Vector{CodeBlock}         # @code snippet+output blocks
-    content::Vector{Pair{Symbol,Int}}  # declaration order: (:figure|:table|:panel|:check|:code) => index into the list above
+    content::Vector{Pair{Symbol,Int}}  # declaration order: (:figure|:table|:panel|:check|:code|:section) => index into the list above
+    # The section tree (#170): a `@section` nests to any depth. `depth` counts from the part (a page is
+    # 1, a top-level section 2), `parent` is the enclosing section (`nothing` at the top level), and
+    # `sections` holds the children, which also appear in `content` as `:section => index`.
+    depth::Int
+    parent::Union{Section,Nothing}
+    sections::Vector{Section}
 end
 
 """
@@ -221,7 +227,7 @@ mutable struct Page
 end
 
 # All checks on a benchmark page in declaration order: page-level @expect PLUS any inside a @section.
-_benchmark_checks(pg::Page) = vcat(pg.checks, (s.checks for s in pg.sections)...)
+_benchmark_checks(pg::Page) = vcat(pg.checks, (s.checks for s in _all_sections(pg))...)
 
 # Single source of the verdict invariant — used by every backend so PASS/FAIL can never diverge.
 function _benchmark_verdict(checks)
@@ -509,6 +515,9 @@ macro page(args...)
 end
 
 function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing, status=nothing)
+    CTX.section === nothing || error(
+        "@page :$(id) inside @section :$(CTX.section.id) — a page cannot be nested in a section",
+    )
     layout === nothing ||
         layout in (:grid, :single, :wide) ||
         error(
@@ -627,6 +636,7 @@ end
 function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=nothing)
     pg = CTX.page
     pg === nothing && error("@section outside of a @page")
+    parent = CTX.section
     layout === nothing ||
         layout in (:grid, :single, :wide) ||
         error(
@@ -635,7 +645,8 @@ function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=
     sec = Section(
         id,
         string(title),
-        _anchor(id),
+        # a hierarchical path, so equal ids under different parents never share an anchor
+        parent === nothing ? _anchor(id) : string(parent.anchor, ".", _anchor(id)),
         by,
         nothing,
         summary === nothing ? nothing : string(summary),
@@ -647,12 +658,30 @@ function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=
         Check[],
         CodeBlock[],
         Pair{Symbol,Int}[],
+        parent === nothing ? 2 : parent.depth + 1,
+        parent,
+        Section[],
     )
-    push!(pg.sections, sec)
+    if parent === nothing
+        push!(pg.sections, sec)
+    else
+        push!(parent.sections, sec)
+        push!(parent.content, :section => length(parent.sections))
+    end
     CTX.section = sec
     return sec
 end
-_exit_section!() = (CTX.section = nothing)
+# Leaving a section returns to the one that encloses it (or to the page at the top level).
+_exit_section!() = (CTX.section = CTX.section === nothing ? nothing : CTX.section.parent)
+
+# Every section of a page, depth first in declaration order: the one walk for anything that must see
+# the whole tree (id resolution, figure counts, thumbnails), so no caller can stop at the top level.
+function _all_sections(pg)
+    out = Section[]
+    walk(s) = (push!(out, s); foreach(walk, s.sections))
+    foreach(walk, pg.sections)
+    return out
+end
 
 "Register a plot; the expression is DEFERRED. `@figure expr [params=…] [caption=…] [id=…] [thumbnail=…]` / `@figure [kw] begin … end`"
 macro figure(args...)
@@ -995,6 +1024,8 @@ function _content_items(c)
             c.checks[i]
         elseif k === :code
             c.codes[i]
+        elseif k === :section
+            c.sections[i]
         else
             c.panels[i]
         end,
@@ -1155,12 +1186,12 @@ function resolved_thumbnail(pg::Page)
     for f in pg.figures
         f.thumbnail && return FigRef(f.id)
     end
-    for sec in pg.sections, f in sec.figures
+    for sec in _all_sections(pg), f in sec.figures
         f.thumbnail && return FigRef(f.id)
     end
     # else the first figure (page-level, then the first section's)
     isempty(pg.figures) || return FigRef(pg.figures[1].id)
-    for sec in pg.sections
+    for sec in _all_sections(pg)
         isempty(sec.figures) || return FigRef(sec.figures[1].id)
     end
     return nothing

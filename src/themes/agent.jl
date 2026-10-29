@@ -340,6 +340,8 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
         _jsonstr(string(sec.id)),
         ",\"title\":",
         _jsonstr(sec.title),
+        ",\"depth\":",
+        sec.depth,
         ",\"desc\":",
         sec.desc === nothing ? "null" : _jsonstr(sec.desc.source),
         ",\"figures\":",
@@ -356,7 +358,13 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
     _agent_codes!(theme, sec.codes, ctx)
     print(io, ",\"content\":")
     _agent_content!(sec, ctx)
-    print(io, "}")
+    # the section tree: children nest inside their parent's object, in declaration order
+    print(io, ",\"sections\":[")
+    for (j, child) in enumerate(sec.sections)
+        j == 1 || print(io, ",")
+        emit_section(theme, child, pg, ctx)
+    end
+    print(io, "]}")
     return nothing
 end
 
@@ -542,8 +550,24 @@ function _agent_md_content(io, c, outdir, comments, as_table)
             _agent_md_check(io, item)
         elseif kind === :code
             _agent_md_code(io, item)
+        elseif kind === :section   # a nested section, in declaration order
+            _agent_md_section(io, item, outdir, comments, as_table)
         end
     end
+    return nothing
+end
+
+# The one place agent.md turns a section's depth into a heading. A page is `###`, so a top-level
+# section is `####`; past `######` the level is kept as a bold line (Markdown has no deeper heading).
+function _agent_md_heading(sec)
+    n = sec.depth + 2
+    return n <= 6 ? string("#"^n, " ", sec.title) : string("**", sec.title, "**")
+end
+
+function _agent_md_section(io, sec, outdir, comments, as_table)
+    println(io, "\n", _agent_md_heading(sec), "  [id: ", sec.id, "]")
+    sec.desc === nothing || println(io, sec.desc.source)
+    _agent_md_content(io, sec, outdir, comments, as_table)
     return nothing
 end
 
@@ -571,9 +595,7 @@ function _agent_markdown(doc::Document, outdir, comments, as_table)
         pg.desc === nothing || println(io, pg.desc.source)
         _agent_md_content(io, pg, outdir, comments, as_table)
         for sec in pg.sections
-            println(io, "\n#### ", sec.title, "  [id: ", sec.id, "]")
-            sec.desc === nothing || println(io, sec.desc.source)
-            _agent_md_content(io, sec, outdir, comments, as_table)
+            _agent_md_section(io, sec, outdir, comments, as_table)
         end
     end
     return String(take!(io))

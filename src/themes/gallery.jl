@@ -430,7 +430,7 @@ function _gallery_numbers(doc::Document)
                 eqn,
             )
         end
-        for sec in pg.sections
+        for sec in _all_sections(pg)
             secn += 1
             subfig = 0
             nums[sec.anchor] = string(
@@ -636,7 +636,7 @@ function _gallery_citations(doc::Document, bib::Dict{Symbol,BibEntry})
         for f in pg.figures
             seen(f.caption)
         end
-        for sec in pg.sections
+        for sec in _all_sections(pg)
             seen(_descsrc(sec.desc))
             for f in sec.figures
                 seen(f.caption)
@@ -648,15 +648,22 @@ end
 
 # ---------- emit (the theme-dispatched entry point) ----------
 
+# A contents entry is indented by its depth below the page (`base` extra levels for a list that also
+# shows the pages themselves), so a nested section reads as nested in every contents list.
+function _toc_indent(sec, base)
+    n = sec.depth - 2 + base
+    return n <= 0 ? "" : string(" style=\"margin-left:", 1.2 * n, "rem\"")
+end
+
 # Figure count of one page = its page-level figures plus every section's figures.
 function _page_nfigs(pg::Page)
-    return length(pg.figures) + sum(length(s.figures) for s in pg.sections; init=0)
+    return length(pg.figures) + sum(length(s.figures) for s in _all_sections(pg); init=0)
 end
 
 # Every figure of a page in display order: page-level (page-as-leaf) first, then each section's.
 function _page_figs(pg::Page)
     figs = copy(pg.figures)
-    for sec in pg.sections
+    for sec in _all_sections(pg)
         append!(figs, sec.figures)
     end
     return figs
@@ -847,10 +854,10 @@ function emit_page(theme::GalleryBase, pg, ctx)
     )
     if !isempty(pg.sections)
         println(io, "<nav><strong>Contents</strong>")
-        for sec in pg.sections
+        for sec in _all_sections(pg)
             n = length(sec.figures)
             cnt = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
-            println(io, "<a href=\"#", sec.anchor, "\">", _esc(sec.title), cnt, "</a>")
+            println(io, "<a href=\"#", sec.anchor, "\"", _toc_indent(sec, 0), ">", _esc(sec.title), cnt, "</a>")
         end
         println(io, "</nav>")
         for sec in pg.sections
@@ -905,14 +912,16 @@ function _emit_toc_nav(doc::Document, io; has_bib::Bool=false)
         n = _page_nfigs(pg)
         cnt = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
         println(io, "<a href=\"#", pg.anchor, "\">", _esc(pg.title), cnt, "</a>")
-        for sec in pg.sections
+        for sec in _all_sections(pg)
             sn = length(sec.figures)
             scnt = sn > 0 ? string(" <span class=\"nfig\">(", sn, ")</span>") : ""
             println(
                 io,
                 "<a href=\"#",
                 sec.anchor,
-                "\" style=\"margin-left:1.2rem\">",
+                "\"",
+                _toc_indent(sec, 1),
+                ">",
                 _esc(sec.title),
                 scnt,
                 "</a>",
@@ -1230,8 +1239,9 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     n > 0 && (heading *= string(" <span class=\"nfig\">(", n, ")</span>"))
     bookmarked && (heading *= " <span class=\"pinax-bm-on\" title=\"bookmarked\">★</span>")
     cls = bookmarked ? "section bookmarked" : "section"
+    open_h, close_h = _gallery_heading(sec, ctx)
     println(
-        io, "<section class=\"", cls, "\" id=\"", sec.anchor, "\"><h2>", heading, "</h2>"
+        io, "<section class=\"", cls, "\" id=\"", sec.anchor, "\">", open_h, heading, close_h
     )
     if sec.desc !== nothing
         println(
@@ -1258,11 +1268,29 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
             println(io, panel)
         end
         isempty(sec.tables) || _emit_tables(theme, sec.tables, ctx)
+        # facets regroup the figures only; child sections still follow, in declaration order
+        foreach(child -> emit_section(theme, child, pg, ctx), sec.sections)
     else
-        _emit_content(theme, sec, assetdir, sec.layout, ctx)
+        _emit_content(theme, sec, assetdir, sec.layout, ctx; page=pg)
     end
     emit_comments(theme, sec.anchor, ctx)
     return println(io, "</section>")
+end
+
+# The one place a gallery section's depth becomes a heading: `<h2>` for a top-level section down to
+# `<h6>`; deeper sections keep their level as an ARIA heading, with a diagnostic (never flattened).
+function _gallery_heading(sec, ctx)
+    d = sec.depth
+    d <= 6 && return ("<h$(d)>", "</h$(d)>")
+    push!(
+        ctx.rdiag,
+        DiagEntry(
+            WARNING,
+            sec.anchor,
+            "section at depth $(d) is deeper than <h6>; rendered as an aria-level heading",
+        ),
+    )
+    return ("<div role=\"heading\" aria-level=\"$(d)\" class=\"pinax-deep-heading\">", "</div>")
 end
 
 # Render the id-keyed comment turns for a node (a figure or a section) inline, co-located with their
@@ -1513,7 +1541,7 @@ end
 
 # Emit a container's content (figures / tables / @raw panels) in DECLARATION order. Consecutive
 # figures are grouped into one figure grid; a table or @raw panel between them flushes the grid.
-function _emit_content(theme::GalleryBase, c, assetdir, layout, ctx)
+function _emit_content(theme::GalleryBase, c, assetdir, layout, ctx; page=nothing)
     figbuf = Figure[]
     flush_figs() =
         if !isempty(figbuf)
@@ -1531,6 +1559,9 @@ function _emit_content(theme::GalleryBase, c, assetdir, layout, ctx)
         elseif kind === :code
             flush_figs()
             emit_code(theme, item, ctx)
+        elseif kind === :section   # a nested section, in declaration order
+            flush_figs()
+            emit_section(theme, item, page, ctx)
         else                       # :panel — @raw HTML, verbatim
             flush_figs()
             println(ctx.io, item)

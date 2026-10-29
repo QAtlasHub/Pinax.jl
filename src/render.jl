@@ -16,7 +16,7 @@ function resolve!(doc::Document)
         for f in pg.figures            # page-level figures (page-as-leaf)
             doc.refs[f.id] = f
         end
-        for sec in pg.sections
+        for sec in _all_sections(pg)
             doc.refs[sec.id] = sec
             for f in sec.figures
                 doc.refs[f.id] = f
