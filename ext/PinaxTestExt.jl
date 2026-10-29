@@ -67,7 +67,88 @@ end
 function __init__()
     # Register the container probe (a `Ref` assignment, not a method override — no precompile clash).
     Pinax._TEST_CONTAINER_PROBE[] = _current_test_container
+    Pinax._SCOPE_HOOK[] = Pinax._ScopeHook(
+        _open_container, _container_pairs, _close_container
+    )
     return nothing
+end
+
+# ── a manuscript container AS the current testset (#173) ─────────────────────────────────────────
+#
+# While a `@page` / `@section` body runs, its container is the current testset, so `Test`'s own
+# `@test` is a check of that container and a nested `@testset` is a child section (`Test` builds a
+# nested set from the parent's TYPE). Every result is also handed to `outer`, the nearest ordinary
+# testset, so a suite counts it exactly as if the `@test` were written there. With none open (a
+# manuscript run on its own) the result is only recorded; `render` reports it.
+mutable struct PinaxContainerSet <: AbstractTestSet
+    description::String
+    node::Any                               # the Section or Page this testset IS
+    outer::Union{AbstractTestSet,Nothing}   # nearest non-container testset, or nothing
+    owns::Bool                              # created by a nested @testset: closes its own section
+end
+
+_enclosing_testset() = Test.get_testset_depth() == 0 ? nothing : Test.get_testset()
+_outer_of(ts::PinaxContainerSet) = ts.outer
+_outer_of(ts) = ts
+
+function _open_container(c)
+    ts = PinaxContainerSet(c.title, c, _outer_of(_enclosing_testset()), false)
+    TESTSET_STACK && Test.push_testset(ts)       # Julia ≤ 1.12: the stack is task-local storage
+    return ts
+end
+_close_container(ts) = (TESTSET_STACK && Test.pop_testset(); nothing)
+
+@static if isdefined(Test, :CURRENT_TESTSET)
+    function _container_pairs(ts)
+        return (
+            Test.CURRENT_TESTSET => ts, Test.TESTSET_DEPTH => Test.get_testset_depth() + 1
+        )
+    end
+else
+    _container_pairs(ts) = (Pinax._NO_SCOPE => nothing, Pinax._NO_SCOPE => nothing)
+end
+
+# A `@testset "desc"` nested in a container: `Test` constructs it from the parent's type, so this is
+# where a testset becomes a child section of whatever container is open.
+function PinaxContainerSet(desc::AbstractString; kw...)
+    parent = _enclosing_testset()
+    sec = Pinax._enter_section!(_slug(desc), String(desc))
+    return PinaxContainerSet(String(desc), sec, _outer_of(parent), true)
+end
+
+function Test.finish(ts::PinaxContainerSet)
+    ts.owns && Pinax._exit_section!()
+    return ts
+end
+
+# The section tree is built as sections open; a finished child needs no recording.
+Test.record(::PinaxContainerSet, child::PinaxContainerSet) = child
+# Any other testset nested here (an explicit `@testset DefaultTestSet`) still reaches the suite.
+function Test.record(ts::PinaxContainerSet, child::AbstractTestSet)
+    ts.outer === nothing || Test.record(ts.outer, child)
+    return child
+end
+function Test.record(ts::PinaxContainerSet, res::Test.Result)
+    if !(res isa Test.Broken)
+        chk = _push_container_check!(ts.node, res)
+        chk.reported = ts.outer !== nothing   # the suite counts it; `render` will not repeat it
+    end
+    ts.outer === nothing || Test.record(ts.outer, res)
+    return res
+end
+
+function _push_container_check!(c, res)
+    chk = _check_from(_result_data_expr(res), _label(res), res isa Test.Pass, 0)
+    chk.id = Symbol(c.id, "_t", length(c.checks) + 1)
+    chk.source = _source_str(res)
+    blk = _code_block_for(res)
+    if blk !== nothing
+        Pinax._push_auto_code!(c, blk)
+        chk.code_anchor = blk.anchor
+    end
+    push!(c.checks, chk)
+    push!(c.content, :check => length(c.checks))
+    return chk
 end
 
 # The probe `Pinax._current_container()` consults. Returns the innermost open Pinax test container,

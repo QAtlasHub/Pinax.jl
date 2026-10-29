@@ -149,14 +149,19 @@ mutable struct Check
     code_anchor::String   # anchor of the `CodeBlock` holding the code that produced this check — the
     # code itself is ONE artifact in the document (a `@code` block), and this is the reference to it,
     # never a second copy of the source; "" when there is none.
+    reported::Bool        # already handed to an enclosing ordinary testset (#173): a failing check is
+    # reported exactly once, by that suite when there is one, else by `render`.
 end
-# Keep the 8-/9-arg positional forms working (source/code_anchor default to "") — every existing
-# construction is unchanged, and only the `Test` bridge, which has the `LineNumberNode`, fills them in.
+# Keep the 8-/9-/10-arg positional forms working (source/code_anchor default to "", reported to
+# false) — every existing construction is unchanged.
 function Check(id, label, got, want, delta, tol, kind, pass)
-    return Check(id, label, got, want, delta, tol, kind, pass, "", "")
+    return Check(id, label, got, want, delta, tol, kind, pass, "", "", false)
 end
 function Check(id, label, got, want, delta, tol, kind, pass, source)
-    return Check(id, label, got, want, delta, tol, kind, pass, source, "")
+    return Check(id, label, got, want, delta, tol, kind, pass, source, "", false)
+end
+function Check(id, label, got, want, delta, tol, kind, pass, source, code_anchor)
+    return Check(id, label, got, want, delta, tol, kind, pass, source, code_anchor, false)
 end
 
 """
@@ -227,7 +232,48 @@ mutable struct Page
 end
 
 # All checks on a benchmark page in declaration order: page-level @expect PLUS any inside a @section.
-_benchmark_checks(pg::Page) = vcat(pg.checks, (s.checks for s in _all_sections(pg))...)
+_benchmark_checks(pg::Page) = _subtree_checks(pg)
+
+# Every check in a container's subtree: its own, then each nested section's, in declaration order.
+_subtree_checks(pg::Page) = vcat(pg.checks, (s.checks for s in _all_sections(pg))...)
+function _subtree_checks(sec::Section)
+    out = copy(sec.checks)
+    foreach(child -> append!(out, _subtree_checks(child)), sec.sections)
+    return out
+end
+
+"""
+    verdict(container) -> (; passed, total, verdict, failed) | nothing
+
+The verdict of a `@page` or `@section` over every check in its subtree, derived on demand and never
+stored. `nothing` when the subtree holds no checks, so an empty container cannot read as PASS.
+"""
+function verdict(c::Union{Page,Section})
+    checks = _subtree_checks(c)
+    return isempty(checks) ? nothing : _benchmark_verdict(checks)
+end
+
+"""
+    ChecksFailed(failed)
+
+Thrown by `render` after it has written every output, when the document holds failing checks that
+no enclosing testset was told about. `failed` lists their ids; `path` is the entry file written.
+"""
+struct ChecksFailed <: Exception
+    failed::Vector{String}
+    path::String   # the entry file render wrote, where the failures are shown
+end
+function Base.showerror(io::IO, e::ChecksFailed)
+    return print(
+        io,
+        "ChecksFailed: ",
+        length(e.failed),
+        " failing check(s), rendered and shown as FAIL in ",
+        e.path,
+        ": ",
+        join(e.failed, ", "),
+    )
+end
 
 # Single source of the verdict invariant — used by every backend so PASS/FAIL can never diverge.
 function _benchmark_verdict(checks)
@@ -289,6 +335,39 @@ current_section() = CTX.section
 # reads a `Ref`, the extension supplies the closure at load — no method the extension must overwrite.
 const _TEST_CONTAINER_PROBE = Base.RefValue{Any}(nothing)
 _probe_test_container() = (p=_TEST_CONTAINER_PROBE[]; p === nothing ? :none : p())
+
+# The container scope (#173). With `Test` loaded, an open `@page` / `@section` is the current testset
+# for its body, so `Test`'s own `@test` is a check of that container and a nested `@testset` is a child
+# section. Core stays `Test`-free: `PinaxTestExt` registers the hook at load, and without it the
+# expansion below enters a scope that changes nothing. `@with` adds no closure, so the body's scoping
+# is exactly what it was.
+struct _ScopeHook
+    open::Function    # container -> testset handle (or nothing)
+    pairs::Function   # handle -> the two ScopedValue pairs that make it current
+    close::Function   # handle -> nothing
+end
+const _SCOPE_HOOK = Base.RefValue{Union{_ScopeHook,Nothing}}(nothing)
+const _NO_SCOPE = Base.ScopedValues.ScopedValue{Any}(nothing)
+_open_scope(c) = (h=_SCOPE_HOOK[]; h === nothing ? nothing : h.open(c))
+function _scope_pair(ts, i)
+    h = _SCOPE_HOOK[]
+    return (h === nothing || ts === nothing) ? (_NO_SCOPE => nothing) : h.pairs(ts)[i]
+end
+function _close_scope(ts)
+    return (h=_SCOPE_HOOK[]; (h === nothing || ts === nothing) ? nothing : h.close(ts))
+end
+
+# `body` run with container `c` as the current testset (see above), for the @page / @section macros.
+function _scoped_body(c, body)
+    return quote
+        local ts = Pinax._open_scope($c)
+        try
+            Base.ScopedValues.@with Pinax._scope_pair(ts, 1) Pinax._scope_pair(ts, 2) $body
+        finally
+            Pinax._close_scope(ts)
+        end
+    end
+end
 
 "Reset the implicit document (fresh, empty). The preamble `@pinaxsetup` calls this."
 # Every setting `reset!` reads. A keyword outside this set is refused rather than dropped: the
@@ -504,9 +583,9 @@ macro page(args...)
     id, title, body = args[1], args[2], args[end]
     enter = _call(:_enter_page!, (esc(id), esc(title)), _kwspecs(args[3:(end - 1)]))
     return quote
-        $enter
+        local pg = $enter
         try
-            $(esc(body))
+            $(_scoped_body(:pg, esc(body)))
         finally
             _exit_page!()
         end
@@ -623,9 +702,9 @@ macro section(args...)
     id, title, body = args[1], args[2], args[end]
     enter = _call(:_enter_section!, (esc(id), esc(title)), _kwspecs(args[3:(end - 1)]))
     return quote
-        $enter
+        local sec = $enter
         try
-            $(esc(body))
+            $(_scoped_body(:sec, esc(body)))
         finally
             _exit_section!()
         end

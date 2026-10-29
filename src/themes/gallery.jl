@@ -242,6 +242,9 @@ const _GALLERY_CSS = """
   .card-thumb-pdf{width:100%;height:100%;border:0;background:#fff;pointer-events:none}
   .card-body{padding:.7rem .9rem}
   .card-title{font-weight:600;font-size:1.05rem}
+  .pinax-verdict-badge{display:inline-block;font-size:.75rem;font-weight:600;border-radius:6px;padding:0 .4rem;margin-left:.4rem;vertical-align:middle;border:1px solid}
+  .pinax-verdict-badge.pass{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
+  .pinax-verdict-badge.fail{background:var(--bad-bg);border-color:var(--bad);color:var(--bad)}
   .card-status{display:inline-block;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--warn);background:var(--warn-bg);border:1px solid var(--warn);border-radius:6px;padding:0 .35rem;margin-left:.4rem;vertical-align:middle}
   .card-summary{color:var(--mut);font-size:.9rem;margin-top:.2rem}
   .card-sections{margin-top:.5rem;font-size:.85rem;color:var(--mut)}
@@ -857,7 +860,17 @@ function emit_page(theme::GalleryBase, pg, ctx)
         for sec in _all_sections(pg)
             n = length(sec.figures)
             cnt = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
-            println(io, "<a href=\"#", sec.anchor, "\"", _toc_indent(sec, 0), ">", _esc(sec.title), cnt, "</a>")
+            println(
+                io,
+                "<a href=\"#",
+                sec.anchor,
+                "\"",
+                _toc_indent(sec, 0),
+                ">",
+                _esc(sec.title),
+                cnt,
+                "</a>",
+            )
         end
         println(io, "</nav>")
         for sec in pg.sections
@@ -1238,10 +1251,19 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     n = length(sec.figures)
     n > 0 && (heading *= string(" <span class=\"nfig\">(", n, ")</span>"))
     bookmarked && (heading *= " <span class=\"pinax-bm-on\" title=\"bookmarked\">★</span>")
+    heading *= _gallery_verdict(sec)
     cls = bookmarked ? "section bookmarked" : "section"
     open_h, close_h = _gallery_heading(sec, ctx)
     println(
-        io, "<section class=\"", cls, "\" id=\"", sec.anchor, "\">", open_h, heading, close_h
+        io,
+        "<section class=\"",
+        cls,
+        "\" id=\"",
+        sec.anchor,
+        "\">",
+        open_h,
+        heading,
+        close_h,
     )
     if sec.desc !== nothing
         println(
@@ -1277,6 +1299,25 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     return println(io, "</section>")
 end
 
+# A container's derived verdict as a heading badge ("" when its subtree holds no checks), so every
+# container that has checks shows PASS/FAIL, not only a benchmark page (#173).
+function _gallery_verdict(c)
+    v = verdict(c)
+    v === nothing && return ""
+    cls = v.verdict == "PASS" ? "pass" : "fail"
+    return string(
+        " <span class=\"pinax-verdict-badge ",
+        cls,
+        "\">",
+        v.verdict,
+        " ",
+        v.passed,
+        "/",
+        v.total,
+        "</span>",
+    )
+end
+
 # The one place a gallery section's depth becomes a heading: `<h2>` for a top-level section down to
 # `<h6>`; deeper sections keep their level as an ARIA heading, with a diagnostic (never flattened).
 function _gallery_heading(sec, ctx)
@@ -1290,7 +1331,9 @@ function _gallery_heading(sec, ctx)
             "section at depth $(d) is deeper than <h6>; rendered as an aria-level heading",
         ),
     )
-    return ("<div role=\"heading\" aria-level=\"$(d)\" class=\"pinax-deep-heading\">", "</div>")
+    return (
+        "<div role=\"heading\" aria-level=\"$(d)\" class=\"pinax-deep-heading\">", "</div>"
+    )
 end
 
 # Render the id-keyed comment turns for a node (a figure or a section) inline, co-located with their

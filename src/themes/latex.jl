@@ -284,6 +284,17 @@ end
 function emit_section(theme::LaTeXBase, sec, pg, ctx)
     io = ctx.io
     println(io, _latex_heading(sec, ctx))
+    v = verdict(sec)
+    v === nothing || println(
+        io,
+        "\\noindent\\textbf{",
+        v.verdict,
+        "} ",
+        v.passed,
+        "/",
+        v.total,
+        " checks passed.\n",
+    )
     sec.desc === nothing || println(io, emit_text(theme, sec.desc.source, sec.anchor, ctx))
     _latex_emit_content!(
         theme, sec, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx; page=pg

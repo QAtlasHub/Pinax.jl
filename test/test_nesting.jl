@@ -71,8 +71,9 @@ end
             s = s.sections[1]
         end
         @test depths == 2:7
-        @test anchors == ["s2", "s2.s3", "s2.s3.s4", "s2.s3.s4.s5", "s2.s3.s4.s5.s6",
-            "s2.s3.s4.s5.s6.s7"]
+        @test anchors == [
+            "s2", "s2.s3", "s2.s3.s4", "s2.s3.s4.s5", "s2.s3.s4.s5.s6", "s2.s3.s4.s5.s6.s7"
+        ]
         # every figure in the tree is resolvable by id
         doc = Pinax.resolve!(Pinax.current_document())
         @test length(doc.refs) == 1 + 6 + 6   # page + sections + figures

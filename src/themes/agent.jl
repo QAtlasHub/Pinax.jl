@@ -332,6 +332,22 @@ function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
     return nothing
 end
 
+# A derived verdict as JSON (`null` when the subtree holds no checks — never a vacuous PASS).
+function _agent_verdict_json(v)
+    v === nothing && return "null"
+    return string(
+        "{\"verdict\":",
+        _jsonstr(v.verdict),
+        ",\"passed\":",
+        v.passed,
+        ",\"total\":",
+        v.total,
+        ",\"failed\":[",
+        join((_jsonstr(f) for f in v.failed), ","),
+        "]}",
+    )
+end
+
 function emit_section(theme::AgentBase, sec, pg, ctx)
     io = ctx.io
     print(
@@ -342,6 +358,8 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
         _jsonstr(sec.title),
         ",\"depth\":",
         sec.depth,
+        ",\"verdict\":",
+        _agent_verdict_json(verdict(sec)),
         ",\"desc\":",
         sec.desc === nothing ? "null" : _jsonstr(sec.desc.source),
         ",\"figures\":",

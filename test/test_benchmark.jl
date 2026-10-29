@@ -8,6 +8,19 @@ function Pinax.emit_check(::CheckOverrideAgent, chk, ctx)
     return print(ctx.io, "{\"custom_chk\":\"", chk.id, "\"}")
 end
 
+# A document holding failing checks renders every output and then raises `ChecksFailed` (#173). These
+# tests read what was written, so they assert the raise and return the entry file it names.
+function _render_failing(; kw...)
+    err = try
+        Pinax.render(; kw...)
+        nothing
+    catch e
+        e
+    end
+    @test err isa Pinax.ChecksFailed
+    return err.path
+end
+
 # `@expect` / `@benchmark` — a physics test set. `@expect` is a single PASS/FAIL check; `@benchmark`
 # is a page (status=:benchmark) grouping checks into a verdict. One node set renders to a
 # machine-readable `benchmark` block (agent), a fixed test-report (gallery), and a tabular (latex).
@@ -91,7 +104,7 @@ end
         end
 
         # ----- agent backend (the machine-readable verdict contract) -----
-        Pinax.render(; out=joinpath(tmp, "a"), theme=:agent)
+        _render_failing(; out=joinpath(tmp, "a"), theme=:agent)
         aj = read(joinpath(tmp, "a", "agent.json"), String)
         @test occursin("\"kind\":\"benchmark\"", aj)
         @test occursin("\"id\":\"aa_tl\"", aj)
@@ -114,7 +127,7 @@ end
         @test occursin("[FAIL] G2", am)
 
         # ----- gallery backend (the fixed test-report UI) -----
-        g = read(Pinax.render(; out=joinpath(tmp, "g"), theme=:gallery), String)
+        g = read(_render_failing(; out=joinpath(tmp, "g"), theme=:gallery), String)
         @test occursin("pinax-benchmark", g)
         @test occursin("pinax-verdict-fail", g)
         @test occursin("AA TL test set   2/3 FAIL", g)   # verdict band text
@@ -166,7 +179,7 @@ end
             @expect "E1" "e" got = 1.0 want = 1.0 tol = 1e-3
             @expect "G2" "g" got = 0.5 want = 0.0 tol = 1e-3
         end
-        lx = read(Pinax.render(; out=joinpath(tmp, "l"), theme=:latex), String)
+        lx = read(_render_failing(; out=joinpath(tmp, "l"), theme=:latex), String)
         @test occursin("\\begin{tabular}", lx)
         @test occursin("Verdict: FAIL", lx)
         @test occursin("PASS", lx)
@@ -232,7 +245,7 @@ end
                 @expect "G" "g" got = 0.5 want = 0.0 tol = 1e-3   # abs FAIL
             end
         end
-        Pinax.render(; out=joinpath(tmp, "a"), theme=:agent)
+        _render_failing(; out=joinpath(tmp, "a"), theme=:agent)
         aj = read(joinpath(tmp, "a", "agent.json"), String)
         @test occursin("\"total\":1", aj)
         @test occursin("\"verdict\":\"FAIL\"", aj)

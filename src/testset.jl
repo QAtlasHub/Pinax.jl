@@ -1469,7 +1469,16 @@ function render_test_report(
         _exit_page!()
     end
     _emit_node!(root, counter, page_when, seen)
-    doc = current_document()
+    return _render_report_doc(current_document(), out)
+end
+
+# Render a test report's document to both faces. Every check in it came from a `@test` the test runner
+# already counted and reported, so `render` must not report it a second time (#173: a failing check
+# is reported exactly once).
+function _render_report_doc(doc, out)
+    for pg in doc.pages, c in _subtree_checks(pg)
+        c.reported = true
+    end
     gallery = render(doc; out="$(out)_html", theme=:gallery)
     agent = render(doc; out="$(out)_agent", theme=:agent)
     return (; gallery, agent)
@@ -1562,8 +1571,7 @@ function _render_matrix(
         end
     end
     doc = current_document()
-    gallery = render(doc; out="$(out)_html", theme=:gallery)
-    agent = render(doc; out="$(out)_agent", theme=:agent)
+    gallery, agent = _render_report_doc(doc, out)
     return (; gallery, agent)
 end
 

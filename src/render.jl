@@ -68,6 +68,13 @@ function render(
     )
     _finalize_cache!(cache)
     vault === nothing || _record_provenance(vault, study)
+    # Every output is on disk; now a failing check nobody has reported yet makes the call fail, the way
+    # the outermost testset throws at its end (#173). Checks a suite already counted are not repeated.
+    unreported = [
+        string(c.id) for pg in doc.pages for
+        c in _subtree_checks(pg) if !c.pass && !c.reported
+    ]
+    isempty(unreported) || throw(ChecksFailed(unreported, String(path)))
     return path
 end
 
