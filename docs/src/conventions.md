@@ -50,7 +50,17 @@ the gap.
   - A `@testset` is a section, and nested testsets are nested sections.
   - A `@test` is a check, recorded with what it compared and its margin (`delta / tol`), exactly as
     in a test report (`Pinax.test`, see "Test → Pinax").
-- Any section that contains checks shows its verdict, in every face.
+- While a `@page` / `@section` body runs, that container is the current testset. A `@test` anywhere
+  in it is a check of the innermost container, and a `@testset "x"` in it is a child section. The
+  body's variable scoping is exactly what it was. (#173)
+- A verdict is derived, never stored. It is `(passed, total)` over the container's subtree, and
+  there is none when the subtree holds no checks, so an empty container never reads as PASS. Every
+  face shows it on every container that has one.
+- A failing check is reported **exactly once**:
+  - When an ordinary testset encloses the document (a test suite), the result is handed to it, and
+    the suite counts it as if the `@test` were written there.
+  - Otherwise `render` writes every output with the failure shown as FAIL, then raises
+    `ChecksFailed`, naming the failing ids and the file written.
 - `@assert` is plain Julia: a precondition. When it fails, rendering stops with the error. It is
   not recorded as a check.
 - `@expect` is removed. During 0.2 it raises an error that points to `@test`.
@@ -81,14 +91,8 @@ the gap.
 
 These are not settled yet. Each will move into a section above once decided.
 
-- **A failing `@test` in a manuscript.** Either the failure is recorded and rendering continues, or
-  it stops as in a test suite.
-- **`@testset` capture outside `Pinax.test`.** Inside a document, `@testset` is not yet captured
-  into the open container. How the capture is installed there still needs a design.
-- **What replaces `@benchmark`.** Once every section shows its verdict, a separate page kind may not
-  be needed.
-- **A container with zero checks.** It must not report PASS (#114). It could be an error, or a
-  distinct "no checks" state.
+- **What replaces `@benchmark`.** Every container now shows its verdict, so the separate page kind
+  is expected to go (#173). The benchmark-specific report layout still needs a home.
 - **`@desc`.** What a second `@desc` in one container means, and whether `@desc` keeps its position
   in content order.
 - **`@raw`.** What form it takes in `agent.json`.
