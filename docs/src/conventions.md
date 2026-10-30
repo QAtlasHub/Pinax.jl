@@ -126,8 +126,11 @@ or pull request that tracks the gap.
 - The `agent.json` shape is a contract. The pinax-mcp fixture is generated from the emitter
   (`test/test_contract.jl`) and checked against the consumer schema, which must name every key the
   emitter writes. (#169)
-- In `agent.json`, a text field the author did not write is the empty string, and an object that
-  does not exist is `null`. (in progress, #172)
+- In `agent.json`, a text field the author did not write is the empty string, and an object or a
+  reference that does not exist is `null`. Pages and sections carry the same keys; a page adds only
+  `part` and `status`. A reference between nodes is an id (a check's `code_id`).
+- `agent.json` and `agent.md` end with the document's `diagnostics` — what the build and the render
+  recorded, such as a node a face left out — so an agent sees the gaps as data.
 
 ## Output
 

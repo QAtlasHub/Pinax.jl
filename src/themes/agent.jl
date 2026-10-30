@@ -193,8 +193,6 @@ function emit_code(::AgentBase, blk, ctx)
         io,
         "{\"id\":",
         _jsonstr(string(blk.id)),
-        ",\"anchor\":",          # what a check's `code_anchor` points at
-        _jsonstr(blk.anchor),
         ",\"caption\":",
         _jsonstr(blk.caption),
         ",\"lang\":",
@@ -242,9 +240,9 @@ function emit_check(::AgentBase, chk, ctx)
         _agent_jsonval(chk.pass),
         ",\"source\":",
         _jsonstr(chk.source),
-        # the code is ONE object in `codes` (kind "code"); a check REFERENCES it by anchor
-        ",\"code_anchor\":",
-        _jsonstr(chk.code_anchor),
+        # the code is ONE object in `codes` (kind "code"); a check REFERENCES it by id, or null
+        ",\"code_id\":",
+        isempty(chk.code_anchor) ? "null" : _jsonstr(chk.code_anchor),
         "}",
     )
     return nothing
@@ -270,7 +268,11 @@ function _agent_content!(c, ctx)
     print(io, "[")
     started = false
     for (kind, item) in _content_items(c)
-        kind === :panel && continue   # @raw HTML has no structured identity (an open question)
+        if kind === :panel   # @raw HTML has no agent form (an open question); say so, once
+            msg = "a @raw block is HTML; left out of agent.json and agent.md"
+            push!(ctx.rdiag, DiagEntry(WARNING, c.anchor, msg))
+            continue
+        end
         kind in (:text, :figure, :table, :check, :code, :section) ||
             _unhandled_node("agent.json", kind)
         started && print(io, ",")
@@ -349,39 +351,32 @@ function _agent_texts!(texts, ctx)
     return print(ctx.io, "]")
 end
 
-function emit_section(theme::AgentBase, sec, pg, ctx)
+# Pages and sections are one kind of container, so they share one body and one set of keys: a page
+# adds only `part` and `status` (Conventions › Faces). Text the author did not write is "".
+function _agent_container!(theme::AgentBase, c, pg, assetdir, ctx)
     io = ctx.io
     print(
         io,
-        "{\"id\":",
-        _jsonstr(string(sec.id)),
-        ",\"title\":",
-        _jsonstr(sec.title),
-        ",\"depth\":",
-        sec.depth,
+        ",\"summary\":",
+        _jsonstr(something(c.summary, "")),
         ",\"verdict\":",
-        _agent_verdict_json(verdict(sec)),
-        ",\"texts\":",
+        _agent_verdict_json(verdict(c)),
+        ",\"checks\":",
     )
-    _agent_texts!(sec.texts, ctx)
+    _agent_checks!(theme, c.checks, ctx)
+    print(io, ",\"texts\":")
+    _agent_texts!(c.texts, ctx)
     print(io, ",\"figures\":")
-    _agent_figs!(
-        theme,
-        sec.figures,
-        joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor),
-        ctx,
-    )
+    _agent_figs!(theme, c.figures, assetdir, ctx)
     print(io, ",\"tables\":")
-    _agent_tables!(theme, sec.tables, ctx)
+    _agent_tables!(theme, c.tables, ctx)
     print(io, ",\"codes\":")
-    _agent_codes!(theme, sec.codes, ctx)
-    print(io, ",\"checks\":")
-    _agent_checks!(theme, sec.checks, ctx)
+    _agent_codes!(theme, c.codes, ctx)
     print(io, ",\"content\":")
-    _agent_content!(sec, ctx)
+    _agent_content!(c, ctx)
     # the section tree: children nest inside their parent's object, in declaration order
     print(io, ",\"sections\":[")
-    for (j, child) in enumerate(sec.sections)
+    for (j, child) in enumerate(c.sections)
         j == 1 || print(io, ",")
         emit_section(theme, child, pg, ctx)
     end
@@ -389,42 +384,34 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
     return nothing
 end
 
-function emit_page(theme::AgentBase, pg, ctx)
-    io = ctx.io
+function emit_section(theme::AgentBase, sec, pg, ctx)
     print(
-        io,
+        ctx.io,
+        "{\"id\":",
+        _jsonstr(string(sec.id)),
+        ",\"title\":",
+        _jsonstr(sec.title),
+        ",\"depth\":",
+        sec.depth,
+    )
+    assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
+    return _agent_container!(theme, sec, pg, assetdir, ctx)
+end
+
+function emit_page(theme::AgentBase, pg, ctx)
+    print(
+        ctx.io,
         "{\"id\":",
         _jsonstr(string(pg.id)),
         ",\"title\":",
         _jsonstr(pg.title),
-        ",\"part\":",
+        ",\"depth\":1,\"part\":",
         pg.part === nothing ? "null" : _jsonstr(string(pg.part)),
         ",\"status\":",
         _jsonstr(string(pg.status)),
-        ",\"summary\":",
-        pg.summary === nothing ? "null" : _jsonstr(pg.summary),
-        ",\"texts\":",
     )
-    _agent_texts!(pg.texts, ctx)
-    print(io, ",\"figures\":")
-    _agent_figs!(
-        theme, pg.figures, joinpath(ctx.outdir, "assets", "figures", pg.anchor), ctx
-    )
-    print(io, ",\"tables\":")
-    _agent_tables!(theme, pg.tables, ctx)
-    print(io, ",\"codes\":")
-    _agent_codes!(theme, pg.codes, ctx)
-    print(io, ",\"verdict\":", _agent_verdict_json(verdict(pg)), ",\"checks\":")
-    _agent_checks!(theme, pg.checks, ctx)
-    print(io, ",\"content\":")
-    _agent_content!(pg, ctx)
-    print(io, ",\"sections\":[")
-    for (j, sec) in enumerate(pg.sections)
-        j == 1 || print(io, ",")
-        emit_section(theme, sec, pg, ctx)
-    end
-    print(io, "]}")
-    return nothing
+    assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor)
+    return _agent_container!(theme, pg, pg, assetdir, ctx)
 end
 
 # Build the whole agent.json (title + parts + pages, the latter via the per-node contract).
@@ -441,7 +428,9 @@ function _agent_json(theme::AgentBase, doc::Document, ctx)
             ",\"title\":",
             _jsonstr(ptitle),
             ",\"desc\":",
-            d === nothing ? "null" : _jsonstr(d.source),
+            _jsonstr(d === nothing ? "" : d.source),
+            ",\"status\":",
+            haskey(doc.part_status, pid) ? _jsonstr(string(doc.part_status[pid])) : "null",
             "}",
         )
     end
@@ -449,6 +438,22 @@ function _agent_json(theme::AgentBase, doc::Document, ctx)
     for (i, pg) in enumerate(doc.pages)
         i == 1 || print(io, ",")
         emit_page(theme, pg, ctx)
+    end
+    # what the build and this render recorded — a left-out node, a failed figure — as data, so an
+    # agent sees the gaps instead of inferring them (Conventions › Faces)
+    print(io, "],\"diagnostics\":[")
+    for (i, e) in enumerate(vcat(doc.diag.entries, ctx.rdiag))
+        i == 1 || print(io, ",")
+        print(
+            io,
+            "{\"severity\":",
+            _jsonstr(string(e.severity)),
+            ",\"item\":",
+            _jsonstr(e.item),
+            ",\"message\":",
+            _jsonstr(e.message),
+            "}",
+        )
     end
     print(io, "]}")
     return String(take!(io))
@@ -574,11 +579,8 @@ function _agent_md_content(io, c, outdir, comments, as_table, rdiag)
             _agent_md_code(io, item)
         elseif kind === :section   # a nested section, in declaration order
             _agent_md_section(io, item, outdir, comments, as_table, rdiag)
-        elseif kind === :panel   # @raw HTML: no form in agent.md (an open question); say so
-            push!(
-                rdiag,
-                DiagEntry(WARNING, c.anchor, "a @raw block is HTML; left out of agent.md"),
-            )
+        elseif kind === :panel
+            nothing   # @raw HTML: left out, and recorded once by the agent.json pass
         else
             _unhandled_node("agent.md", kind)
         end
@@ -624,6 +626,7 @@ function _agent_md_section(io, sec, outdir, comments, as_table, rdiag)
         "]",
     )
     _agent_md_verdict(io, sec)
+    sec.summary === nothing || println(io, "_", sec.summary, "_")
     _agent_md_content(io, sec, outdir, comments, as_table, rdiag)
     return nothing
 end
@@ -660,6 +663,14 @@ function _agent_markdown(doc::Document, outdir, comments, as_table, rdiag)
     return String(take!(io))
 end
 
+# The diagnostics as a closing agent.md section ("" when there are none).
+function _agent_md_diagnostics(doc, rdiag)
+    entries = vcat(doc.diag.entries, rdiag)
+    isempty(entries) && return ""
+    lines = ("- [$(e.severity)] $(e.item): $(e.message)" for e in entries)
+    return string("\n## Diagnostics\n", join(lines, "\n"), "\n")
+end
+
 # ---------- emit ----------
 
 function emit_document(
@@ -673,13 +684,11 @@ function emit_document(
     rdiag = DiagEntry[]
     mkpath(outdir)
     ctx = AgentCtx(IOBuffer(), String(outdir), comments, cache, rdiag)
+    # agent.json first: it materializes the figures agent.md then reads. agent.md ends with every
+    # diagnostic, its own (a fallback heading) included.
     write(joinpath(outdir, "agent.json"), _agent_json(theme, doc, ctx))
-    write(
-        joinpath(outdir, "agent.md"),
-        _agent_markdown(doc, outdir, comments, figure_as_table(theme), rdiag),
-    )
-    # materialize failures leave a figure's `assets` empty in the JSON (the agent sees the gap);
-    # no separate diagnostics file is emitted for the machine view.
+    md = _agent_markdown(doc, outdir, comments, figure_as_table(theme), rdiag)
+    write(joinpath(outdir, "agent.md"), string(md, _agent_md_diagnostics(doc, rdiag)))
     return joinpath(outdir, "agent.json")
 end
 

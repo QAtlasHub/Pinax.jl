@@ -171,7 +171,7 @@
        "kind": "rel",
        "pass": true,
        "source": "",
-       "code_anchor": ""
+       "code_id": null
       }
      ],
      "content": [
@@ -220,7 +220,7 @@
          "kind": "abs",
          "pass": false,
          "source": "test.jl:9",
-         "code_anchor": ""
+         "code_id": null
         }
        ],
        "content": [
@@ -286,5 +286,6 @@
    "verdict": null,
    "checks": []
   }
- ]
+ ],
+ "diagnostics": []
 }

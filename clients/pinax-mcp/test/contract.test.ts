@@ -53,3 +53,8 @@ test("every content ref in the emitted fixture resolves to a unit", () => {
   atlas.doc.pages.forEach(walk);
   assert.deepEqual(missing, []);
 });
+
+test("the outline ends with the document's diagnostics", () => {
+  const o = loadAtlas(emitted).outline();
+  assert.match(o, /## Diagnostics\n- \[WARNING\] p2: a @raw block is HTML/);
+});

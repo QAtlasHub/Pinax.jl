@@ -1101,8 +1101,8 @@ end
         @test occursin("class=\"pinax-codelink\" href=\"#code_f_jl_1_2\"", html)
         @test !occursin("pinax-code-row", html)               # no second code renderer
         agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
-        @test occursin("\"code_anchor\":\"code_f_jl_1_2\"", agent)
-        @test occursin("\"anchor\":\"code_f_jl_1_2\"", agent)  # resolvable against the code object
+        @test occursin("\"code_id\":\"code_f_jl_1_2\"", agent)
+        @test occursin("{\"id\":\"code_f_jl_1_2\",\"caption\"", agent)  # resolvable against the code object
     end
 
     @testset "one code artifact per region: a sweep's samples and N shards collapse onto it" begin
@@ -1122,6 +1122,6 @@ end
         html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
         @test count("@test n &gt; 0", html) == 1               # ONE block, not one per sample
         agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
-        @test count("\"anchor\":\"code_s_jl_2_3\"", agent) == 1   # one code object in `codes`
+        @test count("{\"id\":\"code_s_jl_2_3\",\"caption\"", agent) == 1   # one code object in `codes`
     end
 end

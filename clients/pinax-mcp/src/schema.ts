@@ -52,7 +52,6 @@ export const FigureZ = z
 export const CodeZ = z
   .object({
     id: z.string(),
-    anchor: z.string(), // what a check's `code_anchor` points at
     caption: z.string().optional(),
     lang: z.string(),
     source: z.string(),
@@ -78,7 +77,7 @@ export const CheckZ = z
     kind: z.string(),
     pass: z.boolean(),
     source: z.string().optional(),
-    code_anchor: z.string().optional(),
+    code_id: z.string().nullable().optional(), // the code block it was captured from, by id
   })
   .passthrough();
 
@@ -97,6 +96,7 @@ export interface SectionT {
   id: string;
   title: string;
   depth?: number;
+  summary?: string;
   verdict?: z.infer<typeof VerdictZ> | null;
   texts?: z.infer<typeof TextZ>[];
   figures: z.infer<typeof FigureZ>[];
@@ -113,6 +113,7 @@ export const SectionZ: z.ZodType<SectionT> = z.lazy(() =>
       id: z.string(),
       title: z.string(),
       depth: z.number().optional(),
+      summary: z.string().optional(),
       verdict: VerdictZ.nullable().optional(),
       texts: z.array(TextZ).optional(),
       figures: z.array(FigureZ),
@@ -129,6 +130,7 @@ export const PageZ = z
   .object({
     id: z.string(),
     title: z.string(),
+    depth: z.number().optional(),
     part: z.string().nullable(),
     status: z.string().optional(), // maturity: "draft" (a manuscript) or "final" (the published version)
     summary: z.string().nullable().optional(),
@@ -148,7 +150,13 @@ export const PartZ = z
     id: z.string(),
     title: z.string(),
     desc: z.string().nullable(),
+    status: z.string().nullable().optional(), // the default status of its pages, or null
   })
+  .passthrough();
+
+// What the build and the render recorded: a node a face left out, a figure that failed, …
+export const DiagnosticZ = z
+  .object({ severity: z.string(), item: z.string(), message: z.string() })
   .passthrough();
 
 export const AgentDocZ = z
@@ -156,6 +164,7 @@ export const AgentDocZ = z
     title: z.string(),
     parts: z.array(PartZ),
     pages: z.array(PageZ),
+    diagnostics: z.array(DiagnosticZ).optional(),
   })
   .passthrough();
 
@@ -169,4 +178,5 @@ export type ContentRef = z.infer<typeof ContentRefZ>;
 export type Section = SectionT;
 export type Page = z.infer<typeof PageZ>;
 export type Part = z.infer<typeof PartZ>;
+export type Diagnostic = z.infer<typeof DiagnosticZ>;
 export type AgentDoc = z.infer<typeof AgentDocZ>;

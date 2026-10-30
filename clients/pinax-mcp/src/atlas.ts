@@ -147,6 +147,13 @@ export class Atlas {
       };
       for (const sec of page.sections) emitSection(sec, 4);
     }
+    // what the build and the render recorded (a node a face left out, a failed figure), so a reader
+    // sees the gaps rather than inferring them
+    const diags = this.doc.diagnostics ?? [];
+    if (diags.length) {
+      out.push("\n## Diagnostics");
+      for (const d of diags) out.push(`- [${d.severity}] ${d.item}: ${d.message}`);
+    }
     return out.join("\n");
   }
 

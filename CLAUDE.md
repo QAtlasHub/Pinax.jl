@@ -56,6 +56,8 @@ when adding any node type: it needs a human render **and** an agent-data form.
 - **Every container with checks carries `verdict` + `checks` in `agent.json`** — `verdict` is
   `{verdict:"PASS|FAIL", passed, total, failed}` over the subtree (`null` with no checks, never a
   vacuous PASS) and `checks` holds the container's own `{id,label,got,want,delta,tol,kind,pass,…}`.
+  Pages and sections share one set of keys; nodes reference each other by id (a check's `code_id`),
+  and the document ends with its `diagnostics`.
   A failing check is reported once: to the enclosing testset, else `render` raises `ChecksFailed`
   after writing every output.
 - **Two-env reality:** Pinax needs a plotting backend (Plots/Makie, heavy); compute needs its own
