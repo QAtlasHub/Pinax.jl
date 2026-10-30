@@ -151,17 +151,31 @@ mutable struct Check
     # never a second copy of the source; "" when there is none.
     reported::Bool        # already handed to an enclosing ordinary testset (#173): a failing check is
     # reported exactly once, by that suite when there is one, else by `render`.
+    indicator::Bool       # a 1/0 pass indicator (a `@test` with no recoverable numbers), not a margin
 end
-# Keep the 8-/9-/10-arg positional forms working (source/code_anchor default to "", reported to
-# false) — every existing construction is unchanged.
+# Keep the shorter positional forms working (source/code_anchor default to "", reported and
+# indicator to false) — every existing construction is unchanged.
 function Check(id, label, got, want, delta, tol, kind, pass)
-    return Check(id, label, got, want, delta, tol, kind, pass, "", "", false)
+    return Check(id, label, got, want, delta, tol, kind, pass, "", "", false, false)
 end
 function Check(id, label, got, want, delta, tol, kind, pass, source)
-    return Check(id, label, got, want, delta, tol, kind, pass, source, "", false)
+    return Check(id, label, got, want, delta, tol, kind, pass, source, "", false, false)
 end
 function Check(id, label, got, want, delta, tol, kind, pass, source, code_anchor)
-    return Check(id, label, got, want, delta, tol, kind, pass, source, code_anchor, false)
+    return Check(
+        id, label, got, want, delta, tol, kind, pass, source, code_anchor, false, false
+    )
+end
+function Check(id, label, got, want, delta, tol, kind, pass, source, code_anchor, reported)
+    return Check(
+        id, label, got, want, delta, tol, kind, pass, source, code_anchor, reported, false
+    )
+end
+
+# A copy of `c` with some fields replaced — so a fold can renumber or tag a check it does not own
+# without mutating the caller's object (#130).
+function _copy_check(c::Check; kw...)
+    return Check((get(kw, f, getfield(c, f)) for f in fieldnames(Check))...)
 end
 
 """

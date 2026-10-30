@@ -504,7 +504,20 @@ function _check_from(expr, label::AbstractString, passed::Bool, i::Int)
     nums = _approx_numbers(expr)
     if nums === nothing
         got = passed ? 1.0 : 0.0
-        return Check(id, String(label), got, 1.0, abs(got - 1.0), 0.5, :abs, passed)
+        return Check(
+            id,
+            String(label),
+            got,
+            1.0,
+            abs(got - 1.0),
+            0.5,
+            :abs,
+            passed,
+            "",
+            "",
+            false,
+            true,
+        )
     end
     got, want, tol, kind = nums
     delta = kind === :rel ? abs(got - want) / abs(want) : abs(got - want)
@@ -599,7 +612,7 @@ end
 function _worst_margin(n)
     worst = nothing
     for c in n.checks
-        c.kind === :abs && c.tol == 0.5 && c.want == 1.0 && continue   # the 1/0 indicator, not a margin
+        c.indicator && continue   # a 1/0 pass indicator carries no margin
         m = _margin(c)
         worst = worst === nothing ? m : max(worst, m)
     end
@@ -888,18 +901,7 @@ function _emit_sweep!(n, counter::Ref{Int}, page_when::Function, acc::Vector{Che
         _push_sweep_figures!(c.id, qi, label, pts)
     end
     for (bind, chk) in samples
-        tagged = Check(
-            chk.id,
-            string(chk.label, "  [", _binding_str(bind), "]"),
-            chk.got,
-            chk.want,
-            chk.delta,
-            chk.tol,
-            chk.kind,
-            chk.pass,
-            chk.source,
-            chk.code_anchor,
-        )
+        tagged = _copy_check(chk; label=string(chk.label, "  [", _binding_str(bind), "]"))
         _place_check!(c, tagged, counter, acc)
     end
     return acc
@@ -918,31 +920,40 @@ function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, 
     K = length(ticks)
     legkey(p) = _binding_str(p[1][1:(end - 1)])
     legs = unique(legkey.(pts))
-    wantv = fill(NaN, K)
-    bandlo = fill(NaN, K)
-    bandhi = fill(NaN, K)
+    # Each series keeps its own reference and tolerance band (#130): two series with different `want`
+    # at one tick must not share whichever band was folded last.
     conv_series = NamedTuple[]
     marg_series = NamedTuple[]
     for lg in legs
         xs, gy, my, ok = Int[], Float64[], Float64[], Bool[]
+        want, lo, hi = Float64[], Float64[], Float64[]
         for p in pts
             legkey(p) == lg || continue
-            i = tickindex[xval(p)]
             c = p[2]
-            push!(xs, i)
+            push!(xs, tickindex[xval(p)])
             push!(gy, c.got)
             push!(my, _margin(c))
             push!(ok, c.pass)
-            wantv[i] = c.want
             tolabs = c.kind === :rel ? c.tol * abs(c.want) : c.tol
-            bandlo[i] = c.want - tolabs
-            bandhi[i] = c.want + tolabs
+            push!(want, c.want)
+            push!(lo, c.want - tolabs)
+            push!(hi, c.want + tolabs)
         end
         perm = sortperm(xs)
-        push!(conv_series, (; label=lg, xs=xs[perm], ys=gy[perm], ok=ok[perm]))
+        push!(
+            conv_series,
+            (;
+                label=lg,
+                xs=xs[perm],
+                ys=gy[perm],
+                ok=ok[perm],
+                want=want[perm],
+                lo=lo[perm],
+                hi=hi[perm],
+            ),
+        )
         push!(marg_series, (; label=lg, xs=xs[perm], ys=my[perm], ok=ok[perm]))
     end
-    band = [(bandlo[i], bandhi[i]) for i in 1:K]
     qi[] += 1
     q = _trunc(label, 44)
     # both SVGs derive from `pts` (+ the axis) — one data fingerprint keys their cache (issue #69 L).
@@ -964,8 +975,6 @@ function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, 
             ylabel="got",
             xticklabels=xticklabels,
             series=conv_series,
-            band=band,
-            refline=wantv,
         ),
         code=fp,
         caption="Convergence of `$(q)` over the swept axis `$(xvar)`. Dashed line = `want`; the shaded " *
@@ -974,9 +983,16 @@ function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, 
         data=(;
             xlabel=string(xvar),
             ylabel="got",
+            # the reference and band ride along per series, so the LLM face has what the plot draws
             series=[
-                (; label=isempty(s.label) ? "got" : s.label, x=s.xs, y=s.ys) for
-                s in conv_series
+                (;
+                    label=isempty(s.label) ? "got" : s.label,
+                    x=s.xs,
+                    y=s.ys,
+                    want=s.want,
+                    lo=s.lo,
+                    hi=s.hi,
+                ) for s in conv_series
             ],
         ),
     )
@@ -1015,18 +1031,10 @@ end
 # A small multi-series line plot as hand-written SVG (same reason as `_margin_svg`: `@figure`'s gen may
 # return a file path, so a test report draws itself without dragging a plotting backend into every test
 # env). `series` is `[(; label, xs::Vector{Int}, ys::Vector{Float64}, ok::Vector{Bool}), …]` where `xs`
-# index into `xticklabels`; `band` shades a per-tick `(lo, hi)`, `refline` dashes a per-tick reference,
-# `hline` draws one horizontal boundary. y is auto-scaled over everything drawn.
+# index into `xticklabels`; a series carrying `want`/`lo`/`hi` also gets its own shaded tolerance band
+# and dashed reference; `hline` draws one horizontal boundary. y is auto-scaled over everything drawn.
 function _sweep_plot_svg(
-    path;
-    title,
-    xlabel,
-    ylabel,
-    xticklabels::Vector{String},
-    series,
-    band=nothing,
-    refline=nothing,
-    hline=nothing,
+    path; title, xlabel, ylabel, xticklabels::Vector{String}, series, hline=nothing
 )
     K = length(xticklabels)
     W, H, L, R, T, Bm = 640, 300, 66, 150, 30, 46
@@ -1036,11 +1044,12 @@ function _sweep_plot_svg(
     for s in series, y in s.ys
         isfinite(y) && push!(ys, y)
     end
-    band === nothing || for (lo, hi) in band
-        isfinite(lo) && push!(ys, lo)
-        isfinite(hi) && push!(ys, hi)
+    for s in series
+        hasproperty(s, :want) || continue
+        append!(
+            ys, filter(isfinite, s.lo), filter(isfinite, s.hi), filter(isfinite, s.want)
+        )
     end
-    refline === nothing || append!(ys, filter(isfinite, refline))
     hline === nothing || push!(ys, hline)
     isempty(ys) && (ys = [0.0, 1.0])
     ylo, yhi = extrema(ys)
@@ -1074,24 +1083,32 @@ function _sweep_plot_svg(
             """<line x1="$(x)" y1="$(T + ploth)" x2="$(x)" y2="$(T + ploth + 4)" stroke="#bbb"/><text x="$(x)" y="$(T + ploth + 16)" text-anchor="middle" fill="#888">$(_xml(xticklabels[i]))</text>\n""",
         )
     end
-    if band !== nothing
+    # Each series' own tolerance band and dashed reference, in its colour (#130); a band identical to
+    # one already drawn (series sharing a reference) is drawn once.
+    drawn = Set{Any}()
+    for (si, s) in enumerate(series)
+        hasproperty(s, :want) || continue
+        key = (s.xs, s.lo, s.hi, s.want)
+        key in drawn && continue
+        push!(drawn, key)
+        col = _SERIES_COLORS[(si - 1) % length(_SERIES_COLORS) + 1]
         hi_pts, lo_pts = String[], String[]
-        for i in 1:K
-            lo, hi = band[i]
-            (isfinite(lo) && isfinite(hi)) || continue
-            push!(hi_pts, "$(xat(i)),$(yat(hi))")
-            pushfirst!(lo_pts, "$(xat(i)),$(yat(lo))")
+        for j in eachindex(s.xs)
+            (isfinite(s.lo[j]) && isfinite(s.hi[j])) || continue
+            push!(hi_pts, "$(xat(s.xs[j])),$(yat(s.hi[j]))")
+            pushfirst!(lo_pts, "$(xat(s.xs[j])),$(yat(s.lo[j]))")
         end
         isempty(hi_pts) || print(
             io,
-            """<polygon points="$(join(vcat(hi_pts, lo_pts), " "))" fill="#4c9f70" fill-opacity="0.12"/>\n""",
+            """<polygon points="$(join(vcat(hi_pts, lo_pts), " "))" fill="$(col)" fill-opacity="0.12"/>\n""",
         )
-    end
-    if refline !== nothing
-        d = ["$(xat(i)),$(yat(refline[i]))" for i in 1:K if isfinite(refline[i])]
+        d = [
+            "$(xat(s.xs[j])),$(yat(s.want[j]))" for
+            j in eachindex(s.xs) if isfinite(s.want[j])
+        ]
         length(d) >= 2 && print(
             io,
-            """<polyline points="$(join(d, " "))" fill="none" stroke="#4c9f70" stroke-width="1.3" stroke-dasharray="4,3"/>\n""",
+            """<polyline points="$(join(d, " "))" fill="none" stroke="$(col)" stroke-width="1.3" stroke-dasharray="4,3"/>\n""",
         )
     end
     if hline !== nothing
@@ -1278,7 +1295,8 @@ end
 # t1) and place the check into the current container + content order + margin accumulator.
 function _place_check!(c, chk::Check, counter::Ref{Int}, acc::Vector{Check})
     counter[] += 1
-    chk.id = Symbol("t", counter[])
+    # a copy: the fold must not renumber (or later tag) the tree's own Check (#130)
+    chk = _copy_check(chk; id=Symbol("t", counter[]))
     push!(c.checks, chk)
     push!(c.content, :check => length(c.checks))
     push!(acc, chk)
@@ -1708,6 +1726,7 @@ function _check_to_dict(c::Check)
     isempty(c.source) || (d["source"] = c.source)   # carry WHERE it failed across a shard dump
     # …and the REFERENCE to the code block that produced it (the block itself rides `n.codes`).
     isempty(c.code_anchor) || (d["code_anchor"] = c.code_anchor)
+    c.indicator && (d["indicator"] = true)
     return d
 end
 
@@ -1746,6 +1765,8 @@ function _dict_to_check(d::AbstractDict)
         d["pass"],
         get(d, "source", ""),
         get(d, "code_anchor", ""),
+        false,
+        get(d, "indicator", false),
     )
 end
 
