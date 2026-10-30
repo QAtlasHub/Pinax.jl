@@ -4,7 +4,7 @@ A **general-purpose** library + [MCP](https://modelcontextprotocol.io) server ov
 `agent.json`. It consumes the `render(theme=:agent)` artifact of *any* Pinax document — there is no
 per-project knowledge in here; the `agent.json` schema is the only contract.
 
-Pinax's agent backend emits every unit (part / page / section / figure) as an id-addressable JSON
+Pinax's agent backend emits every unit (part / page / section / figure / table / check) as an id-addressable JSON
 node, each figure carrying its **verification substrate** — the caption (the claim), the generating
 code, the params binding, the rendered asset, and the comment thread. `pinax-mcp` serves that to an
 LLM so it can reconcile a claim against its evidence.
@@ -50,9 +50,9 @@ Register it with an MCP client (Claude Desktop, etc.):
 | | |
 | --- | --- |
 | resource `pinax://document` | the outline (markdown) |
-| resource `pinax://{kind}/{id}` | any part/page/section/figure/**table** node (JSON) |
+| resource `pinax://{kind}/{id}` | any part/page/section/figure/**table**/**check** node (JSON) |
 | resource `pinax://asset/{figureId}/{index}` | a figure's rendered asset (image/PDF bytes, for vision models) |
-| tool `outline()` | the document tree, token-lean — figures and tables in declaration order |
+| tool `outline()` | the document tree, token-lean — figures, tables and checks in declaration order, nested sections one level deeper, and each container's `[PASS/FAIL passed/total]` verdict |
 | tool `get_unit(id)` | one unit; a figure → its substrate (incl. an inline data-table preview when the theme presents figures as tables); a `@table` → its header + rows |
 | tool `search(query)` | substring search over captions/code/comments/**table cells** → unit ids + snippet |
 | tool `get_figure_data(id)` | a figure's **full** plotted-data CSV (its `table` field is only a preview) |

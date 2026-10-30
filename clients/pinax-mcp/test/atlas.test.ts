@@ -71,3 +71,31 @@ test("figure assets + full-data csv resolve to absolute paths", () => {
   assert.ok(data && data.abs.startsWith(atlas.baseDir) && data.abs.endsWith("p1_fig1.csv"));
   assert.equal(atlas.figureData("p1_tbl1"), null); // not a figure
 });
+
+test("nested sections are indexed to any depth, under their parent section", () => {
+  const atlas = loadAtlas(fixture);
+  assert.equal(atlas.unit("s2")?.kind, "section");
+  assert.equal(atlas.unit("s2")?.parent, "s1");
+  assert.equal(atlas.unit("s2")!.node.depth, 3);
+});
+
+test("checks are units, so a content reference to a check resolves", () => {
+  const atlas = loadAtlas(fixture);
+  const c = atlas.unit("s2_t1")!;
+  assert.equal(c.kind, "check");
+  assert.equal(c.parent, "s2");
+  assert.equal(c.node.pass, false);
+  assert.equal(atlas.all("check").length, 2);
+});
+
+test("outline shows each container's verdict, nested sections deeper, and checks", () => {
+  const o = loadAtlas(fixture).outline();
+  assert.match(o, /### \[page p1\] Page One — overview page {2}\[FAIL 1\/2\]/);
+  assert.match(o, /#### \[section s1\] Section One {2}\[FAIL 1\/2\]/);
+  assert.match(o, /##### \[section s2\] Section Two {2}\[FAIL 0\/1\]/);
+  assert.match(o, /- \[check s1_t1\] PASS isapprox\(1\.0001, 1\.0; rtol = 0\.001\)/);
+  assert.match(o, /- \[check s2_t1\] FAIL /);
+  assert.doesNotMatch(o, /\(missing\)/);
+  assert.doesNotMatch(o, /\[page p2\][^\n]*\[(PASS|FAIL)/); // no checks, no verdict
+});
+

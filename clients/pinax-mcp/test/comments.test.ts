@@ -22,8 +22,9 @@ test("addComment appends id-keyed array-of-tables (the shape read_comments expec
 
   const data = parse(readFileSync(path, "utf8")) as any;
   assert.equal(data.comment.eq_energy.length, 2);
-  assert.deepEqual(data.comment.eq_energy[0], { author: "llm", text: "first note" });
-  assert.deepEqual(data.comment.eq_energy[1], { author: "sensei", text: "second note" });
+  // smol-toml >= 1.9 parses tables as null-prototype objects; compare the fields, not the prototype
+  assert.deepEqual({ ...data.comment.eq_energy[0] }, { author: "llm", text: "first note" });
+  assert.deepEqual({ ...data.comment.eq_energy[1] }, { author: "sensei", text: "second note" });
   assert.equal(data.comment.p1_fig1.length, 1);
 });
 
@@ -95,7 +96,7 @@ test("add_comment is exposed only with --comments and persists over MCP", { time
 
   // the file is now a Pinax-compatible comments.toml
   const data = parse(readFileSync(cf, "utf8")) as any;
-  assert.deepEqual(data.comment.p1_fig1[0], { author: "llm", text: "verified" });
+  assert.deepEqual({ ...data.comment.p1_fig1[0] }, { author: "llm", text: "verified" }); // null-prototype table
 });
 
 test("without --comments the write tools are absent (read-only by default)", { timeout: 20000 }, async () => {

@@ -48,27 +48,78 @@ export const FigureZ = z
   })
   .passthrough();
 
-export const SectionZ = z
+// A number, or the string a non-finite value is written as ("NaN", "Inf").
+const NumZ = z.union([z.number(), z.string()]);
+
+// One check — a `Test` `@test` recorded into a container, with what it compared and its margin.
+export const CheckZ = z
   .object({
     id: z.string(),
-    title: z.string(),
-    desc: z.string().nullable(),
-    figures: z.array(FigureZ),
-    tables: z.array(TableNodeZ).optional(),
-    content: z.array(ContentRefZ).optional(),
+    label: z.string(),
+    got: NumZ,
+    want: NumZ,
+    delta: NumZ,
+    tol: NumZ,
+    kind: z.string(),
+    pass: z.boolean(),
+    source: z.string().optional(),
+    code_anchor: z.string().optional(),
   })
   .passthrough();
+
+// A container's verdict over its whole subtree; `null` when the subtree holds no checks.
+export const VerdictZ = z
+  .object({
+    verdict: z.enum(["PASS", "FAIL"]),
+    passed: z.number(),
+    total: z.number(),
+    failed: z.array(z.string()),
+  })
+  .passthrough();
+
+// Sections nest to any depth: `depth` counts from the part (a page is 1, a top-level section 2).
+export interface SectionT {
+  id: string;
+  title: string;
+  depth?: number;
+  verdict?: z.infer<typeof VerdictZ> | null;
+  desc: string | null;
+  figures: z.infer<typeof FigureZ>[];
+  tables?: z.infer<typeof TableNodeZ>[];
+  checks?: z.infer<typeof CheckZ>[];
+  content?: z.infer<typeof ContentRefZ>[];
+  sections?: SectionT[];
+  [k: string]: unknown;
+}
+export const SectionZ: z.ZodType<SectionT> = z.lazy(() =>
+  z
+    .object({
+      id: z.string(),
+      title: z.string(),
+      depth: z.number().optional(),
+      verdict: VerdictZ.nullable().optional(),
+      desc: z.string().nullable(),
+      figures: z.array(FigureZ),
+      tables: z.array(TableNodeZ).optional(),
+      checks: z.array(CheckZ).optional(),
+      content: z.array(ContentRefZ).optional(),
+      sections: z.array(SectionZ).optional(),
+    })
+    .passthrough(),
+);
 
 export const PageZ = z
   .object({
     id: z.string(),
     title: z.string(),
     part: z.string().nullable(),
-    status: z.string().optional(), // maturity tag: "final" (shaped/curated) vs "trial" (experiment attempt)
+    status: z.string().optional(), // maturity: "draft" (a manuscript) or "final" (the published version)
     summary: z.string().nullable().optional(),
     desc: z.string().nullable(),
     figures: z.array(FigureZ),
     tables: z.array(TableNodeZ).optional(),
+    verdict: VerdictZ.nullable().optional(),
+    checks: z.array(CheckZ).optional(),
     content: z.array(ContentRefZ).optional(),
     sections: z.array(SectionZ),
   })
@@ -91,9 +142,11 @@ export const AgentDocZ = z
   .passthrough();
 
 export type Figure = z.infer<typeof FigureZ>;
+export type Check = z.infer<typeof CheckZ>;
+export type Verdict = z.infer<typeof VerdictZ>;
 export type TableNode = z.infer<typeof TableNodeZ>;
 export type ContentRef = z.infer<typeof ContentRefZ>;
-export type Section = z.infer<typeof SectionZ>;
+export type Section = SectionT;
 export type Page = z.infer<typeof PageZ>;
 export type Part = z.infer<typeof PartZ>;
 export type AgentDoc = z.infer<typeof AgentDocZ>;
