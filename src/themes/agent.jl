@@ -280,13 +280,13 @@ function _agent_content!(c, ctx)
     print(io, "[")
     started = false
     for (kind, item) in _content_items(c)
-        if kind === :panel   # @raw HTML has no agent form (an open question); say so, once
+        if item isa RawBlock   # @raw HTML has no agent form (an open question); say so, once
             msg = "a @raw block is HTML; left out of agent.json and agent.md"
-            push!(ctx.rdiag, DiagEntry(WARNING, c.anchor, msg))
+            push!(ctx.rdiag, DiagEntry(WARNING, item.container, msg))
             continue
         end
-        kind in (:text, :figure, :table, :check, :code, :section) ||
-            _unhandled_node("agent.json", kind)
+        item isa Union{Prose,Figure,Table,Check,CodeBlock,Section} ||
+            _unhandled_node("agent.json", item)
         started && print(io, ",")
         started = true
         print(
@@ -578,30 +578,28 @@ function _agent_md_code(io, blk)
     return nothing
 end
 
-# A container's figures + tables + checks + codes in declaration order (@raw panels are HTML, skipped in md view).
+# A container's content in agent.md, in declaration order: one method per node type, so a type
+# agent.md has no form for is an error naming it. `env` is (outdir, comments, as_table, rdiag).
 function _agent_md_content(io, c, outdir, comments, as_table, rdiag)
-    for (kind, item) in _content_items(c)
-        if kind === :text
-            println(io, item.source)
-        elseif kind === :figure
-            _agent_md_fig(io, item, outdir, comments, as_table)
-        elseif kind === :table
-            _agent_md_table(io, item)
-            _agent_md_notes(io, item.anchor, comments)
-        elseif kind === :check
-            nothing   # listed under the container's verdict band, ahead of the content
-        elseif kind === :code
-            _agent_md_code(io, item)
-        elseif kind === :section   # a nested section, in declaration order
-            _agent_md_section(io, item, outdir, comments, as_table, rdiag)
-        elseif kind === :panel
-            nothing   # @raw HTML: left out, and recorded once by the agent.json pass
-        else
-            _unhandled_node("agent.md", kind)
-        end
-    end
+    env = (; outdir, comments, as_table, rdiag)
+    foreach(((_, node),) -> _agent_md_node(io, node, env), _content_items(c))
     return nothing
 end
+_agent_md_node(io, node, env) = _unhandled_node("agent.md", node)
+_agent_md_node(io, p::Prose, env) = println(io, p.source)
+function _agent_md_node(io, f::Figure, env)
+    return _agent_md_fig(io, f, env.outdir, env.comments, env.as_table)
+end
+function _agent_md_node(io, t::Table, env)
+    _agent_md_table(io, t)
+    return _agent_md_notes(io, t.anchor, env.comments)
+end
+_agent_md_node(io, ::Check, env) = nothing   # listed under the container's verdict band, ahead
+_agent_md_node(io, b::CodeBlock, env) = _agent_md_code(io, b)
+function _agent_md_node(io, s::Section, env)   # a nested section, in declaration order
+    return _agent_md_section(io, s, env.outdir, env.comments, env.as_table, env.rdiag)
+end
+_agent_md_node(io, ::RawBlock, env) = nothing   # @raw HTML: left out, recorded by the agent.json pass
 
 # The one place agent.md turns depth into a heading, for parts (0, `##`), pages (1, `###`) and
 # sections (2, `####` …). Past `######` the level is kept as a bold line (Markdown has no deeper

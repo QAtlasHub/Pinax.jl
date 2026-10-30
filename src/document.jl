@@ -230,6 +230,15 @@ mutable struct Prose
     source::String
 end
 
+"""
+A `@raw` block as a content-walk node: author-written HTML, kept verbatim. `container` is the anchor
+of the page or section it was written in (a face that cannot show it names that container).
+"""
+struct RawBlock
+    html::String
+    container::String
+end
+
 "A section: a container of prose, figures, tables, code, checks and child sections, in order."
 mutable struct Section
     id::Symbol
@@ -1195,7 +1204,7 @@ function _content_items(c)
             elseif k === :section
                 c.sections[i]
             elseif k === :panel
-                c.panels[i]
+                RawBlock(c.panels[i], c.anchor)
             else
                 error("Pinax: unknown content kind :$(k) in \"$(c.anchor)\"")
             end,
@@ -1203,12 +1212,14 @@ function _content_items(c)
     ]
 end
 
-# Every backend's content walk ends in this, so a node kind added to `_content_items` fails loudly in
-# each face until that face handles it — never printed verbatim or silently dropped (#168).
-function _unhandled_node(face, kind)
+# A node (or content kind) a face has no form for: every content walk ends in this, so a node type
+# added to `_content_items` fails loudly in each face until that face handles it — never printed
+# verbatim or silently dropped (#168).
+function _unhandled_node(face, node)
     name = face isa AbstractString ? face : string(nameof(typeof(face)), " theme")
+    what = node isa Symbol ? ":$(node) node" : string(nameof(typeof(node)))
     return error(
-        "Pinax: the $(name) has no form for a :$(kind) node — every node kind needs one in every face",
+        "Pinax: the $(name) has no form for a $(what) — every node kind needs one in every face",
     )
 end
 

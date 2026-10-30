@@ -174,26 +174,30 @@ end
 # Emit a container's figures + tables in declaration order (@raw panels are HTML, skipped in LaTeX;
 # checks are rendered by the container's check table, not inline).
 function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx; page=nothing)
-    for (kind, item) in _content_items(c)
-        if kind === :text
-            println(ctx.io, emit_text(theme, item.source, item.anchor, ctx))
-        elseif kind === :figure
-            _latex_emit_fig!(theme, item, assetdir, ctx)
-        elseif kind === :table
-            emit_table(theme, item, ctx)
-        elseif kind === :code
-            emit_code(theme, item, ctx)
-        elseif kind === :section   # a nested section, in declaration order
-            emit_section(theme, item, page, ctx)
-        elseif kind === :check
+    for (_, node) in _content_items(c)
+        if node isa Figure
+            _latex_emit_fig!(theme, node, assetdir, ctx)
+        elseif node isa Section   # a nested section, in declaration order
+            emit_section(theme, node, page, ctx)
+        elseif node isa Check
             nothing   # in the container's check table, under its verdict band
-        elseif kind === :panel
-            _latex_left_out!(ctx, c.anchor, "a @raw block is HTML, which has no LaTeX form")
         else
-            _unhandled_node(theme, kind)
+            emit_node(theme, node, ctx)
         end
     end
     return nothing
+end
+
+# The leaves of a LaTeX content walk.
+function emit_node(theme::LaTeXBase, p::Prose, ctx)
+    return println(ctx.io, emit_text(theme, p.source, p.anchor, ctx))
+end
+emit_node(theme::LaTeXBase, t::Table, ctx) = emit_table(theme, t, ctx)
+emit_node(theme::LaTeXBase, b::CodeBlock, ctx) = emit_code(theme, b, ctx)
+function emit_node(::LaTeXBase, r::RawBlock, ctx)
+    return _latex_left_out!(
+        ctx, r.container, "a @raw block is HTML, which has no LaTeX form"
+    )
 end
 
 # A `@code` block → a verbatim listing of the source, then its captured output.

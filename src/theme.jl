@@ -25,8 +25,8 @@ Then `render(; out, theme=MyTheme())`, `theme=:mine`, or `theme="path/to/mytheme
 
 The shipped bases — `GalleryBase` (HTML), `LaTeXBase`, `AgentBase` — instead implement
 `emit_document` as a walk that dispatches to one generic per node (`emit_page`, `emit_section`,
-`emit_figure`, `emit_table`, `emit_check`, `emit_code`, `emit_text`, `emit_view`, `emit_comments`,
-`emit_index`). Subtype one of those to change some nodes and inherit the rest; those generics have
+`emit_figure`, `emit_node`, `emit_table`, `emit_check`, `emit_code`, `emit_text`, `emit_view`,
+`emit_comments`, `emit_index`). Subtype one of those to change some nodes and inherit the rest; those generics have
 no fallback of their own, so they are only relevant once something calls them.
 
 Traits, which do have defaults: `output_format` (`:html` | `:latex` | `:agent`), `figure_formats`
@@ -77,6 +77,18 @@ function emit_check end
 
 "Render one `@code` block (source + captured output). `emit_code(theme, codeblock, ctx)`."
 function emit_code end
+
+"""
+    emit_node(theme, node, ctx)
+
+Render one leaf of a container's content walk — a `Prose` block, a `Table`, a `CodeBlock` or a
+`RawBlock` — where it was written. The walk itself places figures (a face may group them),
+sections (it recurses) and checks (they sit in the container's check table). A theme overrides one
+node type and inherits the rest; a node type it has no method for is an error naming the theme and
+the type (#168).
+"""
+function emit_node end
+emit_node(theme::Theme, node, ctx) = _unhandled_node(theme, node)
 
 "Render a markdown+math source (a `@desc`/`@caption`). `emit_text(theme, source, item, ctx; block)`."
 function emit_text end

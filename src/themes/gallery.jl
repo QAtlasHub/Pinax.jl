@@ -1556,40 +1556,38 @@ function _emit_content(
             emit_view(theme, Val(:grid), copy(figbuf), assetdir, layout, ctx)
             empty!(figbuf)
         end
-    for (kind, item) in _content_items(c)
-        if kind === :text
-            flush_figs()
-            println(
-                ctx.io,
-                "<div class=\"desc\" id=\"",
-                item.anchor,
-                "\">",
-                emit_text(theme, item.source, item.anchor, ctx),
-                "</div>",
-            )
-        elseif kind === :figure
-            figures && push!(figbuf, item)
-        elseif kind === :table
-            flush_figs()
-            emit_table(theme, item, ctx)
-        elseif kind === :check
+    for (_, node) in _content_items(c)
+        if node isa Figure
+            figures && push!(figbuf, node)
+        elseif node isa Check
             continue   # checks are rendered by the container's check table (verdict band + rows)
-        elseif kind === :code
-            flush_figs()
-            emit_code(theme, item, ctx)
-        elseif kind === :section   # a nested section, in declaration order
-            flush_figs()
-            emit_section(theme, item, page, ctx)
-        elseif kind === :panel     # @raw HTML, verbatim
-            flush_figs()
-            println(ctx.io, item)
         else
-            _unhandled_node(theme, kind)
+            flush_figs()
+            if node isa Section
+                emit_section(theme, node, page, ctx)
+            else
+                emit_node(theme, node, ctx)
+            end
         end
     end
     flush_figs()
     return nothing
 end
+
+# The leaves of a gallery content walk.
+function emit_node(theme::GalleryBase, p::Prose, ctx)
+    return println(
+        ctx.io,
+        "<div class=\"desc\" id=\"",
+        p.anchor,
+        "\">",
+        emit_text(theme, p.source, p.anchor, ctx),
+        "</div>",
+    )
+end
+emit_node(theme::GalleryBase, t::Table, ctx) = emit_table(theme, t, ctx)
+emit_node(theme::GalleryBase, b::CodeBlock, ctx) = emit_code(theme, b, ctx)
+emit_node(::GalleryBase, r::RawBlock, ctx) = println(ctx.io, r.html)   # @raw HTML, verbatim
 
 # A `@code` block: the source in a highlighted `<pre>`, then its captured output (if any).
 function emit_code(::GalleryBase, blk, ctx)

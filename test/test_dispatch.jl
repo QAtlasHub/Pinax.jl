@@ -136,3 +136,40 @@ end
         @test_throws "hologram" Pinax.render(; out=mktempdir(), theme=theme)
     end
 end
+
+# Leaf content — prose, tables, code blocks, @raw — is emitted through one generic, `emit_node`, so a
+# theme overrides one node type and inherits the rest (#168). A node type a theme has no method for
+# is an error naming the theme and the type, in every face.
+struct TableTagGallery <: Pinax.GalleryBase end
+function Pinax.emit_node(::TableTagGallery, t::Pinax.Table, ctx)
+    return println(ctx.io, "<p>TBL:", t.id, "</p>")
+end
+struct TableTagTeX <: Pinax.LaTeXBase end
+Pinax.emit_node(::TableTagTeX, t::Pinax.Table, ctx) = println(ctx.io, "%% TBL:", t.id)
+struct Hologram end
+
+@testset "emit_node: one node type overridden, the rest inherited" begin
+    tmp = mktempdir()
+    Pinax.reset!(; title="nodes")
+    @page :p "P" begin
+        @desc "PROSE"
+        @table (a=[1],) id = :t caption = "TBLCAP"
+        @code id = :c X_VAL = 1
+        @raw "<b>RAWBLOCK</b>"
+    end
+    g = read(Pinax.render(; out=joinpath(tmp, "g"), theme=TableTagGallery()), String)
+    @test occursin("<p>TBL:t</p>", g) && !occursin("TBLCAP", g)
+    @test occursin("PROSE", g) && occursin("X_VAL", g) && occursin("RAWBLOCK", g)
+    lx = read(Pinax.render(; out=joinpath(tmp, "l"), theme=TableTagTeX()), String)
+    @test occursin("%% TBL:t", lx) && !occursin("TBLCAP", lx)
+    @test occursin("PROSE", lx) && occursin("X_VAL", lx)
+
+    for theme in (Pinax.GalleryTheme(), Pinax.LaTeXTheme(), Pinax.AgentTheme())
+        @test_throws r"has no form for a Hologram" Pinax.emit_node(
+            theme, Hologram(), nothing
+        )
+    end
+    @test_throws r"agent.md has no form for a Hologram" Pinax._agent_md_node(
+        IOBuffer(), Hologram(), nothing
+    )
+end
