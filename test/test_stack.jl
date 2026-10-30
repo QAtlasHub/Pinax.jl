@@ -20,8 +20,8 @@ using ParamIO
             end
         end
         figs = Pinax.current_document().pages[1].sections[1].figures
-        @test figs[1].id !== :s_fig1                 # param-derived, not positional
-        @test occursin("N_8", String(figs[1].id))    # carries the param identity
+        # generated: the container id plus a hash of the code and the key's canonical form
+        @test startswith(String(figs[1].id), "s_fig_")
         @test figs[1].id !== figs[2].id              # different params -> different id
 
         # same params in a different insertion order -> same canonical -> same id
@@ -55,7 +55,7 @@ using ParamIO
         @test ab[1] === ba[2]                        # kA's id is identical in both layouts
     end
 
-    @testset "explicit id and non-DataKey params keep positional/explicit behaviour" begin
+    @testset "explicit id wins; non-DataKey params hash their repr" begin
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" begin
@@ -64,7 +64,7 @@ using ParamIO
             end
         end
         figs = Pinax.current_document().pages[1].sections[1].figures
-        @test figs[1].id === :s_fig1                 # non-DataKey -> positional
+        @test startswith(String(figs[1].id), "s_fig_")  # non-DataKey -> its repr is hashed
         @test figs[2].id === :custom                 # explicit id wins over params
     end
 
