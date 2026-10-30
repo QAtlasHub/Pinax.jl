@@ -567,8 +567,8 @@ mutable struct TestNode
     tables::Vector{Table}
     panels::Vector{String}
     codes::Vector{CodeBlock}
-    desc::Union{Desc,Nothing}
-    content::Vector{Pair{Symbol,Int}}   # declaration order of figures/tables/panels/checks/codes
+    texts::Vector{Prose}                # @desc prose blocks
+    content::Vector{Pair{Symbol,Int}}   # declaration order of texts/figures/tables/panels/checks/codes
 end
 
 function TestNode(
@@ -583,7 +583,7 @@ function TestNode(
     tables::Vector{Table}=Table[],
     panels::Vector{String}=String[],
     codes::Vector{CodeBlock}=CodeBlock[],
-    desc::Union{Desc,Nothing}=nothing,
+    texts::Vector{Prose}=Prose[],
     content::Vector{Pair{Symbol,Int}}=Pair{Symbol,Int}[],
 )
     id = _slug(description)
@@ -601,7 +601,7 @@ function TestNode(
         tables,
         panels,
         codes,
-        desc,
+        texts,
         content,
     )
 end
@@ -1277,7 +1277,6 @@ end
 function _emit_own_content!(n::TestNode, acc::Vector{Check})
     c = _ctx_container()
     c === nothing && return acc
-    n.desc === nothing || (c.desc = n.desc)
     # No interleaved `content` (a legacy dump, a hand-built node) — place checks then codes directly,
     # so a dumped `@code` still shows.
     if isempty(n.content) && (!isempty(n.checks) || !isempty(n.codes))
@@ -1301,6 +1300,9 @@ function _emit_own_content!(n::TestNode, acc::Vector{Check})
         elseif kind === :panel
             push!(c.panels, n.panels[i])
             push!(c.content, :panel => length(c.panels))
+        elseif kind === :text
+            push!(c.texts, n.texts[i])
+            push!(c.content, :text => length(c.texts))
         elseif kind === :code
             # Deduplicated by id: N shards of one sweep carry the same captured snippet, and it must
             # appear once (the ids of explicit `@code` blocks are already container-unique).
@@ -1416,9 +1418,9 @@ function completeness_overview end
 # The caller's own content on the overview page. What the CI job knows and the document does not — a
 # completeness verdict, a note about the environment — belongs IN the artifact rather than in a log
 # that expires, and the way to say it is Pinax's own vocabulary rather than a second one: the hook
-# runs with the overview page open, so `@desc` / `@table` / `@raw` land on it. A `@desc` renders
-# ABOVE the standard tables (a page's description is not content-ordered), which is where a verdict
-# wants to be; tables follow the fixed ones.
+# runs with the overview page open, so `@desc` / `@table` / `@raw` land on it. It runs FIRST, so its
+# content — in the order written — leads the page, above the fixed provenance and per-file tables,
+# which is where a verdict wants to be.
 #
 # It cannot break the render. A throwing hook is recorded as a diagnostic — loud in the artifact,
 # silent in the exit code — exactly like every other failure in the report machinery.
@@ -1453,7 +1455,7 @@ ones.
 with Pinax's ordinary content macros — `@desc`, `@table`, `@raw` — and its content lands there. This
 is how something the running job knows but the tree does not gets into the artifact instead of into a
 CI log that expires: a completeness verdict ("every unit ran exactly once"), the environment, a note
-about what was skipped. A `@desc` appears above the fixed tables. If the hook throws, that is a
+about what was skipped. Its content leads the page, above the fixed tables. If the hook throws, that is a
 diagnostic in the report, not a failed render.
 
 Writes `<out>_html` (the human gallery) and `<out>_agent` (`agent.json`), following the same
@@ -1479,6 +1481,7 @@ function render_test_report(
     # land in agent.json as data, so an LLM reads the suite without scraping a log.
     _enter_page!(:overview, title; layout=:wide, summary=_summary_line(root))
     try
+        _overview_hook(overview)   # the caller's verdict leads, above the fixed tables
         prov = _provenance_rows()
         isempty(prov) || _push_table!(;
             data=prov,
@@ -1496,7 +1499,6 @@ function render_test_report(
                     "that file: 1.0 means a check landed exactly on its tolerance.",
             id=:per_file,
         )
-        _overview_hook(overview)
     finally
         _exit_page!()
     end
@@ -1568,6 +1570,7 @@ function _render_matrix(
     )
     _enter_page!(:overview, title; layout=:wide, summary=_summary_line(rowsroot))
     try
+        _overview_hook(overview)   # the caller's verdict leads, above the fixed tables
         _push_table!(;
             data=[(;
                 field="matrix cells", value=join(unique(c for (_, c) in pairs), "  ·  ")
@@ -1589,7 +1592,6 @@ function _render_matrix(
             id=:per_file,
             caption="Per-cell, per-file result profile. `worst margin` is the largest `delta/tol` in that (cell, file).",
         )
-        _overview_hook(overview)
     finally
         _exit_page!()
     end
@@ -1668,7 +1670,11 @@ function _node_to_dict(n)
     isempty(n.codes) || (d["code"] = [_code_to_dict(c) for c in n.codes])
     isempty(n.tables) || (d["table"] = [_table_to_dict(t) for t in n.tables])
     isempty(n.panels) || (d["panel"] = collect(n.panels))
-    n.desc === nothing || (d["desc"] = n.desc.source)
+    isempty(n.texts) || (
+        d["text"] = [
+            Dict{String,Any}("id" => String(t.id), "source" => t.source) for t in n.texts
+        ]
+    )
     isempty(n.content) || (
         d["content"] = [
             Dict{String,Any}("kind" => String(k), "i" => i) for (k, i) in n.content
@@ -1757,7 +1763,10 @@ function _dict_to_node(d::AbstractDict)
         codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
         tables=Table[_dict_to_table(t) for t in get(d, "table", Any[])],
         panels=String[string(p) for p in get(d, "panel", Any[])],
-        desc=haskey(d, "desc") ? Desc(d["desc"]) : nothing,
+        texts=Prose[
+            Prose(Symbol(t["id"]), _anchor(Symbol(t["id"])), t["source"]) for
+            t in get(d, "text", Any[])
+        ],
         # A `@figure` did not survive, so any `:figure` entry in the recorded order is dropped — the
         # rest keeps its declared position (a legacy dump with no `content` falls back to checks-then-
         # codes in `_emit_own_content!`).

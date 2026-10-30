@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { AgentDocZ, type AgentDoc, type Part } from "./schema.js";
 
-export type UnitKind = "part" | "page" | "section" | "figure" | "table" | "code" | "check";
+export type UnitKind = "part" | "page" | "section" | "text" | "figure" | "table" | "code" | "check";
 
 export interface Unit {
   kind: UnitKind;
@@ -66,8 +66,12 @@ export class Atlas {
     }
   }
 
-  // A container's figures, tables, code blocks and checks, each addressable under the container's id.
+  // A container's prose, figures, tables, code blocks and checks, each addressable under its id.
   private addLeaves(node: any, parent: string): void {
+    for (const t of node.texts ?? []) {
+      // a prose block's label is its first line (what a reader would recognise)
+      this.add({ kind: "text", id: t.id, label: t.text.split("\n")[0], parent, node: t });
+    }
     for (const fig of node.figures ?? []) {
       this.add({ kind: "figure", id: fig.id, label: fig.caption, parent, node: fig });
     }
@@ -174,6 +178,8 @@ export class Atlas {
         for (const c of n.comments ?? []) consider(u, "comment", `${c.author}: ${c.text}`);
       } else if (u.kind === "code") {
         consider(u, "code", n.source);
+      } else if (u.kind === "text") {
+        consider(u, "text", n.text);
       } else if (u.kind === "table") {
         const cellStr = (c: unknown) => (c == null ? "" : String(c)); // avoid [object Object] / nested-array join
         consider(u, "cells", (n.rows ?? []).map((r: unknown[]) => r.map(cellStr).join(" ")).join(" | "));

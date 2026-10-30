@@ -71,7 +71,7 @@ or pull request that tracks the gap.
 ## Content
 
 - `@desc` is a **prose block**: markdown and math, placed in content order like any other node. A
-  container holds any number of them, interleaved with figures, tables and code. (in progress, #172)
+  container holds any number of them, interleaved with figures, tables and code.
 
   ```julia
   @section :energy "Energy" begin
@@ -85,7 +85,7 @@ or pull request that tracks the gap.
 - Each content macro takes its expression first and keywords as `name = value`, in any order.
 - A caption is given either as `caption=` on `@figure`, `@table` or `@code`, or by `@caption` written
   directly after the node. A node has **at most one** caption: a second one (`caption=` and then
-  `@caption`, or two `@caption`s) is an error. (in progress, #172)
+  `@caption`, or two `@caption`s) is an error.
 - `@caption` attaches to the node **immediately before it**: a figure, table or code block (its
   caption) or a check (its label). If there is none, or that node carries no caption (prose, `@raw`,
   a section), it is an error. It never reaches back to an earlier node.

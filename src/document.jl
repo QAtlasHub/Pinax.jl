@@ -220,13 +220,23 @@ mutable struct CodeBlock
     lang::String          # syntax hint for the highlighter, e.g. "julia"
 end
 
-"A section (a group of figures + a description)."
+"""
+A prose block — markdown and math written with `@desc`, placed in content order like any other node
+(Conventions › Content). A container holds any number of them.
+"""
+mutable struct Prose
+    id::Symbol
+    anchor::String
+    source::String
+end
+
+"A section: a container of prose, figures, tables, code, checks and child sections, in order."
 mutable struct Section
     id::Symbol
     title::String
     anchor::String
     facet::Any                       # by= param axis (String|Tuple|Nothing)
-    desc::Union{Desc,Nothing}
+    texts::Vector{Prose}             # @desc prose blocks, in the order written
     summary::Union{String,Nothing}   # for index :rich
     thumbnail::Union{FigRef,Nothing} # section-level main figure
     layout::Union{Symbol,Nothing}    # :wide|:grid|:single (theme hint)
@@ -235,7 +245,7 @@ mutable struct Section
     tables::Vector{Table}            # @table artifacts
     checks::Vector{Check}            # PASS/FAIL checks (Test's @test written in the section body)
     codes::Vector{CodeBlock}         # @code snippet+output blocks
-    content::Vector{Pair{Symbol,Int}}  # declaration order: (:figure|:table|:panel|:check|:code|:section) => index into the list above
+    content::Vector{Pair{Symbol,Int}}  # declaration order: (:text|:figure|:table|:panel|:check|:code|:section) => index into the list above
     # The section tree (#170): a `@section` nests to any depth. `depth` counts from the part (a page is
     # 1, a top-level section 2), `parent` is the enclosing section (`nothing` at the top level), and
     # `sections` holds the children, which also appear in `content` as `:section => index`.
@@ -258,7 +268,7 @@ mutable struct Page
     no_thumbnail::Bool
     sections::Vector{Section}
     part::Union{Symbol,Nothing}      # the @part this page belongs to (navigation grouping), or nothing
-    desc::Union{Desc,Nothing}        # page-level description (page-as-leaf: @desc directly under @page)
+    texts::Vector{Prose}             # @desc prose blocks written directly in the page, in order
     figures::Vector{Figure}          # page-level figures (page-as-leaf: @figure with no enclosing @section)
     panels::Vector{String}           # page-level @raw blocks
     layout::Union{Symbol,Nothing}    # :grid|:single|:wide hint for the page-level figure grid
@@ -363,8 +373,9 @@ mutable struct BuildContext
     part::Union{Symbol,Nothing}      # the @part currently open (pages inherit it), or nothing
     page::Union{Page,Nothing}
     section::Union{Section,Nothing}
+    captioned::Any                   # the node the latest `@caption` named (a node takes one caption)
 end
-const CTX = BuildContext(nothing, nothing, nothing, nothing)
+const CTX = BuildContext(nothing, nothing, nothing, nothing, nothing)
 
 current_document() = CTX.document
 current_page() = CTX.page
@@ -559,7 +570,8 @@ function _node_id!(c, id, base::Symbol, what::AbstractString)
             _claim!(_symbol_id(id, what), where)
         end
     end
-    taken(x) = any(n -> n.id === x, Iterators.flatten((c.figures, c.tables, c.codes)))
+    taken(x) =
+        any(n -> n.id === x, Iterators.flatten((c.texts, c.figures, c.tables, c.codes)))
     id === nothing && return _free_id(base, taken)
     sid = _symbol_id(id, what)
     taken(sid) && error(
@@ -725,7 +737,7 @@ function _enter_page!(id, title; summary=nothing, layout=nothing, status=nothing
         false,
         Section[],
         CTX.part,          # inherit the open @part, if any
-        nothing,
+        Prose[],
         Figure[],
         String[],
         layout,
@@ -825,7 +837,7 @@ function _enter_section!(id, title; by=nothing, summary=nothing, layout=nothing)
         string(title),
         _anchor(id),   # the id is the anchor: ids are unique in the whole document
         by,
-        nothing,
+        Prose[],
         summary === nothing ? nothing : string(summary),
         nothing,
         layout,
@@ -1144,7 +1156,9 @@ function _content_items(c)
     return [
         (
             k,
-            if k === :figure
+            if k === :text
+                c.texts[i]
+            elseif k === :figure
                 c.figures[i]
             elseif k === :table
                 c.tables[i]
@@ -1238,24 +1252,27 @@ function _set_caption!(s)
         "after a @figure, @table, @code or @test, or pass `caption=` to that node",
     )
     kind, i = c.content[end]
-    if kind === :check
-        c.checks[i].label = string(s)   # name the check's quantity
-    elseif kind === :figure
-        c.figures[i].caption = string(s)
-    elseif kind === :table
-        c.tables[i].caption = string(s)
-    elseif kind === :code
-        c.codes[i].caption = string(s)
-    else
-        error(
-            "Pinax: @caption in \"$(c.anchor)\" follows a $(kind), which carries no caption — " *
-            "@caption names only the node written immediately before it",
-        )
-    end
+    kind in (:check, :figure, :table, :code) || error(
+        "Pinax: @caption in \"$(c.anchor)\" follows a $(kind), which carries no caption — " *
+        "@caption names only the node written immediately before it",
+    )
+    node = _content_items(c)[end][2]
+    # one caption per node: `caption=` and then `@caption`, or two `@caption`s, is an error
+    (node === CTX.captioned || (kind !== :check && !isempty(node.caption))) && error(
+        "Pinax: @caption in \"$(c.anchor)\" names a $(kind) that already has a caption — a node " *
+        "takes one caption, from `caption=` or from one `@caption`",
+    )
+    kind === :check ? (node.label = string(s)) : (node.caption = string(s))   # a check: its quantity
+    CTX.captioned = node
     return nothing
 end
 
-"Section description (markdown + LaTeX source). `@desc md\"…\"`"
+"""
+    @desc md"…"
+
+A prose block (markdown + math), placed in content order like any other node. A container holds any
+number of them, interleaved with figures, tables and code (Conventions › Content).
+"""
 macro desc(x)
     return quote
         _set_desc!($(esc(x)))
@@ -1265,7 +1282,10 @@ function _set_desc!(s)
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@desc outside of a @section or @page")
-    c.desc = Desc(string(s))
+    src = string(s)
+    tid = _node_id!(c, nothing, Symbol(c.id, "_txt_", _stable_hash(src)), "prose block")
+    push!(c.texts, Prose(tid, _anchor(tid), src))
+    push!(c.content, :text => length(c.texts))
     return nothing
 end
 

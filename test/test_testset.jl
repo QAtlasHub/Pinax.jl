@@ -208,17 +208,20 @@ end
             codes=[CodeBlock(:c1, "c1", "E = f(x)", "", "", "julia")],
             tables=[tbl],
             panels=["<p>raw panel</p>"],
-            desc=Pinax.Desc("a description"),
-            content=Pair{Symbol,Int}[:code => 1, :check => 1, :table => 1, :panel => 1],
+            texts=[Pinax.Prose(:d1, "d1", "a description")],
+            content=Pair{Symbol,Int}[
+                :text => 1, :code => 1, :check => 1, :table => 1, :panel => 1
+            ],
         )
         p = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
         back = Pinax.load_test_dump(p).children[1]
-        @test back.desc.source == "a description"
+        @test only(back.texts).source == "a description"
         @test back.tables[1].caption == "a caption"
         @test back.tables[1].rows == Vector{Any}[Any[10, -0.1], Any[20, ""]]  # missing → its cell text
         @test back.panels == ["<p>raw panel</p>"]
-        @test back.content ==
-            Pair{Symbol,Int}[:code => 1, :check => 1, :table => 1, :panel => 1]
+        @test back.content == Pair{Symbol,Int}[
+            :text => 1, :code => 1, :check => 1, :table => 1, :panel => 1
+        ]
         render_test_report([p]; out=joinpath(dir, "rep"))
         html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
         @test all(
@@ -304,8 +307,8 @@ end
         @test captured === root.node
         @test !any(f -> hasfield(PinaxTestSet, f), (:figures, :checks, :content, :nbroken))
         @test length(root.node.figures) == 2
-        @test root.node.desc !== nothing && occursin("a description", root.node.desc.source)
-        @test root.node.content == [:figure => 1, :figure => 2]   # @desc sets desc, not content order
+        @test occursin("a description", only(root.node.texts).source)
+        @test root.node.content == [:figure => 1, :text => 1, :figure => 2]   # prose keeps its place
     end
 
     if isdefined(Test, :CURRENT_TESTSET)

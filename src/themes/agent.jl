@@ -271,7 +271,7 @@ function _agent_content!(c, ctx)
     started = false
     for (kind, item) in _content_items(c)
         kind === :panel && continue   # @raw HTML has no structured identity (an open question)
-        kind in (:figure, :table, :check, :code, :section) ||
+        kind in (:text, :figure, :table, :check, :code, :section) ||
             _unhandled_node("agent.json", kind)
         started && print(io, ",")
         started = true
@@ -331,6 +331,24 @@ function _agent_verdict_json(v)
     )
 end
 
+# A container's prose blocks: `[{id, text}]`, in the order written (their place among the other
+# nodes is in `content`).
+function _agent_texts!(texts, ctx)
+    print(ctx.io, "[")
+    for (i, t) in enumerate(texts)
+        i == 1 || print(ctx.io, ",")
+        print(
+            ctx.io,
+            "{\"id\":",
+            _jsonstr(string(t.id)),
+            ",\"text\":",
+            _jsonstr(t.source),
+            "}",
+        )
+    end
+    return print(ctx.io, "]")
+end
+
 function emit_section(theme::AgentBase, sec, pg, ctx)
     io = ctx.io
     print(
@@ -343,10 +361,10 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
         sec.depth,
         ",\"verdict\":",
         _agent_verdict_json(verdict(sec)),
-        ",\"desc\":",
-        sec.desc === nothing ? "null" : _jsonstr(sec.desc.source),
-        ",\"figures\":",
+        ",\"texts\":",
     )
+    _agent_texts!(sec.texts, ctx)
+    print(io, ",\"figures\":")
     _agent_figs!(
         theme,
         sec.figures,
@@ -385,10 +403,10 @@ function emit_page(theme::AgentBase, pg, ctx)
         _jsonstr(string(pg.status)),
         ",\"summary\":",
         pg.summary === nothing ? "null" : _jsonstr(pg.summary),
-        ",\"desc\":",
-        pg.desc === nothing ? "null" : _jsonstr(pg.desc.source),
-        ",\"figures\":",
+        ",\"texts\":",
     )
+    _agent_texts!(pg.texts, ctx)
+    print(io, ",\"figures\":")
     _agent_figs!(
         theme, pg.figures, joinpath(ctx.outdir, "assets", "figures", pg.anchor), ctx
     )
@@ -544,7 +562,9 @@ end
 # A container's figures + tables + checks + codes in declaration order (@raw panels are HTML, skipped in md view).
 function _agent_md_content(io, c, outdir, comments, as_table)
     for (kind, item) in _content_items(c)
-        if kind === :figure
+        if kind === :text
+            println(io, item.source)
+        elseif kind === :figure
             _agent_md_fig(io, item, outdir, comments, as_table)
         elseif kind === :table
             _agent_md_table(io, item)
@@ -580,7 +600,6 @@ end
 function _agent_md_section(io, sec, outdir, comments, as_table)
     println(io, "\n", _agent_md_heading(sec), "  [id: ", sec.id, "]")
     _agent_md_verdict(io, sec)
-    sec.desc === nothing || println(io, sec.desc.source)
     _agent_md_content(io, sec, outdir, comments, as_table)
     return nothing
 end
@@ -603,7 +622,6 @@ function _agent_markdown(doc::Document, outdir, comments, as_table)
         println(io, "\n### ", pg.title, "  [id: ", pg.id, "]", badge)
         _agent_md_verdict(io, pg)
         pg.summary === nothing || println(io, "_", pg.summary, "_")
-        pg.desc === nothing || println(io, pg.desc.source)
         _agent_md_content(io, pg, outdir, comments, as_table)
         for sec in pg.sections
             _agent_md_section(io, sec, outdir, comments, as_table)

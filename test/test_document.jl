@@ -29,8 +29,7 @@ const SIDE = Ref(0)   # for checking @figure deferral
         @test length(pg.sections[1].figures) == 2
         @test length(pg.sections[2].figures) == 1
         @test pg.sections[2].facet == "system.g"
-        @test pg.sections[1].desc isa Pinax.Desc
-        @test occursin("langle", pg.sections[1].desc.source)
+        @test occursin("langle", only(pg.sections[1].texts).source)   # @desc: a prose block
     end
 
     @testset "@figure is deferred" begin
@@ -76,18 +75,23 @@ const SIDE = Ref(0)   # for checking @figure deferral
         @test fig.params == (N=8, g=0.5)
     end
 
-    @testset "caption: @caption, precedence, diagnostics" begin
+    @testset "caption: one per node, from caption= or @caption" begin
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" begin
-                @figure 1 caption = "kw"
-                @caption md"override"      # wins
-                @figure 2 caption = "only" # no @caption -> caption= stays
+                @figure 1
+                @caption md"from the macro"
+                @figure 2 caption = "from the keyword"
             end
         end
         figs = Pinax.current_document().pages[1].sections[1].figures
-        @test figs[1].caption == "override"
-        @test figs[2].caption == "only"
+        @test figs[1].caption == "from the macro"
+        @test figs[2].caption == "from the keyword"
+        Pinax.reset!()
+        @test_throws "already has a caption" @page :p "P" begin
+            @figure 1 caption = "kw"
+            @caption md"a second caption"
+        end
 
         # @caption names the node IMMEDIATELY before it — never an earlier figure (#159)
         Pinax.reset!()

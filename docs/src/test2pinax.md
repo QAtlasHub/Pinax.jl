@@ -170,8 +170,8 @@ Pinax.render_test_report(
 )
 ```
 
-A `@desc` appears above the fixed provenance and per-file tables — a page's description is not
-content-ordered — which is where a verdict wants to be; tables follow them. Everything goes to every
+The hook runs first, so its content — in the order written — leads the overview page, above the fixed
+provenance and per-file tables, which is where a verdict wants to be. Everything goes to every
 backend, so the verdict is **data** in `agent.json` and not only pixels in the gallery.
 
 If the hook throws, that is a diagnostic in the report and the report still renders: the same rule as

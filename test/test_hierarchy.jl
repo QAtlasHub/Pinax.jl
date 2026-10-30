@@ -169,7 +169,7 @@ using Test
             @figure svg
         end
         pg = Pinax.current_document().pages[1]
-        @test pg.desc !== nothing && occursin("page level desc", pg.desc.source)
+        @test occursin("page level desc", only(pg.texts).source)
         @test pg.panels == ["<div class=\"banner\">hi</div>"]
         html = read(Pinax.render(; out=sitedir("leaf")), String)   # single page → one index.html
         @test occursin("page level desc", html)

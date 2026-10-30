@@ -164,7 +164,9 @@ end
 # checks are rendered by the container's check table, not inline).
 function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx; page=nothing)
     for (kind, item) in _content_items(c)
-        if kind === :figure
+        if kind === :text
+            println(ctx.io, emit_text(theme, item.source, item.anchor, ctx))
+        elseif kind === :figure
             _latex_emit_fig!(theme, item, assetdir, ctx)
         elseif kind === :table
             emit_table(theme, item, ctx)
@@ -296,7 +298,6 @@ function emit_section(theme::LaTeXBase, sec, pg, ctx)
     io = ctx.io
     println(io, _latex_heading(sec, ctx))
     _latex_checks!(theme, sec, ctx)
-    sec.desc === nothing || println(io, emit_text(theme, sec.desc.source, sec.anchor, ctx))
     _latex_emit_content!(
         theme, sec, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx; page=pg
     )
@@ -308,7 +309,6 @@ function emit_page(theme::LaTeXBase, pg, ctx)
     io = ctx.io
     # a page = one \section; its page-level (page-as-leaf) desc + figures, then its subsections
     println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
-    pg.desc === nothing || println(io, emit_text(theme, pg.desc.source, pg.anchor, ctx))
     # checks lead (tabular of the page's own checks + a verdict line over its subtree)
     _latex_checks!(theme, pg, ctx)
     _latex_emit_content!(theme, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx)

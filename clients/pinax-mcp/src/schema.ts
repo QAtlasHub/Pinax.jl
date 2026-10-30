@@ -60,6 +60,9 @@ export const CodeZ = z
   })
   .passthrough();
 
+// A prose block (`@desc`): markdown and math, placed in content order like any other node.
+export const TextZ = z.object({ id: z.string(), text: z.string() }).passthrough();
+
 // A number, or the string a non-finite value is written as ("NaN", "Inf").
 const NumZ = z.union([z.number(), z.string()]);
 
@@ -95,7 +98,7 @@ export interface SectionT {
   title: string;
   depth?: number;
   verdict?: z.infer<typeof VerdictZ> | null;
-  desc: string | null;
+  texts?: z.infer<typeof TextZ>[];
   figures: z.infer<typeof FigureZ>[];
   tables?: z.infer<typeof TableNodeZ>[];
   codes?: z.infer<typeof CodeZ>[];
@@ -111,7 +114,7 @@ export const SectionZ: z.ZodType<SectionT> = z.lazy(() =>
       title: z.string(),
       depth: z.number().optional(),
       verdict: VerdictZ.nullable().optional(),
-      desc: z.string().nullable(),
+      texts: z.array(TextZ).optional(),
       figures: z.array(FigureZ),
       tables: z.array(TableNodeZ).optional(),
       codes: z.array(CodeZ).optional(),
@@ -129,7 +132,7 @@ export const PageZ = z
     part: z.string().nullable(),
     status: z.string().optional(), // maturity: "draft" (a manuscript) or "final" (the published version)
     summary: z.string().nullable().optional(),
-    desc: z.string().nullable(),
+    texts: z.array(TextZ).optional(),
     figures: z.array(FigureZ),
     tables: z.array(TableNodeZ).optional(),
     codes: z.array(CodeZ).optional(),
@@ -157,6 +160,7 @@ export const AgentDocZ = z
   .passthrough();
 
 export type Figure = z.infer<typeof FigureZ>;
+export type Text = z.infer<typeof TextZ>;
 export type Code = z.infer<typeof CodeZ>;
 export type Check = z.infer<typeof CheckZ>;
 export type Verdict = z.infer<typeof VerdictZ>;

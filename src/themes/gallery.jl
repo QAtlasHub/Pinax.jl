@@ -405,76 +405,58 @@ function _gallery_numbers(doc::Document)
         nums[pg.anchor] = string(
             numberer(:page, _counters(pagen, pid, partn, pg.part, secn, fign, 0, eqn))
         )
-        mkctr(e) = _counters(pagen, pid, partn, pg.part, secn, fign, 0, e)
-        eqn = _scan_eqs!(
-            _descsrc(pg.desc), pg.anchor, mkctr, nums, ids_eq, eqseq, numberer, eqn
-        )
-        subfig = 0
-        for fig in pg.figures
-            fign += 1
-            subfig += 1
-            nums[fig.anchor] = string(
-                numberer(
-                    :figure, _counters(pagen, pid, partn, pg.part, secn, fign, subfig, eqn)
-                ),
-            )
-            sf = subfig
-            eqn = _scan_eqs!(
-                fig.caption,
-                fig.anchor,
-                e -> _counters(pagen, pid, partn, pg.part, secn, fign, sf, e),
-                nums,
-                ids_eq,
-                eqseq,
-                numberer,
-                eqn,
-            )
+        # A container's prose and figures in declaration order: each figure is numbered, and the
+        # display equations in prose and captions are numbered as a reader meets them.
+        function walk!(c)
+            subfig = 0
+            for (kind, item) in _content_items(c)
+                if kind === :text
+                    eqn = _scan_eqs!(
+                        item.source,
+                        item.anchor,
+                        e -> _counters(pagen, pid, partn, pg.part, secn, fign, 0, e),
+                        nums,
+                        ids_eq,
+                        eqseq,
+                        numberer,
+                        eqn,
+                    )
+                elseif kind === :figure
+                    fign += 1
+                    subfig += 1
+                    nums[item.anchor] = string(
+                        numberer(
+                            :figure,
+                            _counters(pagen, pid, partn, pg.part, secn, fign, subfig, eqn),
+                        ),
+                    )
+                    sf = subfig
+                    eqn = _scan_eqs!(
+                        item.caption,
+                        item.anchor,
+                        e -> _counters(pagen, pid, partn, pg.part, secn, fign, sf, e),
+                        nums,
+                        ids_eq,
+                        eqseq,
+                        numberer,
+                        eqn,
+                    )
+                end
+            end
         end
+        walk!(pg)
         for sec in _all_sections(pg)
             secn += 1
-            subfig = 0
             nums[sec.anchor] = string(
                 numberer(
-                    :section, _counters(pagen, pid, partn, pg.part, secn, fign, subfig, eqn)
+                    :section, _counters(pagen, pid, partn, pg.part, secn, fign, 0, eqn)
                 ),
             )
-            eqn = _scan_eqs!(
-                _descsrc(sec.desc),
-                sec.anchor,
-                e -> _counters(pagen, pid, partn, pg.part, secn, fign, 0, e),
-                nums,
-                ids_eq,
-                eqseq,
-                numberer,
-                eqn,
-            )
-            for fig in sec.figures
-                fign += 1
-                subfig += 1
-                nums[fig.anchor] = string(
-                    numberer(
-                        :figure,
-                        _counters(pagen, pid, partn, pg.part, secn, fign, subfig, eqn),
-                    ),
-                )
-                sf = subfig
-                eqn = _scan_eqs!(
-                    fig.caption,
-                    fig.anchor,
-                    e -> _counters(pagen, pid, partn, pg.part, secn, fign, sf, e),
-                    nums,
-                    ids_eq,
-                    eqseq,
-                    numberer,
-                    eqn,
-                )
-            end
+            walk!(sec)
         end
     end
     return nums, ids_eq, eqseq
 end
-
-_descsrc(d) = d === nothing ? "" : d.source
 
 # Scan one source for `$$…$$` blocks: number each equation (numberer gets the live counters via the
 # `mkctr(eqn)` closure), register `@label(:id)` ids, record the per-node ordered (anchor, number) list.
@@ -631,17 +613,9 @@ function _gallery_citations(doc::Document, bib::Dict{Symbol,BibEntry})
                 citenums[key] = length(order)
             end
         end
-    for pg in doc.pages
-        seen(_descsrc(pg.desc))                 # page-level desc (page-as-leaf)
-        for f in pg.figures
-            seen(f.caption)
-        end
-        for sec in _all_sections(pg)
-            seen(_descsrc(sec.desc))
-            for f in sec.figures
-                seen(f.caption)
-            end
-        end
+    for pg in doc.pages, c in (pg, _all_sections(pg)...)
+        foreach(t -> seen(t.source), c.texts)   # prose, then figure captions
+        foreach(f -> seen(f.caption), c.figures)
     end
     return citenums, order
 end
@@ -841,14 +815,6 @@ function emit_page(theme::GalleryBase, pg, ctx)
         println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
     # checks lead (verdict band + check table); @figures follow.
     _emit_checks!(theme, pg, ctx)
-    if pg.desc !== nothing
-        println(
-            io,
-            "<div class=\"desc\">",
-            emit_text(theme, pg.desc.source, pg.anchor, ctx),
-            "</div>",
-        )
-    end
     _emit_content(
         theme, pg, joinpath(ctx.outdir, "assets", "figures", pg.anchor), pg.layout, ctx
     )
@@ -1155,14 +1121,6 @@ function emit_document(
             # checks lead (verdict band + check table); @figures follow
             _emit_checks!(theme, pg, ctx)
             # page-as-leaf content (the global TOC nav above already lists the sections)
-            if pg.desc !== nothing
-                println(
-                    io,
-                    "<div class=\"desc\">",
-                    emit_text(theme, pg.desc.source, pg.anchor, ctx),
-                    "</div>",
-                )
-            end
             _emit_content(
                 theme,
                 pg,
@@ -1261,14 +1219,6 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
         heading,
         close_h,
     )
-    if sec.desc !== nothing
-        println(
-            io,
-            "<div class=\"desc\">",
-            emit_text(theme, sec.desc.source, sec.anchor, ctx),
-            "</div>",
-        )
-    end
     _emit_checks!(theme, sec, ctx)
     assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
     if sec.facet isa AbstractString
@@ -1564,7 +1514,17 @@ function _emit_content(
             empty!(figbuf)
         end
     for (kind, item) in _content_items(c)
-        if kind === :figure
+        if kind === :text
+            flush_figs()
+            println(
+                ctx.io,
+                "<div class=\"desc\" id=\"",
+                item.anchor,
+                "\">",
+                emit_text(theme, item.source, item.anchor, ctx),
+                "</div>",
+            )
+        elseif kind === :figure
             figures && push!(figbuf, item)
         elseif kind === :table
             flush_figs()
