@@ -26,6 +26,24 @@ using ParamIO
         @test count("class=\"facet\"", html) == 2       # two groups
     end
 
+    @testset "a faceted section still shows its code, tables and panels, in order (#168)" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :s "S" by = "system.g" begin
+                @figure svg params = k(1.0)
+                @code E = 1.0 + 1.0 id = :energy_code
+                @raw "<p>RAWPANEL</p>"
+                @table (a=[1],) caption = "TBLCAP"
+            end
+        end
+        html = read(Pinax.render(; out=site("fc")), String)
+        @test occursin("id=\"energy_code\"", html)   # the anchor a check's code link points at
+        i_code = first(findfirst("id=\"energy_code\"", html))
+        i_raw = first(findfirst("RAWPANEL", html))
+        i_tbl = first(findfirst("TBLCAP", html))
+        @test i_code < i_raw < i_tbl                    # declaration order, after the facet groups
+    end
+
     @testset "two figures with one key in one section collide: an error, never a rename" begin
         Pinax.reset!()
         @test_throws "duplicate id" @page :p "P" begin

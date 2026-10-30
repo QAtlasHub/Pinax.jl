@@ -99,3 +99,18 @@ end
     @test occursin("\"tagged\":true", j)      # the override fired
     @test occursin("\"sections\":[", j)       # emit_section(::AgentBase) emitted the sections array
 end
+
+# A content kind no backend knows is an error in every face, naming it — never printed verbatim or
+# dropped (#168). `_content_items` is the one registry of kinds every backend walks.
+@testset "an unknown content kind fails loudly in every theme" begin
+    for theme in (:gallery, :agent, :latex)
+        Pinax.reset!(; title="unknown")
+        @page :p "P" begin
+            @section :s "S" begin
+                @raw "<b>x</b>"
+            end
+        end
+        push!(Pinax.current_document().pages[1].sections[1].content, :hologram => 1)
+        @test_throws "hologram" Pinax.render(; out=mktempdir(), theme=theme)
+    end
+end

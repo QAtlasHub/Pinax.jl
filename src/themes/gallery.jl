@@ -1272,8 +1272,8 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     _emit_checks!(theme, sec, ctx)
     assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
     if sec.facet isa AbstractString
-        # faceting regroups figures by a param axis, so declaration order does not apply; @raw panels
-        # and tables follow the facet groups.
+        # faceting regroups figures by a param axis, so declaration order does not apply to them;
+        # everything else follows the facet groups, in declaration order (#168).
         for (val, figs) in _facet_groups(sec.figures, sec.facet)
             label = if val === missing
                 string(sec.facet, ": (unset)")
@@ -1283,12 +1283,7 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
             println(io, "<h3 class=\"facet\">", _esc(label), "</h3>")
             emit_view(theme, Val(:grid), figs, assetdir, sec.layout, ctx)
         end
-        for panel in sec.panels
-            println(io, panel)
-        end
-        isempty(sec.tables) || _emit_tables(theme, sec.tables, ctx)
-        # facets regroup the figures only; child sections still follow, in declaration order
-        foreach(child -> emit_section(theme, child, pg, ctx), sec.sections)
+        _emit_content(theme, sec, assetdir, sec.layout, ctx; page=pg, figures=false)
     else
         _emit_content(theme, sec, assetdir, sec.layout, ctx; page=pg)
     end
@@ -1448,13 +1443,6 @@ function emit_table(theme::GalleryBase, tbl, ctx)
     return println(io, "</figure>")
 end
 
-function _emit_tables(theme::GalleryBase, tables, ctx)
-    for tbl in tables
-        emit_table(theme, tbl, ctx)
-    end
-    return nothing
-end
-
 # One check -> a check-table `<tr>`: badge ✓/✗ | id | label | got | want | Δ vs tol (kind).
 # The row is class pinax-pass / pinax-fail so CSS colours it green / red.
 function emit_check(::GalleryBase, chk, ctx)
@@ -1565,7 +1553,10 @@ end
 
 # Emit a container's content (figures / tables / @raw panels) in DECLARATION order. Consecutive
 # figures are grouped into one figure grid; a table or @raw panel between them flushes the grid.
-function _emit_content(theme::GalleryBase, c, assetdir, layout, ctx; page=nothing)
+# `figures=false` leaves the figures out — a faceted section has already emitted them, regrouped.
+function _emit_content(
+    theme::GalleryBase, c, assetdir, layout, ctx; page=nothing, figures=true
+)
     figbuf = Figure[]
     flush_figs() =
         if !isempty(figbuf)
@@ -1574,7 +1565,7 @@ function _emit_content(theme::GalleryBase, c, assetdir, layout, ctx; page=nothin
         end
     for (kind, item) in _content_items(c)
         if kind === :figure
-            push!(figbuf, item)
+            figures && push!(figbuf, item)
         elseif kind === :table
             flush_figs()
             emit_table(theme, item, ctx)
@@ -1586,9 +1577,11 @@ function _emit_content(theme::GalleryBase, c, assetdir, layout, ctx; page=nothin
         elseif kind === :section   # a nested section, in declaration order
             flush_figs()
             emit_section(theme, item, page, ctx)
-        else                       # :panel — @raw HTML, verbatim
+        elseif kind === :panel     # @raw HTML, verbatim
             flush_figs()
             println(ctx.io, item)
+        else
+            _unhandled_node(theme, kind)
         end
     end
     flush_figs()

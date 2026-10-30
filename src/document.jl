@@ -1100,23 +1100,38 @@ function _push_code!(;
     return blk
 end
 
+# A container's content as `(kind, item)` in declaration order — the ONE registry of node kinds every
+# backend walks. A kind not listed here is an error, never misread as another kind's index (#168).
 function _content_items(c)
-    return [(
-        k,
-        if k === :figure
-            c.figures[i]
-        elseif k === :table
-            c.tables[i]
-        elseif k === :check
-            c.checks[i]
-        elseif k === :code
-            c.codes[i]
-        elseif k === :section
-            c.sections[i]
-        else
-            c.panels[i]
-        end,
-    ) for (k, i) in c.content]
+    return [
+        (
+            k,
+            if k === :figure
+                c.figures[i]
+            elseif k === :table
+                c.tables[i]
+            elseif k === :check
+                c.checks[i]
+            elseif k === :code
+                c.codes[i]
+            elseif k === :section
+                c.sections[i]
+            elseif k === :panel
+                c.panels[i]
+            else
+                error("Pinax: unknown content kind :$(k) in \"$(c.anchor)\"")
+            end,
+        ) for (k, i) in c.content
+    ]
+end
+
+# Every backend's content walk ends in this, so a node kind added to `_content_items` fails loudly in
+# each face until that face handles it — never printed verbatim or silently dropped (#168).
+function _unhandled_node(face, kind)
+    name = face isa AbstractString ? face : string(nameof(typeof(face)), " theme")
+    return error(
+        "Pinax: the $(name) has no form for a :$(kind) node — every node kind needs one in every face",
+    )
 end
 
 # Normalize the accepted @table inputs into (header::Vector{String}, rows::Vector{Vector{Any}}).

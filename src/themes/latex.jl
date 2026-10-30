@@ -172,6 +172,10 @@ function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx; page=nothing)
             emit_code(theme, item, ctx)
         elseif kind === :section   # a nested section, in declaration order
             emit_section(theme, item, page, ctx)
+        elseif kind === :check || kind === :panel
+            nothing   # checks: the container's check table; @raw: HTML, no LaTeX form (documented)
+        else
+            _unhandled_node(theme, kind)
         end
     end
     return nothing

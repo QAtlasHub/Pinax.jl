@@ -270,7 +270,9 @@ function _agent_content!(c, ctx)
     print(io, "[")
     started = false
     for (kind, item) in _content_items(c)
-        kind === :panel && continue   # @raw HTML has no structured identity
+        kind === :panel && continue   # @raw HTML has no structured identity (an open question)
+        kind in (:figure, :table, :check, :code, :section) ||
+            _unhandled_node("agent.json", kind)
         started && print(io, ",")
         started = true
         print(
@@ -552,6 +554,10 @@ function _agent_md_content(io, c, outdir, comments, as_table)
             _agent_md_code(io, item)
         elseif kind === :section   # a nested section, in declaration order
             _agent_md_section(io, item, outdir, comments, as_table)
+        elseif kind === :panel
+            nothing   # @raw HTML: no form in agent.md (an open question)
+        else
+            _unhandled_node("agent.md", kind)
         end
     end
     return nothing
