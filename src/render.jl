@@ -22,6 +22,16 @@ function resolve!(doc::Document)
                 doc.refs[f.id] = f
             end
         end
+        # `@thumbnail :id` names a figure on its page; one it cannot find is an error, not a blank card
+        t = pg.thumbnail
+        t === nothing ||
+            any(
+                f -> f.id === t.id,
+                Iterators.flatten((pg.figures, (s.figures for s in _all_sections(pg))...)),
+            ) ||
+            error(
+                "Pinax: @thumbnail :$(t.id) on page :$(pg.id) names no figure on that page"
+            )
     end
     return doc
 end

@@ -187,7 +187,7 @@ const SIDE = Ref(0)   # for checking @figure deferral
         @test sec.layout === :wide
     end
 
-    @testset "preamble: @pinaxsetup / @debug_mode / @bibliography / @newcommand" begin
+    @testset "preamble: @pinaxsetup / @bibliography / @newcommand" begin
         Pinax.reset!()
         @pinaxsetup theme = :gallery debug = true numbering = :page index = :rich
         m = Pinax.current_document().meta
@@ -199,10 +199,6 @@ const SIDE = Ref(0)   # for checking @figure deferral
         # theme-specific kw (css/js/features) are ignored in the structure layer (not an error)
         @pinaxsetup theme = :gallery css = ["x.css"] js = ["y.js"] features = (:comments,)
         @test Pinax.current_document().meta.theme === :gallery
-
-        Pinax.reset!()
-        @debug_mode true
-        @test Pinax.current_document().meta.debug
 
         Pinax.reset!()
         @bibliography "a.bib" "b.bib"

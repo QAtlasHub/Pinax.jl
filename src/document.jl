@@ -235,7 +235,7 @@ mutable struct Section
     id::Symbol
     title::String
     anchor::String
-    facet::Any                       # by= param axis (String|Tuple|Nothing)
+    facet::Union{String,Nothing}     # by= param axis the gallery facets figures on, or nothing
     texts::Vector{Prose}             # @desc prose blocks, in the order written
     summary::Union{String,Nothing}   # for index :rich
     thumbnail::Union{FigRef,Nothing} # section-level main figure
@@ -339,7 +339,7 @@ mutable struct Document
     pages::Vector{Page}
     parts::Vector{Pair{Symbol,String}}   # ordered @part registry: id => title (navigation groups)
     part_descs::Dict{Symbol,Desc}        # @part id => overview description (markdown), shown on the index
-    part_status::Dict{Symbol,Symbol}     # @part id => default status its pages inherit (e.g. :trial)
+    part_status::Dict{Symbol,Symbol}     # @part id => default status its pages inherit (:draft/:final)
     refs::Dict{Symbol,Any}        # label -> node (filled in by resolve)
     bib::Dict{Symbol,Any}         # @cite resolution table (later)
     diag::Diagnostics
@@ -653,12 +653,14 @@ function _pinaxsetup!(; kwargs...)
     return reset!(; kwargs...)
 end
 
-"Diagnostics mode. `@debug_mode true`"
+"""
+`@debug_mode` was removed in 0.2: it said what `@pinaxsetup debug=true` says, and a setting has one
+spelling. Using it raises an error that names the replacement.
+"""
 macro debug_mode(x)
-    return quote
-        _ensure_document!().meta.debug = $(esc(x))
-        nothing
-    end
+    return :(error(
+        "Pinax: `@debug_mode` was removed in 0.2 — write `@pinaxsetup debug = true`."
+    ))
 end
 
 "Declare the .bib source(s) used to resolve `@cite`. `@bibliography \"refs/a.bib\" …`"
@@ -683,11 +685,10 @@ end
 """
 A page. `@page :id "Title" [summary=…] [layout=…] [status=…] begin … end`
 
-`status` tags the page's maturity so a backend or registry can treat trial and result differently:
-`:final` (default — the shaped/curated page) vs `:trial` (a raw experiment attempt). Pinax only carries
-the tag (any `Symbol` is accepted, e.g. `:experimental`/`:draft`); the agent backend exposes it as
-`"status"` for RAG/Archeion filtering and the gallery badges non-`:final` pages. A page inherits its
-enclosing `@part`'s status default unless it sets its own.
+`status` is the page's maturity: `:draft` (a manuscript, work in progress) or `:final` (the default,
+the published version); anything else is an error. Pinax only carries it: the agent backend exposes
+it as `"status"` and the gallery badges a `:draft` page. A page inherits its enclosing `@part`'s
+status default unless it sets its own. A page is written at the top level or directly in a `@part`.
 """
 macro page(args...)
     length(args) >= 3 || error("@page needs :id, \"title\", and a begin…end body")
@@ -780,8 +781,9 @@ A navigation group of pages (LaTeX `\\part`). `@part :id \"Title\" [desc=md\"…
 pages declared inside belong to this part and are grouped (collapsibly) under it in the index and nav.
 `desc=` is an overview shown beneath the part heading on the index (what this whole group covers).
 A part is NOT a file; each `@page` (or top-level `@section`) inside it is still its own HTML page.
-`status=` sets a default maturity (e.g. `:trial`) that the part's pages inherit — so a whole
-"Trials / experiment log" group is declared once, the shaped result living in a separate part.
+`status=` sets a default maturity (`:draft` or `:final`) that the part's pages inherit — so a whole
+group of drafts is declared once, the published result living in a separate part. A part is written
+at the top level.
 """
 macro part(args...)
     length(args) >= 3 || error("@part needs :id, \"title\", and a begin…end body")
@@ -842,6 +844,8 @@ end
 
 function _enter_section!(id, title; by=nothing, summary=nothing, layout=nothing)
     id = _symbol_id(id, "section")
+    (by === nothing || by isa AbstractString) ||
+        error("Pinax: @section by= names one param axis, a String (got $(repr(by)))")
     pg = CTX.page
     pg === nothing && error("@section outside of a @page")
     parent = CTX.section
@@ -855,7 +859,7 @@ function _enter_section!(id, title; by=nothing, summary=nothing, layout=nothing)
         id,
         string(title),
         _anchor(id),   # the id is the anchor: ids are unique in the whole document
-        by,
+        by === nothing ? nothing : String(by),
         Prose[],
         summary === nothing ? nothing : string(summary),
         nothing,
@@ -1331,15 +1335,11 @@ function _set_thumbnail!(x)
         _probe_test_container() === :none || return nothing   # inside a test, no @page → no-op
         error("@thumbnail outside of a @page")
     end
-    if x isa Symbol
-        pg.thumbnail = FigRef(x)
-    else
-        _diag!(
-            WARNING,
-            pg.anchor,
-            "@thumbnail expects a figure id (:sym); inline plots are not supported",
-        )
-    end
+    x isa Symbol || error(
+        "Pinax: @thumbnail takes the id of a figure on its page, a Symbol (got $(repr(x))); " *
+        "to make an inline plot the main figure, give it `thumbnail = true`",
+    )
+    pg.thumbnail = FigRef(x)   # checked against the page's figures when the document is resolved
     return nothing
 end
 

@@ -159,4 +159,23 @@ using Test
         @test occursin("SHARED_NOTE", read(joinpath(out, "html", "test_x_jl.html"), String))
         @test occursin("SHARED_NOTE", read(joinpath(out, "agent", "agent.md"), String))
     end
+
+    @testset "one way to say a thing, and a wrong argument is an error" begin
+        Pinax.reset!()
+        @test_throws "@pinaxsetup debug" @debug_mode true
+        Pinax.reset!()
+        @test_throws "Symbol" @page :p "P" begin
+            @thumbnail "not an id"
+        end
+        Pinax.reset!()
+        @page :p "P" begin
+            @thumbnail :nope
+            @figure 1
+        end
+        @test_throws "names no figure" Pinax.render(; out=joinpath(tmp, "thumb"))
+        Pinax.reset!()
+        @test_throws "a String" @page :p "P" begin
+            @section :s "S" by = ("a", "b") begin end
+        end
+    end
 end
