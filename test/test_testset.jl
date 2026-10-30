@@ -756,18 +756,6 @@ end
         )
     end
 
-    @testset "@expect inside a captured test is forbidden — @test is the assertion (F)" begin
-        # `@expect` is manuscript vocabulary. Directly inside a test — here a captured `PinaxTestSet`,
-        # the report-ON path — it errors and points to `@test`, so a check can never be recorded but
-        # left unenforced (which under a bare `Pkg.test()` would be a green run for a failing check).
-        root = PinaxTestSet("cap")
-        Ext._with_testset(root) do
-            @test_throws "manuscript check" Pinax._push_check!(;
-                id=:E, label="energy", got=1.0, want=1.0, tol=1e-3
-            )
-        end
-    end
-
     @testset "a failing check carries file:line — the failure payload (I)" begin
         # A failing @test records WHERE it failed (its LineNumberNode), so the report says where to
         # look, not just what failed. Captured duck-typed (a Pass may carry no source), carried through

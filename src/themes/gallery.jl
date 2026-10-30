@@ -175,7 +175,7 @@ const _GALLERY_CSS = """
   .pinax-table th,.pinax-table td{border:1px solid var(--line);padding:.25rem .5rem;text-align:left}
   .pinax-table thead th{background:var(--soft);font-weight:600}
   .pinax-table tbody tr:nth-child(even){background:var(--soft)}
-  .pinax-benchmark{margin:0 0 1.4rem}
+  .pinax-checkset{margin:0 0 1.4rem}
   .pinax-verdict{font-weight:700;font-size:1.05rem;padding:.55rem .9rem;border-radius:8px;margin:0 0 .8rem}
   .pinax-verdict-pass{background:var(--ok-bg);border:1px solid var(--ok);color:var(--ok)}
   .pinax-verdict-fail{background:var(--bad-bg);border:1px solid var(--bad);color:var(--bad)}
@@ -242,9 +242,6 @@ const _GALLERY_CSS = """
   .card-thumb-pdf{width:100%;height:100%;border:0;background:#fff;pointer-events:none}
   .card-body{padding:.7rem .9rem}
   .card-title{font-weight:600;font-size:1.05rem}
-  .pinax-verdict-badge{display:inline-block;font-size:.75rem;font-weight:600;border-radius:6px;padding:0 .4rem;margin-left:.4rem;vertical-align:middle;border:1px solid}
-  .pinax-verdict-badge.pass{background:var(--ok-bg);border-color:var(--ok);color:var(--ok)}
-  .pinax-verdict-badge.fail{background:var(--bad-bg);border-color:var(--bad);color:var(--bad)}
   .card-status{display:inline-block;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--warn);background:var(--warn-bg);border:1px solid var(--warn);border-radius:6px;padding:0 .35rem;margin-left:.4rem;vertical-align:middle}
   .card-summary{color:var(--mut);font-size:.9rem;margin-top:.2rem}
   .card-sections{margin-top:.5rem;font-size:.85rem;color:var(--mut)}
@@ -842,8 +839,8 @@ function emit_page(theme::GalleryBase, pg, ctx)
     io = ctx.io
     pg.summary === nothing ||
         println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
-    # a benchmark page leads with its fixed test-report (verdict band + check table); @figures follow.
-    pg.status === :benchmark && _emit_benchmark!(theme, pg, ctx)
+    # checks lead (verdict band + check table); @figures follow.
+    _emit_checks!(theme, pg, ctx)
     if pg.desc !== nothing
         println(
             io,
@@ -1155,8 +1152,8 @@ function emit_document(
             println(io, "<section class=\"page\" id=\"", pg.anchor, "\"><h1>", h1, "</h1>")
             pg.summary === nothing ||
                 println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
-            # a benchmark page leads with its fixed test-report (verdict band + check table)
-            pg.status === :benchmark && _emit_benchmark!(theme, pg, ctx)
+            # checks lead (verdict band + check table); @figures follow
+            _emit_checks!(theme, pg, ctx)
             # page-as-leaf content (the global TOC nav above already lists the sections)
             if pg.desc !== nothing
                 println(
@@ -1251,7 +1248,6 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     n = length(sec.figures)
     n > 0 && (heading *= string(" <span class=\"nfig\">(", n, ")</span>"))
     bookmarked && (heading *= " <span class=\"pinax-bm-on\" title=\"bookmarked\">★</span>")
-    heading *= _gallery_verdict(sec)
     cls = bookmarked ? "section bookmarked" : "section"
     open_h, close_h = _gallery_heading(sec, ctx)
     println(
@@ -1273,6 +1269,7 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
             "</div>",
         )
     end
+    _emit_checks!(theme, sec, ctx)
     assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
     if sec.facet isa AbstractString
         # faceting regroups figures by a param axis, so declaration order does not apply; @raw panels
@@ -1297,25 +1294,6 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     end
     emit_comments(theme, sec.anchor, ctx)
     return println(io, "</section>")
-end
-
-# A container's derived verdict as a heading badge ("" when its subtree holds no checks), so every
-# container that has checks shows PASS/FAIL, not only a benchmark page (#173).
-function _gallery_verdict(c)
-    v = verdict(c)
-    v === nothing && return ""
-    cls = v.verdict == "PASS" ? "pass" : "fail"
-    return string(
-        " <span class=\"pinax-verdict-badge ",
-        cls,
-        "\">",
-        v.verdict,
-        " ",
-        v.passed,
-        "/",
-        v.total,
-        "</span>",
-    )
 end
 
 # The one place a gallery section's depth becomes a heading: `<h2>` for a top-level section down to
@@ -1477,7 +1455,7 @@ function _emit_tables(theme::GalleryBase, tables, ctx)
     return nothing
 end
 
-# One @expect check -> a fixed test-report `<tr>`: badge ✓/✗ | id | label | got | want | Δ vs tol (kind).
+# One check -> a check-table `<tr>`: badge ✓/✗ | id | label | got | want | Δ vs tol (kind).
 # The row is class pinax-pass / pinax-fail so CSS colours it green / red.
 function emit_check(::GalleryBase, chk, ctx)
     io = ctx.io
@@ -1514,19 +1492,21 @@ function emit_check(::GalleryBase, chk, ctx)
     return nothing
 end
 
-# The fixed test-report for a status=:benchmark page: a verdict band (green PASS / red FAIL) then the
-# check table (one emit_check `<tr>` per check). Identical layout for every benchmark (not configurable).
-function _emit_benchmark!(theme::GalleryBase, pg, ctx)
+# The checks of any container (#173): a verdict band over its whole subtree (green PASS / red FAIL),
+# then a table of the checks it owns (one emit_check `<tr>` each). Nothing when the subtree has none.
+# The same layout for a page, a section and a nested testset.
+function _emit_checks!(theme::GalleryBase, c, ctx)
     io = ctx.io
-    checks = _benchmark_checks(pg)
-    v = _benchmark_verdict(checks)
-    println(io, "<div class=\"pinax-benchmark\">")
+    v = verdict(c)
+    v === nothing && return nothing
+    checks = c.checks
+    println(io, "<div class=\"pinax-checkset\">")
     println(
         io,
         "<div class=\"pinax-verdict ",
         v.verdict == "PASS" ? "pinax-verdict-pass" : "pinax-verdict-fail",
         "\">",
-        _esc(pg.title),
+        _esc(c.title),
         "   ",
         v.passed,
         "/",
@@ -1535,6 +1515,7 @@ function _emit_benchmark!(theme::GalleryBase, pg, ctx)
         v.verdict,
         "</div>",
     )
+    isempty(checks) && return println(io, "</div>")
     println(
         io,
         "<table class=\"pinax-checks\"><thead><tr><th></th><th>id</th><th>label</th>",
@@ -1556,7 +1537,7 @@ function _emit_benchmark!(theme::GalleryBase, pg, ctx)
             "<tr class=\"pinax-more\"><td></td><td></td><td colspan=\"4\">… ",
             join(parts, " + "),
             " more not shown (all ",
-            v.total,
+            length(checks),
             " checks are in <code>agent.json</code>)</td></tr>",
         )
     end
@@ -1564,7 +1545,7 @@ function _emit_benchmark!(theme::GalleryBase, pg, ctx)
     return nothing
 end
 
-# Cap the rows a benchmark page draws for a human: failures first (never hidden before a pass), then as
+# Cap the rows a check table draws for a human: failures first (never hidden before a pass), then as
 # many passes as fit. Returns (shown, hidden_failing, hidden_passing) — the caller states the hidden
 # counts. `agent.json` is uncapped, so nothing is lost, only deferred to the machine-readable artifact.
 const _MAX_CHECK_ROWS = 200
@@ -1598,7 +1579,7 @@ function _emit_content(theme::GalleryBase, c, assetdir, layout, ctx; page=nothin
             flush_figs()
             emit_table(theme, item, ctx)
         elseif kind === :check
-            continue   # checks are rendered by the benchmark report (the fixed verdict + check table)
+            continue   # checks are rendered by the container's check table (verdict band + rows)
         elseif kind === :code
             flush_figs()
             emit_code(theme, item, ctx)

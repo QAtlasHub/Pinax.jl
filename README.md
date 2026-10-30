@@ -73,8 +73,8 @@ KaTeX.
 | `:latex` | LaTeX → PDF | manuscripts / sharing |
 | `:agent` | `agent.json` | LLMs / downstream tooling |
 
-The same source — sections, `@desc`/`@caption`, `@table`, citations, a `@benchmark`'s PASS/FAIL
-verdict — flows to every face. Themes are pluggable: `render(; theme = MyTheme())`,
+The same source — sections, `@desc`/`@caption`, `@table`, citations, and the PASS/FAIL verdict of
+the `@test` checks a section holds — flows to every face. Themes are pluggable: `render(; theme = MyTheme())`,
 `register_theme!(:mine, MyTheme())`, or `theme = "path/to/mytheme.jl"`.
 
 ## Bridging a parameter sweep

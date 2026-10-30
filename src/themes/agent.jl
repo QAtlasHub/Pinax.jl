@@ -217,7 +217,7 @@ function _agent_codes!(theme::AgentBase, codes, ctx)
     return nothing
 end
 
-# One @expect check -> a JSON object with native-typed numerics (a tool reads 4.6e-5, not "4.6e-5").
+# One check -> a JSON object with native-typed numerics (a tool reads 4.6e-5, not "4.6e-5").
 function emit_check(::AgentBase, chk, ctx)
     io = ctx.io
     print(
@@ -248,37 +248,16 @@ function emit_check(::AgentBase, chk, ctx)
     return nothing
 end
 
-# The machine-readable verdict for a status=:benchmark page: a `benchmark` block (verdict/passed/total/
-# failed + each check) built from the page's checks. The `benchmark` block is a NEW key on the page
-# object — strict-schema consumers (pinax-mcp) must co-evolve (see CLAUDE.md §agent.json contract).
-function _agent_benchmark!(theme::AgentBase, pg, ctx)
+# A container's own checks as a JSON array (each through the `emit_check` dispatch point), so the
+# `{kind:"check", id}` entries in its `content` resolve within the same object (#173).
+function _agent_checks!(theme::AgentBase, checks, ctx)
     io = ctx.io
-    checks = _benchmark_checks(pg)
-    v = _benchmark_verdict(checks)
-    print(
-        io,
-        ",\"benchmark\":{\"kind\":\"benchmark\",\"id\":",
-        _jsonstr(string(pg.id)),
-        ",\"title\":",
-        _jsonstr(pg.title),
-        ",\"verdict\":",
-        _jsonstr(v.verdict),
-        ",\"passed\":",
-        v.passed,
-        ",\"total\":",
-        v.total,
-        ",\"failed\":[",
-    )
-    for (i, fid) in enumerate(v.failed)
-        i == 1 || print(io, ",")
-        print(io, _jsonstr(fid))
-    end
-    print(io, "],\"checks\":[")
+    print(io, "[")
     for (i, c) in enumerate(checks)
         i == 1 || print(io, ",")
         emit_check(theme, c, ctx)
     end
-    print(io, "]}")
+    print(io, "]")
     return nothing
 end
 
@@ -374,6 +353,8 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
     _agent_tables!(theme, sec.tables, ctx)
     print(io, ",\"codes\":")
     _agent_codes!(theme, sec.codes, ctx)
+    print(io, ",\"checks\":")
+    _agent_checks!(theme, sec.checks, ctx)
     print(io, ",\"content\":")
     _agent_content!(sec, ctx)
     # the section tree: children nest inside their parent's object, in declaration order
@@ -411,6 +392,8 @@ function emit_page(theme::AgentBase, pg, ctx)
     _agent_tables!(theme, pg.tables, ctx)
     print(io, ",\"codes\":")
     _agent_codes!(theme, pg.codes, ctx)
+    print(io, ",\"verdict\":", _agent_verdict_json(verdict(pg)), ",\"checks\":")
+    _agent_checks!(theme, pg.checks, ctx)
     print(io, ",\"content\":")
     _agent_content!(pg, ctx)
     print(io, ",\"sections\":[")
@@ -418,10 +401,7 @@ function emit_page(theme::AgentBase, pg, ctx)
         j == 1 || print(io, ",")
         emit_section(theme, sec, pg, ctx)
     end
-    print(io, "]")
-    # a benchmark page additionally carries its machine-readable verdict block (the LLM contract).
-    pg.status === :benchmark && _agent_benchmark!(theme, pg, ctx)
-    print(io, "}")
+    print(io, "]}")
     return nothing
 end
 
@@ -521,7 +501,7 @@ function _agent_md_table(io, tbl)
     return nothing
 end
 
-# A single @expect check as a markdown list line (the LLM read view): a ✓/✗ badge + the numbers.
+# A single check as a markdown list line (the LLM read view): a ✓/✗ badge + the numbers.
 function _agent_md_check(io, chk)
     badge = chk.pass ? "PASS" : "FAIL"
     println(
@@ -582,8 +562,16 @@ function _agent_md_heading(sec)
     return n <= 6 ? string("#"^n, " ", sec.title) : string("**", sec.title, "**")
 end
 
+# A container's verdict over its subtree as one bold line ("" when it holds no checks).
+function _agent_md_verdict(io, c)
+    v = verdict(c)
+    v === nothing && return nothing
+    return println(io, "**", c.title, "   ", v.passed, "/", v.total, " ", v.verdict, "**")
+end
+
 function _agent_md_section(io, sec, outdir, comments, as_table)
     println(io, "\n", _agent_md_heading(sec), "  [id: ", sec.id, "]")
+    _agent_md_verdict(io, sec)
     sec.desc === nothing || println(io, sec.desc.source)
     _agent_md_content(io, sec, outdir, comments, as_table)
     return nothing
@@ -605,10 +593,7 @@ function _agent_markdown(doc::Document, outdir, comments, as_table)
         end
         badge = pg.status === :final ? "" : "  [status: $(pg.status)]"
         println(io, "\n### ", pg.title, "  [id: ", pg.id, "]", badge)
-        if pg.status === :benchmark
-            v = _benchmark_verdict(_benchmark_checks(pg))
-            println(io, "**", pg.title, "   ", v.passed, "/", v.total, " ", v.verdict, "**")
-        end
+        _agent_md_verdict(io, pg)
         pg.summary === nothing || println(io, "_", pg.summary, "_")
         pg.desc === nothing || println(io, pg.desc.source)
         _agent_md_content(io, pg, outdir, comments, as_table)

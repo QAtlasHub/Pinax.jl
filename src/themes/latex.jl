@@ -161,7 +161,7 @@ function _latex_emit_fig!(theme::LaTeXBase, fig, assetdir, ctx)
 end
 
 # Emit a container's figures + tables in declaration order (@raw panels are HTML, skipped in LaTeX;
-# @expect checks are rendered by the benchmark report, not inline).
+# checks are rendered by the container's check table, not inline).
 function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx; page=nothing)
     for (kind, item) in _content_items(c)
         if kind === :figure
@@ -189,7 +189,7 @@ function emit_code(::LaTeXBase, blk, ctx)
     return nothing
 end
 
-# One @expect check -> a tabular row: id, label, got, want, Δ, tol, PASS/FAIL (cells escaped as text).
+# One check -> a tabular row: id, label, got, want, Δ, tol, PASS/FAIL (cells escaped as text).
 function emit_check(::LaTeXBase, chk, ctx)
     io = ctx.io
     println(
@@ -213,17 +213,13 @@ function emit_check(::LaTeXBase, chk, ctx)
     return nothing
 end
 
-# The test-report for a status=:benchmark page: a `tabular` of the checks + a verdict line.
-function _latex_benchmark!(theme::LaTeXBase, pg, ctx)
+# The checks of any container (#173): a `tabular` of the checks it owns, then a verdict line over its
+# whole subtree. Nothing when the subtree has none.
+function _latex_checks!(theme::LaTeXBase, c, ctx)
     io = ctx.io
-    checks = _benchmark_checks(pg)
-    v = _benchmark_verdict(checks)
-    println(io, "\\begin{tabular}{lllllll}\\hline")
-    println(io, "id & label & got & want & \$\\Delta\$ & tol & result \\\\\\hline")
-    for chk in checks
-        emit_check(theme, chk, ctx)
-    end
-    println(io, "\\hline\\end{tabular}")
+    v = verdict(c)
+    v === nothing && return nothing
+    isempty(c.checks) || _latex_check_table!(theme, c.checks, ctx)
     println(
         io,
         "\\par\\noindent\\textbf{Verdict: ",
@@ -234,6 +230,17 @@ function _latex_benchmark!(theme::LaTeXBase, pg, ctx)
         v.total,
         ")",
     )
+    return nothing
+end
+
+function _latex_check_table!(theme::LaTeXBase, checks, ctx)
+    io = ctx.io
+    println(io, "\\begin{tabular}{lllllll}\\hline")
+    println(io, "id & label & got & want & \$\\Delta\$ & tol & result \\\\\\hline")
+    for chk in checks
+        emit_check(theme, chk, ctx)
+    end
+    println(io, "\\hline\\end{tabular}")
     return nothing
 end
 
@@ -284,17 +291,7 @@ end
 function emit_section(theme::LaTeXBase, sec, pg, ctx)
     io = ctx.io
     println(io, _latex_heading(sec, ctx))
-    v = verdict(sec)
-    v === nothing || println(
-        io,
-        "\\noindent\\textbf{",
-        v.verdict,
-        "} ",
-        v.passed,
-        "/",
-        v.total,
-        " checks passed.\n",
-    )
+    _latex_checks!(theme, sec, ctx)
     sec.desc === nothing || println(io, emit_text(theme, sec.desc.source, sec.anchor, ctx))
     _latex_emit_content!(
         theme, sec, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx; page=pg
@@ -308,8 +305,8 @@ function emit_page(theme::LaTeXBase, pg, ctx)
     # a page = one \section; its page-level (page-as-leaf) desc + figures, then its subsections
     println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
     pg.desc === nothing || println(io, emit_text(theme, pg.desc.source, pg.anchor, ctx))
-    # a benchmark page leads with its test-report (tabular of checks + verdict line)
-    pg.status === :benchmark && _latex_benchmark!(theme, pg, ctx)
+    # checks lead (tabular of the page's own checks + a verdict line over its subtree)
+    _latex_checks!(theme, pg, ctx)
     _latex_emit_content!(theme, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
     emit_comments(theme, pg.anchor, ctx)
     for sec in pg.sections

@@ -1,12 +1,11 @@
 # testset.jl — the Test-FREE half of the `Test` bridge (the other half is ext/PinaxTestExt.jl).
 #
 # A test suite is normally a binary: green or red. But Pinax already has the pieces to say
-# something much more useful — `@expect` records a `Check(got, want, delta, tol, pass)`, and a
-# `status=:benchmark` page renders those as a colored pass/fail report (and emits
-# `{verdict, passed, total, failed, checks:[…]}` into `agent.json`). All that was missing was
-# the bridge FROM `Test`:
+# something much more useful — a `Check(got, want, delta, tol, pass)` per assertion, and every
+# container holding checks renders them as a colored pass/fail report (and emits its `verdict` and
+# `checks` into `agent.json`). All that was missing was the bridge FROM `Test`:
 #
-#     test file  (@testset "test_foo.jl")  →  @page (status=:benchmark)
+#     test file  (@testset "test_foo.jl")  →  @page
 #     @testset   (nested)                  →  @section  (recursively)
 #     @test                                →  a Check  +  the @code that produced it
 #
@@ -35,7 +34,7 @@ touch is the call. Two forms:
   - `Pinax.test(runtests::AbstractString)` — render a specific test file in the current process (no
     sandbox): open a capturing root testset, `include` the file, render.
 
-Each test *file* (a `.jl`-named `@testset`) becomes a `status = :benchmark` page, each nested
+Each test *file* (a `.jl`-named `@testset`) becomes a page, each nested
 `@testset` a section, each `@test` a `Check` carrying its real `got`/`want`/`tol` — and, by default,
 a `@code` block holding the source that produced it, so a reader sees what was measured and not only
 whether it passed. Writes
@@ -248,7 +247,6 @@ const _SELF_RENDERING_MACROS = Set([
     "@section",
     "@page",
     "@part",
-    "@benchmark",
     "@pinaxsetup",
     "@newcommand",
     "@bibliography",
@@ -265,7 +263,6 @@ const _ASSERTION_MACROS = Set([
     "@test_deprecated",
     "@test_warn",
     "@test_nowarn",
-    "@expect",
 ])
 
 _is_assertion_stmt(s) = _macroname(s) in _ASSERTION_MACROS
@@ -1192,7 +1189,7 @@ function _emit_node!(
             pid = _unique_id!(
                 seen, Symbol(id_prefix, _slug(ch.description)), ch.description
             )
-            _enter_page!(pid, ch.description; status=:benchmark, summary=_summary_line(ch))
+            _enter_page!(pid, ch.description; summary=_summary_line(ch))
             try
                 page_checks = Check[]
                 _emit_node!(ch, counter, page_when, seen, page_checks; id_prefix=id_prefix)
@@ -1409,7 +1406,7 @@ end
     render_test_report(dumps::AbstractVector{<:AbstractString}; out, …)       -> (; gallery, agent)
 
 Render a testset tree as a Pinax document: an overview page (one row per test file, ranked by
-`worst margin`), then one `status=:benchmark` page per file whose sections mirror the nested
+`worst margin`), then one page per file whose sections mirror the nested
 testsets, each with its margin figure.
 
 Given a list of TOML dumps (see [`dump_test_report`](@ref)) their trees are **merged** under one root

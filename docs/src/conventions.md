@@ -63,7 +63,10 @@ the gap.
     `ChecksFailed`, naming the failing ids and the file written.
 - `@assert` is plain Julia: a precondition. When it fails, rendering stops with the error. It is
   not recorded as a check.
-- `@expect` is removed. During 0.2 it raises an error that points to `@test`.
+- `@expect` and `@benchmark` are removed. During 0.2 each raises an error that names its
+  replacement (`@test`, and a `@section` / `@testset` holding checks).
+- Every container whose subtree holds checks shows them the same way in every face: a verdict band
+  over the subtree, then a table of the checks it owns.
 
 ## Captions and descriptions
 
@@ -91,8 +94,6 @@ the gap.
 
 These are not settled yet. Each will move into a section above once decided.
 
-- **What replaces `@benchmark`.** Every container now shows its verdict, so the separate page kind
-  is expected to go (#173). The benchmark-specific report layout still needs a home.
 - **`@desc`.** What a second `@desc` in one container means, and whether `@desc` keeps its position
   in content order.
 - **`@raw`.** What form it takes in `agent.json`.

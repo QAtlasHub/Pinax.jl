@@ -18,20 +18,20 @@ The same doc has **two representations, chosen by who reads it** — neither is 
   `figure_as_table` presents each `@figure` **AS its plotted-data table**: the LLM gets the numbers
   (cheap inline preview + full CSV via the MCP `get_figure_data`), not the image.
 
-`@table`, `@desc`/`@caption`, comments, `status`, and a `@benchmark`'s **verdict** flow to **both**
+`@table`, `@desc`/`@caption`, comments, `status`, and each container's **verdict** flow to **both**
 faces from one source. This duality — *figure for humans, data for LLMs, single source* — is why the
-agent backend exists; the `@benchmark` verdict is its sharpest case: a human scans a colored
-test-report, an LLM reads a machine-checkable `PASS/FAIL` instead of trusting a `println`. Keep it
+agent backend exists; the verdict is its sharpest case: a human scans a colored check table, an LLM
+reads a machine-checkable `PASS/FAIL` instead of trusting a `println`. Keep it
 when adding any node type: it needs a human render **and** an agent-data form.
 
 ## Role / public API — the seam
 
 - **Build a doc** (macros populate an implicit global document): `@pinaxsetup` ·
-  `@part`/`@page`/`@section` (structure; `@page status=:trial|:final`) · `@figure` (a deferred
-  `plot(...)` / Makie scene / image path) · `@caption`/`@desc` (markdown+math) · `@table` (a
-  sibling to figures) · `@benchmark`/`@expect` (a **test set**: `@expect got=… want=… tol=…` ⇒
-  PASS/FAIL checks grouped into a verdict; tolerance is relative by default, `want=0` is a residual)
-  · `@raw` (HTML escape hatch).
+  `@part`/`@page`/`@section` (structure; sections nest to any depth; `status=:draft|:final`) ·
+  `@figure` (a deferred `plot(...)` / Makie scene / image path) · `@caption`/`@desc`
+  (markdown+math) · `@table` (a sibling to figures) · checks are `Test`'s own `@test` / `@testset`
+  written in a container (a `@testset` is a child section) · `@raw` (HTML escape hatch). The full
+  authoring contract is `docs/src/conventions.md`.
 - **Render** `render(; out, theme=:gallery|:agent|:latex)` — one doc, three backends:
   `:gallery` (self-contained HTML notebook), `:agent` (`agent.json` + `agent.md`, the LLM view),
   `:latex`. Optional `vault=`/`study=` wires DataVault in (cache tracks the data's `.done`
@@ -48,12 +48,13 @@ when adding any node type: it needs a human render **and** an agent-data form.
   `vault` is given).
 - **`agent.json` is the neutral LLM seam** (the data face above) that pinax-mcp, registries
   (Archeion), and LLMs all read — treat its shape as a contract, not an internal detail.
-- **`status` is a maturity tag a registry interprets:** `:final` (curated) vs `:trial` (raw
-  experiment notebook — what `report` auto-output usually is). Pinax only carries it.
-- **A `@benchmark` page emits a `verdict` block in `agent.json`** — `{verdict:"PASS|FAIL", passed,
-  total, failed, checks:[{id,got,want,delta,tol,kind,pass}]}` — the machine-checkable gate that
-  replaces "the benchmark *seems* to pass". `@expect` **errors** on a non-finite `got`/`want`, a
-  non-positive `tol`, or `kind=:rel` with `want=0`, so `delta` is always a JSON number.
+- **`status` is a page's maturity:** `:draft` (a manuscript) or `:final` (the published version);
+  anything else is an error. Pinax only carries it.
+- **Every container with checks carries `verdict` + `checks` in `agent.json`** — `verdict` is
+  `{verdict:"PASS|FAIL", passed, total, failed}` over the subtree (`null` with no checks, never a
+  vacuous PASS) and `checks` holds the container's own `{id,label,got,want,delta,tol,kind,pass,…}`.
+  A failing check is reported once: to the enclosing testset, else `render` raises `ChecksFailed`
+  after writing every output.
 - **Two-env reality:** Pinax needs a plotting backend (Plots/Makie, heavy); compute needs its own
   heavy deps (ITensorMPS, …). They don't share an env in practice — compute writes a `DataVault`
   (or CSV), Pinax reads it. On HPC this maps to compute-node vs login-node; the seam is the vault.
@@ -65,7 +66,8 @@ when adding any node type: it needs a human render **and** an agent-data form.
 
 - `test/test_datavault.jl` — the `report(vault, recipe)` bridge end-to-end.
 - `test/test_agent.jl`, `test/test_table.jl` — the agent backend + `@table` / figure-as-table.
-- `test/test_benchmark.jl` — `@expect`/`@benchmark` (the verdict contract + the fixed test-report).
+- `test/test_checks.jl`, `test/test_capture.jl`, `test/test_verdict.jl` — `@test` in a document, the
+  verdict contract and the check table; `test/test_nesting.jl` — nested sections and headings.
 - `ext/PinaxDataVaultExt.jl` / `PinaxParamIOExt.jl` — the DataVault/ParamIO seams (vault → doc,
   DataKey → stable figure id).
 - `notes/00–11` (gitignored, Japanese OK) — the design spec.

@@ -130,8 +130,8 @@ end
 _cellstr(x) = x === missing ? "" : string(x)
 
 """
-A single PASS/FAIL check (a `@expect`) — one assertion of a computed value against a reference, the
-atom of a `@benchmark` test set. `delta` is the resolved deviation (relative or absolute per `kind`),
+A single PASS/FAIL check (a `Test` `@test` recorded into a container) — one assertion of a computed
+value against a reference. `delta` is the resolved deviation (relative or absolute per `kind`),
 `pass` is `delta <= tol`. Renders to a row of the gallery's fixed test-report, a LaTeX tabular row,
 and a native-typed JSON object in `agent.json` (the machine-readable verdict).
 """
@@ -145,7 +145,7 @@ mutable struct Check
     kind::Symbol       # :rel or :abs (resolved; never :auto in the struct)
     pass::Bool
     source::String     # "file:line" of the assertion (issue #69 I) — carried for a failing @test so the
-    # report says WHERE, not just what; "" when unknown (a passing @test / a manuscript @expect).
+    # report says WHERE, not just what; "" when unknown (a passing @test).
     code_anchor::String   # anchor of the `CodeBlock` holding the code that produced this check — the
     # code itself is ONE artifact in the document (a `@code` block), and this is the reference to it,
     # never a second copy of the source; "" when there is none.
@@ -193,7 +193,7 @@ mutable struct Section
     figures::Vector{Figure}
     panels::Vector{String}           # @raw HTML blocks (project-specific UI escape hatch, notes 06 §6)
     tables::Vector{Table}            # @table artifacts
-    checks::Vector{Check}            # @expect PASS/FAIL checks (a @benchmark test set)
+    checks::Vector{Check}            # PASS/FAIL checks (Test's @test written in the section body)
     codes::Vector{CodeBlock}         # @code snippet+output blocks
     content::Vector{Pair{Symbol,Int}}  # declaration order: (:figure|:table|:panel|:check|:code|:section) => index into the list above
     # The section tree (#170): a `@section` nests to any depth. `depth` counts from the part (a page is
@@ -223,16 +223,12 @@ mutable struct Page
     panels::Vector{String}           # page-level @raw blocks
     layout::Union{Symbol,Nothing}    # :grid|:single|:wide hint for the page-level figure grid
     tables::Vector{Table}            # page-level @table artifacts (page-as-leaf)
-    checks::Vector{Check}            # page-level @expect checks (a @benchmark test set)
+    checks::Vector{Check}            # page-level checks (Test's @test written in the page body)
     codes::Vector{CodeBlock}         # page-level @code snippet+output blocks
     content::Vector{Pair{Symbol,Int}}  # declaration order of figures/tables/panels/checks/codes
-    status::Symbol                   # maturity tag a backend/registry interprets: :final (default, the
-    # shaped/curated page) vs :trial (a raw experiment attempt) vs :benchmark (a `@benchmark` test set,
-    # which each backend dispatches on to render a verdict / fixed test-report). Pinax only carries it.
+    status::Symbol                   # maturity: :draft (a manuscript) or :final (default, the published
+    # version). Validated by `_status`; what kind of page it is never lives here.
 end
-
-# All checks on a benchmark page in declaration order: page-level @expect PLUS any inside a @section.
-_benchmark_checks(pg::Page) = _subtree_checks(pg)
 
 # Every check in a container's subtree: its own, then each nested section's, in declaration order.
 _subtree_checks(pg::Page) = vcat(pg.checks, (s.checks for s in _all_sections(pg))...)
@@ -250,7 +246,7 @@ stored. `nothing` when the subtree holds no checks, so an empty container cannot
 """
 function verdict(c::Union{Page,Section})
     checks = _subtree_checks(c)
-    return isempty(checks) ? nothing : _benchmark_verdict(checks)
+    return isempty(checks) ? nothing : _verdict_of(checks)
 end
 
 """
@@ -276,7 +272,7 @@ function Base.showerror(io::IO, e::ChecksFailed)
 end
 
 # Single source of the verdict invariant — used by every backend so PASS/FAIL can never diverge.
-function _benchmark_verdict(checks)
+function _verdict_of(checks)
     passed = count(c -> c.pass, checks)
     total = length(checks)
     return (
@@ -593,6 +589,19 @@ macro page(args...)
     end
 end
 
+# A page's maturity: `:draft` (a manuscript) or `:final` (the published version), nothing else.
+# `:trial` is the 0.1 spelling of `:draft`, accepted with a warning during 0.2.
+function _status(s)
+    st = Symbol(s)
+    st in (:draft, :final) && return st
+    if st === :trial
+        @warn "Pinax: status=:trial is deprecated; use status=:draft (the same meaning)." maxlog =
+            1
+        return :draft
+    end
+    return error("Pinax: status must be :draft or :final (got $(repr(st))).")
+end
+
 function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing, status=nothing)
     CTX.section === nothing || error(
         "@page :$(id) inside @section :$(CTX.section.id) — a page cannot be nested in a section",
@@ -605,7 +614,7 @@ function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing, status
     doc = _ensure_document!()
     # status resolution: explicit @page status= wins; else inherit the open @part's
     # default status; else :final (the ordinary shaped/curated page).
-    st = status === nothing ? get(doc.part_status, CTX.part, :final) : Symbol(status)
+    st = status === nothing ? get(doc.part_status, CTX.part, :final) : _status(status)
     pg = Page(
         id,
         string(title),
@@ -633,31 +642,15 @@ end
 _exit_page!() = (CTX.page=nothing; CTX.section=nothing)
 
 """
-A benchmark / test-set page. `@benchmark :id "Title" [summary=…] [layout=…] begin … end` — a `@page`
-whose `status` is fixed to `:benchmark`, holding `@expect` checks (plus any `@page` content:
-`@desc`/`@figure`/`@table`/`@section` — a `@section`'s `@expect`s count toward the verdict too).
-Each backend dispatches on the `:benchmark` status to render a verdict: a machine-readable `benchmark`
-block in `agent.json`, a fixed-layout test-report in the gallery, and a tabular + verdict line in
-LaTeX. Mirrors `@page` (it IS a page); `@expect` populates the page's `checks`.
+`@benchmark` was removed in 0.2 (#173). Checks go in any `@section` (or a `@testset` inside one), and
+every container whose subtree holds checks shows its verdict and its check table in every face.
+Using `@benchmark` raises an error that says so.
 """
 macro benchmark(args...)
-    length(args) >= 3 || error("@benchmark needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    # a @benchmark is a @page pinned to status=:benchmark — append it to whatever kwargs were given
-    enter = _call(
-        :_enter_page!,
-        (esc(id), esc(title)),
-        vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :status, QuoteNode(:benchmark))),
-    )
-    return quote
-        $enter
-        try
-            $(esc(body))
-        finally
-            _exit_page!()
-        end
-        nothing
-    end
+    return :(error(
+        "Pinax: `@benchmark` was removed in 0.2 — put the `@test` checks in a @section (or a " *
+        "@testset inside one); every container with checks shows its verdict (#173).",
+    ))
 end
 
 """
@@ -688,7 +681,7 @@ function _enter_part!(id::Symbol, title; desc=nothing, status=nothing)
     # register (id => title) once, in declaration order, for the grouped navigation
     any(p -> first(p) === id, doc.parts) || push!(doc.parts, id => string(title))
     desc === nothing || (doc.part_descs[id] = Desc(string(desc)))
-    status === nothing || (doc.part_status[id] = Symbol(status))   # default status its pages inherit
+    status === nothing || (doc.part_status[id] = _status(status))  # default status its pages inherit
     CTX.part = id
     CTX.page = nothing
     CTX.section = nothing
@@ -872,69 +865,15 @@ function _push_table!(; data, code, caption="", id=nothing, header=nothing, para
 end
 
 """
-Register one PASS/FAIL check — a `@expect` (the atom of a `@benchmark` test set). The first two macro
-arguments (id, label) are the check id (a `Symbol`, or a `String` coerced to one) and a human label;
-then `got=` (required) is the computed value, `want=` (default `0.0`) the reference, `tol=` (required)
-the tolerance, and `kind=` (default `:auto`) selects the deviation: `:rel` (relative) when there is a
-nonzero reference, `:abs` (a residual against `want=0`). `@expect "E1" "energy density e" got=e want=e_ref tol=1e-2`.
-
-The tolerance is relative by default with a nonzero `want`, absolute for a residual (`want=0`);
-`kind=:rel` with `want=0` is an error, and a non-finite `got`/`want` or a non-positive `tol` is an
-error — a check is a trust gate, so an ill-posed assertion fails loudly rather than mis-reporting.
-
-`@expect` is **manuscript** vocabulary (a `@page`/`@benchmark`/`@section`). Inside a **test suite** the
-assertion is `@test` — Pinax recovers its `got`/`want`/`tol` and shows the same margin — so `@expect`
-used directly in a `@testset` is an error, not a silently-unenforced check (issue #69 F).
+`@expect` was removed in 0.2 (#173). A check is `Test`'s own `@test`: with `using Test`, a `@test`
+written in a `@page` / `@section` is recorded as a check of that container, with the numbers it
+compared and its margin. Using `@expect` raises an error that says so.
 """
 macro expect(args...)
-    length(args) >= 2 || error("@expect needs an id and a \"label\" (plus kwargs)")
-    id, label = args[1], args[2]
-    return _call(
-        :_push_check!,
-        (),
-        vcat(Expr(:kw, :id, esc(id)), Expr(:kw, :label, esc(label)), _kwspecs(args[3:end])),
-    )
-end
-
-function _push_check!(; id, label, got, want=0.0, tol, kind=:auto)
-    # `@expect` is MANUSCRIPT vocabulary. Inside a test suite the assertion is `@test` — whose margin
-    # the report already recovers and shows — so `@expect` used directly in a `@testset` is a mistake:
-    # it records a check the test runner does not enforce, i.e. a GREEN run for a failing check when the
-    # report is off (issue #69 F). Forbid it loudly (and keep the report's on/off state from ever
-    # deciding the verdict, invariant IV). A manuscript built *inside* a test — an open `CTX` page /
-    # section, as Pinax's own tests do — is real manuscript content, so `_ctx_container()` is non-nothing
-    # there and this passes straight through.
-    c = _ctx_container()
-    if c === nothing
-        _probe_test_container() === :none &&
-            error("@expect $(id): outside of a @benchmark/@section/@page")
-        error(
-            "@expect $(id): `@expect` is a manuscript check, not a suite assertion — inside a " *
-            "`@testset` write `@test` (Pinax already recovers and shows its margin in the report).",
-        )
-    end
-    g = Float64(got)
-    w = Float64(want)
-    t = Float64(tol)
-    # a check is a TRUST gate — refuse an ill-posed assertion rather than benchmark a bad value.
-    isfinite(g) || error(
-        "@expect $(id): got= is not finite ($(g)) — fix the upstream computation; do not benchmark a non-finite value",
-    )
-    isfinite(w) || error("@expect $(id): want= is not finite ($(w))")
-    t > 0 || error("@expect $(id): tol= must be positive (got $(t))")
-    # rel DEFAULT when there's a nonzero reference; a residual (want=0) is abs.
-    k = kind === :auto ? (abs(w) > 0 ? :rel : :abs) : kind
-    k in (:rel, :abs) || error("@expect kind= must be :rel or :abs")
-    k === :rel &&
-        abs(w) == 0 &&
-        error(
-            "@expect $(id): kind=:rel needs a nonzero want= (got 0) — use kind=:abs for a residual against zero",
-        )
-    d = k === :rel ? abs(g - w) / abs(w) : abs(g - w)
-    chk = Check(Symbol(id), string(label), g, w, d, t, k, d <= t)
-    push!(c.checks, chk)
-    push!(c.content, :check => length(c.checks))
-    return chk
+    return :(error(
+        "Pinax: `@expect` was removed in 0.2 — write `@test` (with `using Test`) inside the " *
+        "@page/@section; Pinax records it as a check of that container (#173).",
+    ))
 end
 
 # The container's content (figures / tables / @raw panels / @expect checks) in declaration order, as (kind, item) pairs.

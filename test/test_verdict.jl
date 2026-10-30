@@ -70,10 +70,9 @@ end
         out = joinpath(tmp, "faces")
         Pinax.render(; out=out)
         html = read(joinpath(out, "index.html"), String)
-        @test occursin(
-            r"id=\"a\"><h2>[^\n]*class=\"pinax-verdict-badge fail\"[^>]*>FAIL 1/2", html
-        )
-        @test !occursin(r"id=\"empty\"><h2>[^\n]*pinax-verdict-badge", html)
+        # the section's verdict band: its title, passed/total over the subtree, the verdict
+        @test occursin(r"pinax-verdict-fail\">A   1/2 FAIL", html)
+        @test !occursin("Empty   ", html)              # no checks, no band
         Pinax.render(; out=out, theme=:agent)
         js = read(joinpath(out, "agent.json"), String)
         @test occursin(
@@ -83,10 +82,8 @@ end
         @test occursin("\"id\":\"empty\"", js) && occursin("\"verdict\":null", js)
         Pinax.render(; out=out, theme=:latex)
         tex = read(joinpath(out, "document.tex"), String)
-        @test occursin(
-            r"\\subsection\{A\}[^\n]*\n\\noindent\\textbf\{FAIL\} 1/2 checks passed", tex
-        )
-        @test !occursin(r"\\subsection\{Empty\}[^\n]*\n\\noindent\\textbf", tex)
+        @test occursin(r"\\subsection\{A\}[\s\S]*\\textbf\{Verdict: FAIL\} \(1/2\)", tex)
+        @test count("Verdict:", tex) == 2              # the page and :a, never :empty
     end
 
     @testset "a failing check reported to an enclosing testset: render does not raise" begin

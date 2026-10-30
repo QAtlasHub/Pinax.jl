@@ -47,7 +47,7 @@ still fails the process.
 
 ## What you get
 
-Each test *file* (a `.jl`-named `@testset`) becomes a `status = :benchmark` page, each nested
+Each test *file* (a `.jl`-named `@testset`) becomes a page, each nested
 `@testset` a section, and each `@test` a `Check` carrying its real `got` / `want` / `tol`. From those,
 a **convergence** figure and a **margin** figure are derivable with no figure code, and the whole thing
 renders to three backends from one document: `:gallery` (human), `:agent` (`agent.json`, for a
