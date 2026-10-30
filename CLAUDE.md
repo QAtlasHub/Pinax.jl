@@ -39,14 +39,16 @@ when adding any node type: it needs a human render **and** an agent-data form.
   fingerprint; provenance recorded).
 - **Bridge a sweep** `report(vault, recipe; title, out)` — discover the vault's `:done` keys, load
   each Dict, hand the `(key, dict)` pairs to a project `recipe` (which builds the doc), render
-  gallery + agent.json. Driver project-independent; only `recipe` is project-specific.
+  gallery + agent.json into the SIBLING directories `<out>_html/` and `<out>_agent/` (not under
+  `out`). Driver project-independent; only `recipe` is project-specific.
   `sweep_mean(pairs, quantity, axis)` is a generic scalar-vs-swept-param reduction.
 
 ## Contracts that trip up callers — read this
 
 - **`@figure`'s expression is DEFERRED** — captured, not run, until `render` (so structure is
-  cheap and figures cache). The cache keys on code + `params` (+ the `.done` fingerprint when a
-  `vault` is given).
+  cheap and figures cache). The cache keys on code + `params`, plus the data's digest when a
+  `vault` is given: inside `report`, the digest of the bytes the recipe actually read; otherwise the
+  one the key's `.done` marker recorded.
 - **`agent.json` is the neutral LLM seam** (the data face above) that pinax-mcp, registries
   (Archeion), and LLMs all read — treat its shape as a contract, not an internal detail.
 - **`status` is a page's maturity:** `:draft` (a manuscript) or `:final` (the published version);
