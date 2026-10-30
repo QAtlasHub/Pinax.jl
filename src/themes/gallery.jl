@@ -807,32 +807,14 @@ function emit_foot(theme::GalleryBase, io, doc, katex_mode, interactive, rdiag)
     return println(io, "</body></html>")
 end
 
-# A page's body, laid out like any container: its verdict band and own checks, a Contents nav when it
-# has sections, then its content in declaration order (sections included), then its comments.
+# A page's body, laid out like any container: its verdict band and own checks, then its content in
+# declaration order (sections included), then its comments. Every gallery file calls it — the one
+# file of a one-page document and each file of a multi-page one — so an override applies to both.
 function emit_page(theme::GalleryBase, pg, ctx)
     io = ctx.io
     pg.summary === nothing ||
         println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
     _emit_checks!(theme, pg, ctx)
-    if !isempty(pg.sections)
-        println(io, "<nav><strong>Contents</strong>")
-        for sec in _all_sections(pg)
-            n = length(sec.figures)
-            cnt = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
-            println(
-                io,
-                "<a href=\"#",
-                sec.anchor,
-                "\"",
-                _toc_indent(sec, 0),
-                ">",
-                _esc(sec.title),
-                cnt,
-                "</a>",
-            )
-        end
-        println(io, "</nav>")
-    end
     _emit_content(
         theme,
         pg,
@@ -842,6 +824,29 @@ function emit_page(theme::GalleryBase, pg, ctx)
         page=pg,
     )
     emit_comments(theme, pg.anchor, ctx)   # the page (file node) can carry its own comments
+    return nothing
+end
+
+# A page file's Contents nav, listing its sections (a one-page document has the global TOC instead).
+function _emit_page_nav(pg, io)
+    isempty(pg.sections) && return nothing
+    println(io, "<nav><strong>Contents</strong>")
+    for sec in _all_sections(pg)
+        n = length(sec.figures)
+        cnt = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
+        println(
+            io,
+            "<a href=\"#",
+            sec.anchor,
+            "\"",
+            _toc_indent(sec, 0),
+            ">",
+            _esc(sec.title),
+            cnt,
+            "</a>",
+        )
+    end
+    println(io, "</nav>")
     return nothing
 end
 
@@ -1118,19 +1123,7 @@ function emit_document(
             h1 = isempty(pnum) ? _esc(pg.title) : string(_esc(pnum), ". ", _esc(pg.title))
             oh, ch = _gallery_heading(1, pg.anchor, ctx)
             println(io, "<section class=\"page\" id=\"", pg.anchor, "\">", oh, h1, ch)
-            pg.summary === nothing ||
-                println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
-            _emit_checks!(theme, pg, ctx)
-            # its content in declaration order (the global TOC nav above already lists sections)
-            _emit_content(
-                theme,
-                pg,
-                joinpath(ctx.outdir, "assets", "figures", pg.anchor),
-                pg.layout,
-                ctx;
-                page=pg,
-            )
-            emit_comments(theme, pg.anchor, ctx)
+            emit_page(theme, pg, ctx)   # the global TOC nav above already lists its sections
             println(io, "</section>")
         end
         _emit_bibliography(bib, citeorder, io)
@@ -1163,6 +1156,7 @@ function emit_document(
             io, "<div class=\"pinax-meta\">", n, n == 1 ? " figure" : " figures", "</div>"
         )
         interactive && _emit_committed_json(io, comments, bookmarks, features)
+        _emit_page_nav(pg, io)
         println(io, "<section class=\"page\" id=\"", pg.anchor, "\">")
         emit_page(theme, pg, ctx)
         println(io, "</section>")

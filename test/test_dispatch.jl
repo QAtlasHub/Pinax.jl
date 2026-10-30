@@ -34,6 +34,28 @@ end
     @test occursin("class=\"section\"", b)    # …and emit_section too
 end
 
+# `emit_page` is the page's body in every gallery file: a one-page document (a single index.html)
+# calls it like each file of a multi-page one, so a variant's override applies to both (#168).
+struct PageGallery <: Pinax.GalleryBase end
+Pinax.emit_page(::PageGallery, pg, ctx) = println(ctx.io, "<p>PAGE_BODY:", pg.id, "</p>")
+
+@testset "gallery: emit_page renders one-page and multi-page documents alike" begin
+    tmp = mktempdir()
+    Pinax.reset!(; title="one")
+    @page :p "P" begin
+        @desc "DEFAULT_BODY"
+    end
+    one = read(Pinax.render(; out=joinpath(tmp, "one"), theme=PageGallery()), String)
+    @test occursin("PAGE_BODY:p", one) && !occursin("DEFAULT_BODY", one)
+    @test occursin("<section class=\"page\" id=\"p\"><h1>P</h1>", one)
+
+    Pinax.reset!(; title="two")
+    @page :p "P" begin end
+    @page :q "Q" begin end
+    Pinax.render(; out=joinpath(tmp, "two"), theme=PageGallery())
+    @test occursin("PAGE_BODY:q", read(joinpath(tmp, "two", "q.html"), String))
+end
+
 # The points that used to be internal `_*` helpers (emit_text/emit_comments/emit_page/emit_index) are
 # now real dispatch points too — a variant can override them. No structural gap.
 struct PlainText <: Pinax.GalleryBase end
