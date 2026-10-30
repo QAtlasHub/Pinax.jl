@@ -154,6 +154,7 @@ function emit_figure(theme::LaTeXBase, fig, ctx)
     cap = isempty(fig.caption) ? "" : emit_text(theme, fig.caption, fig.anchor, ctx)
     isempty(cap) || println(io, "\\caption{", cap, "}")
     println(io, "\\label{", fig.anchor, "}\\end{figure}")
+    emit_comments(theme, fig.anchor, ctx)   # a figure's comments follow it, as in every face
     return nothing
 end
 
