@@ -308,6 +308,63 @@ end
         @test root.node.content == [:figure => 1, :figure => 2]   # @desc sets desc, not content order
     end
 
+    if isdefined(Test, :CURRENT_TESTSET)
+        @testset "a root testset dumps, renders or stays out — and a red suite still throws" begin
+            # The root's own `finish` (and the `Pkg.test` delegation's atexit hook) run only at
+            # depth 0, so build a suite by hand and finish it with no testset open.
+            pass = Test.Pass(:test, :(1 == 1), :(1 == 1), nothing)
+            fail = Test.Fail(
+                :test, :(1 == 2), "1 == 2", nothing, nothing, LineNumberNode(1), false
+            )
+            function suite(res; kw...)
+                root = PinaxTestSet("Test report"; kw...)
+                file = PinaxTestSet("test_x.jl")
+                Test.record(file, res)
+                Test.record(root, file)
+                return root
+            end
+            at_root(f) = Base.ScopedValues.with(
+                () -> redirect_stdout(f, devnull),
+                Test.CURRENT_TESTSET => Test.FallbackTestSet(),
+                Test.TESTSET_DEPTH => 0,
+            )
+            dir = mktempdir()
+
+            root = suite(pass; out=joinpath(dir, "r"), dump="")
+            @test at_root(() -> Test.finish(root)) === root
+            @test isfile(joinpath(dir, "r_html", "index.html"))
+            @test !isnan(root.node.elapsed)
+
+            d = joinpath(dir, "s.toml")
+            at_root(() -> Test.finish(suite(pass; dump=d)))
+            @test only(Pinax.load_test_dump(d).children).description == "test_x.jl"
+
+            ign = suite(pass; out=joinpath(dir, "ign"), dump="")
+            ign.node.ignore = true
+            at_root(() -> Test.finish(ign))
+            @test !isdir(joinpath(dir, "ign_html"))
+
+            @test_throws "1 failed" at_root(
+                () -> Test.finish(suite(fail; out=joinpath(dir, "red"), dump=""))
+            )
+            @test isfile(joinpath(dir, "red_html", "index.html"))   # rendered before it throws
+
+            # the delegation's atexit hook: an empty root (a precompile / cache-flags probe) is left
+            # alone; a captured one dumps or renders exactly like `finish`
+            d2 = joinpath(dir, "s2.toml")
+            at_root(() -> Ext._finalize_test_capture!(PinaxTestSet("Test report"; dump=d2)))
+            @test !isfile(d2)
+            at_root(() -> Ext._finalize_test_capture!(suite(pass; dump=d2)))
+            @test isfile(d2)
+            at_root(
+                () -> Ext._finalize_test_capture!(
+                    suite(pass; out=joinpath(dir, "fin"), dump="")
+                ),
+            )
+            @test isfile(joinpath(dir, "fin_html", "index.html"))
+        end
+    end
+
     @testset "the seam is inert inside a stock testset, report off (invariant V)" begin
         # A DefaultTestSet is the innermost and no manuscript is open → :inert → @figure no-ops, and
         # its argument (a deferred gen) is never evaluated. It must neither error nor capture.
