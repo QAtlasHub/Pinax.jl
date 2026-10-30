@@ -2,53 +2,95 @@
 
 This page fixes how a Pinax document is written and what each construct means. It is the single
 reference for the authoring interface: code, docs and tests follow it, and a change to a convention
-starts here. Where the code does not yet follow a convention, the entry names the issue that tracks
-the gap.
+starts here. Where the code does not yet follow a convention, the entry says so and names the issue
+or pull request that tracks the gap.
 
 ## Structure
 
-- A document is a tree: `@part` › `@page` › `@section`, and `@section` nests to **any depth**. Leaving
-  a block returns to the enclosing one. `@page` or `@part` inside a section is an error raised where
-  it is written. (#170)
+- A document is a tree: `@part` › `@page` › `@section`, and `@section` nests to **any depth**.
+  Leaving a block returns to the enclosing one.
+- Each block has one place it may be written, and anywhere else is an error raised where it is
+  written:
+  - `@part` at the top level;
+  - `@page` at the top level or directly inside a `@part`;
+  - `@section` inside a `@page` or another `@section`.
+- A page and a section are the same kind of container. Each holds its content in declaration order:
+  prose (`@desc`), figures, tables, code blocks, checks, `@raw` blocks and child sections, freely
+  interleaved. (in progress, #172)
 - Depth is counted from the part: `@part` 0, `@page` 1, a top-level `@section` 2, and so on.
-- Each backend turns depth into a heading in **one** place (`emit_heading`), never by hard-coding a
-  heading command in an emitter:
+- Each backend turns depth into a heading in **one** function, used for pages and sections alike;
+  no emitter hard-codes a heading command. (in progress, #172)
 
-  | depth | LaTeX | Typst | Markdown | gallery HTML |
+  | depth | node | LaTeX | Markdown (`agent.md`) | gallery HTML |
   |---|---|---|---|---|
-  | 1 (page) | `\section` | `=` | `##` | page title |
-  | 2 | `\subsection` | `==` | `###` | `<h2>` |
-  | 3 | `\subsubsection` | `===` | `####` | `<h3>` |
-  | 4 | `\paragraph` | `====` | `#####` | `<h4>` |
-  | 5 | `\subparagraph` | `=====` | `######` | `<h5>` |
+  | 0 | part | `\part` | `##` | `<h1>` on the index |
+  | 1 | page | `\section` | `###` | `<h1>` |
+  | 2 | section | `\subsection` | `####` | `<h2>` |
+  | 3 | | `\subsubsection` | `#####` | `<h3>` |
+  | 4 | | `\paragraph` | `######` | `<h4>` |
+  | 5 | | `\subparagraph` | fallback | `<h5>` |
 
   Beyond a backend's native levels, the node is rendered in one fixed fallback form for that
-  backend and a diagnostic names it. Depth is never flattened silently. (#170)
+  backend and a diagnostic names it. Depth is never flattened silently. A new backend adds its
+  column here. (#170, #171)
 
 ## Identity
 
-- Every node id is unique within the document. A collision (two pages with one id, two figures with
-  the same `params` in one section, two checks with one id) is an **error raised where the second
-  node is written**, naming both. There is no automatic renaming, so ids and links stay stable.
-- Anchors are hierarchical paths (`page.section.subsection`), so equal ids under different parents
-  do not collide.
-- A check's id is its container's anchor plus a short stable hash of its source text (for example
-  `energy_t0k3x9q2`), so adding or reordering other checks never renumbers it. The same text twice in
-  one container gets `-2`, `-3`. A code block's id hashes its code, so shifting lines never moves it.
-  (#123)
-- Those are ids Pinax **generates**, so a repeat is disambiguated, never an error. The same holds for
-  the section a nested `@testset "x"` opens: its id comes from the description, and a second `"x"`
-  in one container becomes `x-2`. Only an id the author wrote raises on collision.
-- Comments, cross-references and `agent.json` all address a node by the same id. There is no second
-  naming scheme.
+- Every node has an id, a `Symbol`, **unique in the whole document** across all kinds: parts,
+  pages, sections, prose blocks, figures, tables, code blocks and checks. (in progress, #172)
+- The id is the node's only name. It is its HTML anchor, the key its comments are stored under, its
+  address in `agent.json` and pinax-mcp, and what `@ref` points at. There is no second naming
+  scheme. (in progress, #172)
+- An id the **author writes** is never renamed. A collision is an error raised where the second
+  node is written, naming the id.
+- An id **Pinax generates** is the container's id plus a short stable hash of the node's own
+  content, so adding, removing or reordering other nodes never changes it. (in progress, #172)
+
+  | node | hashed content | example |
+  |---|---|---|
+  | figure | its code and `params` | `energy_fig_k3x9q2a` |
+  | table | its code | `energy_tbl_0bqw2jb` |
+  | code block | its source | `energy_code_1r2mwly` |
+  | prose block | its text | `energy_txt_9d0fngk` |
+  | check | its source text | `energy_t0358x5n` |
+  | section of a nested `@testset` | its description | `energy_conv` |
+
+  The same content twice in one container gets `-2`, `-3`. A generated id is never an error.
+- Displayed numbers ("Fig. 3", "Sec. 2.1") are positional and separate from ids. Adding a figure
+  renumbers the display, never an id.
 
 ## Maturity
 
 - `status` takes exactly two values: `:draft` (a manuscript, work in progress) and `:final` (the
   published, curated version). Any other value is an error.
 - `:trial` is accepted during 0.2 as a deprecated alias of `:draft`, with a warning.
+- `status` on a `@part` is the default for its pages; a page's own `status` wins.
 - `status` says only how finished a page is. What kind of page it is (for example, whether it holds
   checks) is not a status value.
+
+## Content
+
+- `@desc` is a **prose block**: markdown and math, placed in content order like any other node. A
+  container holds any number of them, interleaved with figures, tables and code. (in progress, #172)
+
+  ```julia
+  @section :energy "Energy" begin
+      @desc md"We compare the energy with the exact solution."
+      @figure plot_energy()
+      @caption "Energy per site."
+      @desc md"The deviation stays below $10^{-3}$ for every $N$."
+  end
+  ```
+
+- Each content macro takes its expression first and keywords as `name = value`, in any order.
+- A caption is given either as `caption=` on `@figure`, `@table` or `@code`, or by `@caption` written
+  directly after the node. A node has **at most one** caption: a second one (`caption=` and then
+  `@caption`, or two `@caption`s) is an error. (in progress, #172)
+- `@caption` attaches to the node **immediately before it**: a figure, table or code block (its
+  caption) or a check (its label). If there is none, or that node carries no caption (prose, `@raw`,
+  a section), it is an error. It never reaches back to an earlier node.
+- `@raw` is the HTML escape hatch. It is shown by the gallery only; every other face records in its
+  diagnostics that it was left out.
 
 ## Checks
 
@@ -61,8 +103,7 @@ the gap.
   in it is a check of the innermost container, and a `@testset "x"` in it is a child section. The
   body's variable scoping is exactly what it was. (#173)
 - A verdict is derived, never stored. It is `(passed, total)` over the container's subtree, and
-  there is none when the subtree holds no checks, so an empty container never reads as PASS. Every
-  face shows it on every container that has one.
+  there is none when the subtree holds no checks, so an empty container never reads as PASS.
 - A failing check is reported **exactly once**:
   - When an ordinary testset encloses the document (a test suite), the result is handed to it, and
     the suite counts it as if the `@test` were written there.
@@ -72,24 +113,26 @@ the gap.
   not recorded as a check.
 - `@expect` and `@benchmark` are removed. During 0.2 each raises an error that names its
   replacement (`@test`, and a `@section` / `@testset` holding checks).
-- Every container whose subtree holds checks shows them the same way in every face: a verdict band
-  over the subtree, then a table of the checks it owns.
-
-## Captions and descriptions
-
-- A caption can be given two ways: `caption=` on `@figure` / `@table`, or `@caption` written
-  directly after the node.
-- `@caption` attaches to the node **immediately before it**: a `@figure`, `@table` or `@code` (its
-  caption) or a `@test` (the check's label). If there is none, or that node cannot carry a caption
-  (`@raw`, a section), it is an error. It never reaches back to an earlier figure.
 
 ## Faces
 
 - Every node kind has a form in every face: the gallery and LaTeX (human) and `agent.json` (LLM).
-  Backends dispatch on the node type. A node kind a backend does not handle is an error, never a
-  silent omission. (#168)
-- The `agent.json` shape is a contract. It is documented from what the emitter writes, and the
-  pinax-mcp fixture is generated from the emitter and checked against the consumer schema. (#169)
+  Every face handles every kind explicitly; a kind a face does not handle is an error naming the
+  face and the kind, never a silent omission. (#168)
+- Every container is laid out in the same order in every face: its heading, then its verdict band
+  and the table of its own checks (when its subtree holds checks), then its content in declaration
+  order. (in progress, #172)
+- The `agent.json` shape is a contract. The pinax-mcp fixture is generated from the emitter
+  (`test/test_contract.jl`) and checked against the consumer schema, which must name every key the
+  emitter writes. (#169)
+- In `agent.json`, a text field the author did not write is the empty string, and an object that
+  does not exist is `null`. (in progress, #172)
+
+## Output
+
+- `out` is always a **directory**. `render` writes one face into it; `report` and the test reports
+  write `out/html/` and `out/agent/`, and every face of one document reads the one
+  `out/comments.toml`. (in progress, #172)
 
 ## Rendering and data
 
@@ -102,10 +145,7 @@ the gap.
 
 These are not settled yet. Each will move into a section above once decided.
 
-- **`@desc`.** What a second `@desc` in one container means, and whether `@desc` keeps its position
-  in content order.
-- **`@raw`.** What form it takes in `agent.json`.
-- **A second caption on one node.** Today a later caption replaces an earlier one (`caption=` then
-  `@caption`, or two `@caption`s in a row). Whether that should be an error instead.
+- **`@raw` in `agent.json`.** Whether it gets a form there (its HTML, or a text rendering of it), or
+  stays a gallery-only escape hatch.
 - **The figure form in `agent.json`.** A plotted-data table may not convey a plot's features. This
   is to be measured before the form changes.
