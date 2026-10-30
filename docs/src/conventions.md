@@ -40,7 +40,7 @@ or pull request that tracks the gap.
 ## Identity
 
 - Every node has an id, a `Symbol`, **unique in the whole document** across all kinds: parts,
-  pages, sections, prose blocks, figures, tables, code blocks and checks.
+  pages, sections, prose blocks, figures, tables, code blocks, `@raw` blocks and checks.
 - The id is the node's only name. It is its HTML anchor, the key its comments are stored under, its
   address in `agent.json` and pinax-mcp, and what `@ref` points at. There is no second naming
   scheme.
@@ -55,6 +55,7 @@ or pull request that tracks the gap.
   | table | its code | `energy_tbl_0bqw2jb` |
   | code block | its source | `energy_code_1r2mwly` |
   | prose block | its text | `energy_txt_9d0fngk` |
+  | `@raw` block | its HTML | `energy_raw_04f9ir3` |
   | check | its source text | `energy_t0358x5n` |
   | section of a nested `@testset` | its description | `energy_conv` |
 
@@ -94,8 +95,10 @@ or pull request that tracks the gap.
 - `@caption` attaches to the node **immediately before it**: a figure, table or code block (its
   caption) or a check (its label). If there is none, or that node carries no caption (prose, `@raw`,
   a section), it is an error. It never reaches back to an earlier node.
-- `@raw` is the HTML escape hatch. It is shown by the gallery only; every other face records in its
-  diagnostics that it was left out. Any node a face cannot show (a figure with no asset LaTeX can
+- `@raw` is the HTML escape hatch: `@raw html [id=…]`. The gallery shows the HTML verbatim under its
+  id, `agent.json` carries the HTML itself (`raws`, with `{kind:"raw"}` in content order) and
+  `agent.md` shows it as an `html` block. LaTeX cannot show HTML, so it leaves the block out and
+  records that in its diagnostics. Any node a face cannot show (a figure with no asset LaTeX can
   include, a table with no columns) is likewise recorded, never dropped silently.
 
 ## Checks
@@ -158,7 +161,5 @@ or pull request that tracks the gap.
 
 These are not settled yet. Each will move into a section above once decided.
 
-- **`@raw` in `agent.json`.** Whether it gets a form there (its HTML, or a text rendering of it), or
-  stays a gallery-only escape hatch.
 - **The figure form in `agent.json`.** A plotted-data table may not convey a plot's features. This
   is to be measured before the form changes.

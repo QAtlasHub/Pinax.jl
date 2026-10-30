@@ -170,7 +170,7 @@ using Test
         end
         pg = Pinax.current_document().pages[1]
         @test occursin("page level desc", only(pg.texts).source)
-        @test pg.panels == ["<div class=\"banner\">hi</div>"]
+        @test only(pg.raws).html == "<div class=\"banner\">hi</div>"
         html = read(Pinax.render(; out=sitedir("leaf")), String)   # single page → one index.html
         @test occursin("page level desc", html)
         @test occursin("<div class=\"banner\">hi</div>", html)

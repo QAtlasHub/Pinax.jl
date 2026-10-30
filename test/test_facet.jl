@@ -26,7 +26,7 @@ using ParamIO
         @test count("class=\"facet\"", html) == 2       # two groups
     end
 
-    @testset "a faceted section still shows its code, tables and panels, in order (#168)" begin
+    @testset "a faceted section still shows its code, tables and raw blocks, in order (#168)" begin
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" by = "system.g" begin

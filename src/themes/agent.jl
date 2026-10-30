@@ -229,6 +229,18 @@ function _agent_codes!(theme::AgentBase, codes, ctx)
     return nothing
 end
 
+# A container's @raw blocks: each one's HTML, as written (an agent reads what the gallery shows).
+function _agent_raws!(raws, ctx)
+    io = ctx.io
+    print(io, "[")
+    for (i, r) in enumerate(raws)
+        i == 1 || print(io, ",")
+        print(io, "{\"id\":", _jsonstr(string(r.id)), ",\"html\":", _jsonstr(r.html), "}")
+    end
+    print(io, "]")
+    return nothing
+end
+
 # One check -> a JSON object with native-typed numerics (a tool reads 4.6e-5, not "4.6e-5").
 function emit_check(::AgentBase, chk, ctx)
     io = ctx.io
@@ -278,17 +290,10 @@ end
 function _agent_content!(c, ctx)
     io = ctx.io
     print(io, "[")
-    started = false
-    for (kind, item) in _content_items(c)
-        if item isa RawBlock   # @raw HTML has no agent form (an open question); say so, once
-            msg = "a @raw block is HTML; left out of agent.json and agent.md"
-            push!(ctx.rdiag, DiagEntry(WARNING, item.container, msg))
-            continue
-        end
-        item isa Union{Prose,Figure,Table,Check,CodeBlock,Section} ||
+    for (i, (kind, item)) in enumerate(_content_items(c))
+        item isa Union{Prose,Figure,Table,Check,CodeBlock,RawBlock,Section} ||
             _unhandled_node("agent.json", item)
-        started && print(io, ",")
-        started = true
+        i == 1 || print(io, ",")
         print(
             io,
             "{\"kind\":",
@@ -384,6 +389,8 @@ function _agent_container!(theme::AgentBase, c, pg, assetdir, ctx)
     _agent_tables!(theme, c.tables, ctx)
     print(io, ",\"codes\":")
     _agent_codes!(theme, c.codes, ctx)
+    print(io, ",\"raws\":")
+    _agent_raws!(c.raws, ctx)
     print(io, ",\"content\":")
     _agent_content!(c, ctx)
     print(io, ",\"comments\":")   # a page or section carries its own thread, as a figure does
@@ -599,7 +606,7 @@ _agent_md_node(io, b::CodeBlock, env) = _agent_md_code(io, b)
 function _agent_md_node(io, s::Section, env)   # a nested section, in declaration order
     return _agent_md_section(io, s, env.outdir, env.comments, env.as_table, env.rdiag)
 end
-_agent_md_node(io, ::RawBlock, env) = nothing   # @raw HTML: left out, recorded by the agent.json pass
+_agent_md_node(io, r::RawBlock, env) = println(io, "```html\n", r.html, "\n```")   # @raw, as written
 
 # The one place agent.md turns depth into a heading, for parts (0, `##`), pages (1, `###`) and
 # sections (2, `####` …). Past `######` the level is kept as a bold line (Markdown has no deeper

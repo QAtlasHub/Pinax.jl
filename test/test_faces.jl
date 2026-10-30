@@ -129,12 +129,33 @@ using JSON
         @test only(sec["sections"])["title"] == "TS_T"
         # content order holds every kind written on the page, sections included (a check is
         # preceded by its code block)
-        @test [r["kind"] for r in pg["content"]] == ["text", "figure", "table", "code", "code", "check", "section"]
-        # @raw has no agent form yet (an open question): it is left out of the content and named
-        # in the diagnostics
-        @test any(
-            d -> d["item"] == "pg" && occursin("@raw", d["message"]), aj["diagnostics"]
-        )
+        @test [r["kind"] for r in pg["content"]] == ["text", "figure", "table", "code", "code", "check", "raw", "section"]
+        # @raw is carried as its HTML, under a generated id like any other node
+        raw = only(pg["raws"])
+        @test raw["html"] == "<b>RAW_HTML</b>" && startswith(raw["id"], "pg_raw_")
+        @test only(r for r in pg["content"] if r["kind"] == "raw")["id"] == raw["id"]
+        @test !any(d -> occursin("@raw", d["message"]), aj["diagnostics"])
+        md = read(joinpath(out, "agent.md"), String)
+        @test occursin("```html\n<b>RAW_HTML</b>\n```", md)
+    end
+
+    @testset "@raw: an id, written or generated, and its anchor in the gallery" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @raw "<i>one</i>" id = :banner
+            @raw "<i>two</i>"
+        end
+        pg = only(Pinax.current_document().pages)
+        @test [r.id for r in pg.raws][1] === :banner
+        @test startswith(string(pg.raws[2].id), "p_raw_")
+        g = read(Pinax.render(; out=joinpath(tmp, "raw")), String)
+        @test occursin("<div class=\"pinax-raw\" id=\"banner\"><i>one</i></div>", g)
+        Pinax.reset!()
+        @test_throws "duplicate id :banner" @page :p "P" begin
+            @raw "<i>one</i>" id = :banner
+            @desc "x"
+            @table (a=[1],) id = :banner
+        end
     end
 
     # A comment is stored under an id. One whose id names no node (a generated id changes with its

@@ -231,12 +231,14 @@ mutable struct Prose
 end
 
 """
-A `@raw` block as a content-walk node: author-written HTML, kept verbatim. `container` is the anchor
-of the page or section it was written in (a face that cannot show it names that container).
+A `@raw` block: author-written HTML, kept verbatim. Like every node it has an id (written with `id=`,
+or generated from its HTML), which is its gallery anchor and its `agent.json` address; `agent.json`
+carries the HTML itself (Conventions › Faces).
 """
 struct RawBlock
+    id::Symbol
+    anchor::String
     html::String
-    container::String
 end
 
 "A section: a container of prose, figures, tables, code, checks and child sections, in order."
@@ -250,11 +252,11 @@ mutable struct Section
     thumbnail::Union{FigRef,Nothing} # section-level main figure
     layout::Union{Symbol,Nothing}    # :wide|:grid|:single (theme hint)
     figures::Vector{Figure}
-    panels::Vector{String}           # @raw HTML blocks (project-specific UI escape hatch, notes 06 §6)
+    raws::Vector{RawBlock}           # @raw HTML blocks (project-specific UI escape hatch, notes 06 §6)
     tables::Vector{Table}            # @table artifacts
     checks::Vector{Check}            # PASS/FAIL checks (Test's @test written in the section body)
     codes::Vector{CodeBlock}         # @code snippet+output blocks
-    content::Vector{Pair{Symbol,Int}}  # declaration order: (:text|:figure|:table|:panel|:check|:code|:section) => index into the list above
+    content::Vector{Pair{Symbol,Int}}  # declaration order: (:text|:figure|:table|:raw|:check|:code|:section) => index into the list above
     # The section tree (#170): a `@section` nests to any depth. `depth` counts from the part (a page is
     # 1, a top-level section 2), `parent` is the enclosing section (`nothing` at the top level), and
     # `sections` holds the children, which also appear in `content` as `:section => index`.
@@ -279,12 +281,12 @@ mutable struct Page
     part::Union{Symbol,Nothing}      # the @part this page belongs to (navigation grouping), or nothing
     texts::Vector{Prose}             # @desc prose blocks written directly in the page, in order
     figures::Vector{Figure}          # page-level figures (page-as-leaf: @figure with no enclosing @section)
-    panels::Vector{String}           # page-level @raw blocks
+    raws::Vector{RawBlock}           # page-level @raw blocks
     layout::Union{Symbol,Nothing}    # :grid|:single|:wide hint for the page-level figure grid
     tables::Vector{Table}            # page-level @table artifacts (page-as-leaf)
     checks::Vector{Check}            # page-level checks (Test's @test written in the page body)
     codes::Vector{CodeBlock}         # page-level @code snippet+output blocks
-    content::Vector{Pair{Symbol,Int}}  # declaration order of texts/figures/tables/panels/checks/codes/sections
+    content::Vector{Pair{Symbol,Int}}  # declaration order of texts/figures/tables/raws/checks/codes/sections
     status::Symbol                   # maturity: :draft (a manuscript) or :final (default, the published
     # version). Validated by `_status`; what kind of page it is never lives here.
 end
@@ -575,8 +577,10 @@ function _node_id!(c, id, base::Symbol, what::AbstractString)
             _claim!(_symbol_id(id, what), where)
         end
     end
-    taken(x) =
-        any(n -> n.id === x, Iterators.flatten((c.texts, c.figures, c.tables, c.codes)))
+    taken(x) = any(
+        n -> n.id === x,
+        Iterators.flatten((c.texts, c.figures, c.tables, c.codes, c.raws)),
+    )
     id === nothing && return _free_id(base, taken)
     sid = _symbol_id(id, what)
     taken(sid) && error(
@@ -764,7 +768,7 @@ function _enter_page!(id, title; summary=nothing, layout=nothing, status=nothing
         CTX.part,          # inherit the open @part, if any
         Prose[],
         Figure[],
-        String[],
+        RawBlock[],
         layout,
         Table[],
         Check[],
@@ -880,7 +884,7 @@ function _enter_section!(id, title; by=nothing, summary=nothing, layout=nothing)
         nothing,
         layout,
         Figure[],
-        String[],
+        RawBlock[],
         Table[],
         Check[],
         CodeBlock[],
@@ -1030,7 +1034,7 @@ macro expect(args...)
     ))
 end
 
-# The container's content (figures / tables / @raw panels / @expect checks) in declaration order, as (kind, item) pairs.
+# The container's content (prose / figures / tables / @raw blocks / checks / code / sections) in declaration order, as (kind, item) pairs.
 """
     @code [caption=…] [id=…] [lang="julia"] [run=true] expr
     @code [kw…] begin … end
@@ -1203,8 +1207,8 @@ function _content_items(c)
                 c.codes[i]
             elseif k === :section
                 c.sections[i]
-            elseif k === :panel
-                RawBlock(c.panels[i], c.anchor)
+            elseif k === :raw
+                c.raws[i]
             else
                 error("Pinax: unknown content kind :$(k) in \"$(c.anchor)\"")
             end,
@@ -1322,21 +1326,35 @@ end
 
 """
 Inject a raw block into the current section — the escape hatch for project-specific UI that markdown
-can't express (coverage tables, broken-data banners; notes 06 §6). `@raw x` evaluates `x` to a
-string and the theme emits it verbatim (the gallery as raw HTML; trusted author content):
-`@raw raw\"<table class=cov>…</table>\"`. Use `@desc` for prose; `@raw` for hand-built markup.
+can't express (coverage tables, broken-data banners; notes 06 §6). `@raw x [id=:name]` evaluates `x`
+to a string: the gallery emits it verbatim (trusted author content) under its id, `agent.json` and
+`agent.md` carry the HTML itself, and LaTeX leaves it out with a diagnostic. Without `id=` the id is
+generated from the HTML. `@raw raw\"<table class=cov>…</table>\"`. Use `@desc` for prose; `@raw` for
+hand-built markup.
 """
-macro raw(x)
-    return quote
-        _push_panel!($(esc(x)))
+macro raw(args...)
+    html = nothing
+    id = nothing
+    for a in args
+        if a isa Expr && a.head === :(=) && a.args[1] === :id
+            id = a.args[2]
+        elseif html === nothing
+            html = a
+        else
+            error("@raw takes one HTML expression (plus `id=`)")
+        end
     end
+    html === nothing && error("@raw needs an HTML expression")
+    return :(_push_raw!($(esc(html)); id=($(esc(id)))))
 end
-function _push_panel!(s)
+function _push_raw!(s; id=nothing)
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@raw outside of a @section or @page")
-    push!(c.panels, string(s))
-    push!(c.content, :panel => length(c.panels))
+    html = string(s)
+    rid = _node_id!(c, id, Symbol(c.id, "_raw_", _stable_hash(html)), "raw block")
+    push!(c.raws, RawBlock(rid, _anchor(rid), html))
+    push!(c.content, :raw => length(c.raws))
     return nothing
 end
 

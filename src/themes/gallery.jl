@@ -1544,8 +1544,8 @@ function _cap_gallery_checks(checks, cap)
     )
 end
 
-# Emit a container's content (figures / tables / @raw panels) in DECLARATION order. Consecutive
-# figures are grouped into one figure grid; a table or @raw panel between them flushes the grid.
+# Emit a container's content in DECLARATION order. Consecutive figures are grouped into one figure
+# grid; any other node between them (prose, a table, code, a @raw block, a section) flushes the grid.
 # `figures=false` leaves the figures out — a faceted section has already emitted them, regrouped.
 function _emit_content(
     theme::GalleryBase, c, assetdir, layout, ctx; page=nothing, figures=true
@@ -1587,7 +1587,11 @@ function emit_node(theme::GalleryBase, p::Prose, ctx)
 end
 emit_node(theme::GalleryBase, t::Table, ctx) = emit_table(theme, t, ctx)
 emit_node(theme::GalleryBase, b::CodeBlock, ctx) = emit_code(theme, b, ctx)
-emit_node(::GalleryBase, r::RawBlock, ctx) = println(ctx.io, r.html)   # @raw HTML, verbatim
+function emit_node(::GalleryBase, r::RawBlock, ctx)   # @raw HTML, verbatim, under its anchor
+    return println(
+        ctx.io, "<div class=\"pinax-raw\" id=\"", r.anchor, "\">", r.html, "</div>"
+    )
+end
 
 # A `@code` block: the source in a highlighted `<pre>`, then its captured output (if any).
 function emit_code(::GalleryBase, blk, ctx)

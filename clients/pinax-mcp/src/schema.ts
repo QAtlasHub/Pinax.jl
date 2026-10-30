@@ -63,6 +63,9 @@ export const CodeZ = z
 // A prose block (`@desc`): markdown and math, placed in content order like any other node.
 export const TextZ = z.object({ id: z.string(), text: z.string() }).passthrough();
 
+// A `@raw` block: author-written HTML, as written (what the gallery shows verbatim).
+export const RawZ = z.object({ id: z.string(), html: z.string() }).passthrough();
+
 // A number, or the string a non-finite value is written as ("NaN", "Inf").
 const NumZ = z.union([z.number(), z.string()]);
 
@@ -103,6 +106,7 @@ export interface SectionT {
   figures: z.infer<typeof FigureZ>[];
   tables?: z.infer<typeof TableNodeZ>[];
   codes?: z.infer<typeof CodeZ>[];
+  raws?: z.infer<typeof RawZ>[];
   checks?: z.infer<typeof CheckZ>[];
   content?: z.infer<typeof ContentRefZ>[];
   comments?: z.infer<typeof CommentZ>[];
@@ -121,6 +125,7 @@ export const SectionZ: z.ZodType<SectionT> = z.lazy(() =>
       figures: z.array(FigureZ),
       tables: z.array(TableNodeZ).optional(),
       codes: z.array(CodeZ).optional(),
+      raws: z.array(RawZ).optional(),
       checks: z.array(CheckZ).optional(),
       content: z.array(ContentRefZ).optional(),
       comments: z.array(CommentZ).optional(), // the section's own thread, as a figure carries one
@@ -141,6 +146,7 @@ export const PageZ = z
     figures: z.array(FigureZ),
     tables: z.array(TableNodeZ).optional(),
     codes: z.array(CodeZ).optional(),
+    raws: z.array(RawZ).optional(),
     verdict: VerdictZ.nullable().optional(),
     checks: z.array(CheckZ).optional(),
     content: z.array(ContentRefZ).optional(),

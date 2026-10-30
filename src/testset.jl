@@ -540,7 +540,7 @@ end
 # `TestNode` is the ONE shape of a captured suite: a live run builds it (each `PinaxTestSet` in the
 # extension is a thin `AbstractTestSet` adapter holding one, #173), a shard dumps and reloads it, and
 # the fold below walks it. It is a container in its own right — the same payload a `Section` carries
-# (id/anchor, figures/tables/panels/codes/checks/desc + content order) — so a content macro inside a
+# (id/anchor, figures/tables/raws/codes/checks/texts + content order) — so a content macro inside a
 # test pushes into it through the `_current_container()` seam exactly as into a section.
 #
 # It is not a `Section` because a section's place in the document is not known while the suite runs:
@@ -565,10 +565,10 @@ mutable struct TestNode
     children::Vector{TestNode}
     figures::Vector{Figure}
     tables::Vector{Table}
-    panels::Vector{String}
+    raws::Vector{RawBlock}
     codes::Vector{CodeBlock}
     texts::Vector{Prose}                # @desc prose blocks
-    content::Vector{Pair{Symbol,Int}}   # declaration order of texts/figures/tables/panels/checks/codes
+    content::Vector{Pair{Symbol,Int}}   # declaration order of texts/figures/tables/raws/checks/codes
 end
 
 function TestNode(
@@ -581,7 +581,7 @@ function TestNode(
     children::Vector{TestNode}=TestNode[],
     figures::Vector{Figure}=Figure[],
     tables::Vector{Table}=Table[],
-    panels::Vector{String}=String[],
+    raws::Vector{RawBlock}=RawBlock[],
     codes::Vector{CodeBlock}=CodeBlock[],
     texts::Vector{Prose}=Prose[],
     content::Vector{Pair{Symbol,Int}}=Pair{Symbol,Int}[],
@@ -599,7 +599,7 @@ function TestNode(
         children,
         figures,
         tables,
-        panels,
+        raws,
         codes,
         texts,
         content,
@@ -878,7 +878,7 @@ end
 function _sweep_has_user_content(n)
     return !isempty(n.figures) ||
            !isempty(n.tables) ||
-           !isempty(n.panels) ||
+           !isempty(n.raws) ||
            any(_sweep_has_user_content, n.children)
 end
 
@@ -1272,7 +1272,7 @@ function _emit_node!(
     return acc
 end
 
-# Move THIS node's own captured content (desc + figures/tables/panels + checks) into the CTX
+# Move THIS node's own captured content (texts + figures/tables/raws + checks) into the CTX
 # container just entered, preserving declaration order. A captured node carries the full interleaved
 # `content`; one without it (a legacy dump, or a node built by hand) falls back to its checks. Uses
 # `_ctx_container()` (never the probe) — the fold builds the doc in `CTX`.
@@ -1299,9 +1299,9 @@ function _emit_own_content!(n::TestNode, acc::Vector{Check})
         elseif kind === :table
             push!(c.tables, n.tables[i])
             push!(c.content, :table => length(c.tables))
-        elseif kind === :panel
-            push!(c.panels, n.panels[i])
-            push!(c.content, :panel => length(c.panels))
+        elseif kind === :raw
+            push!(c.raws, n.raws[i])
+            push!(c.content, :raw => length(c.raws))
         elseif kind === :text
             push!(c.texts, n.texts[i])
             push!(c.content, :text => length(c.texts))
@@ -1673,7 +1673,11 @@ function _node_to_dict(n)
     # sharded and unsharded documents must be the same document, by construction).
     isempty(n.codes) || (d["code"] = [_code_to_dict(c) for c in n.codes])
     isempty(n.tables) || (d["table"] = [_table_to_dict(t) for t in n.tables])
-    isempty(n.panels) || (d["panel"] = collect(n.panels))
+    isempty(n.raws) || (
+        d["raw"] = [
+            Dict{String,Any}("id" => String(r.id), "html" => r.html) for r in n.raws
+        ]
+    )
     isempty(n.texts) || (
         d["text"] = [
             Dict{String,Any}("id" => String(t.id), "source" => t.source) for t in n.texts
@@ -1766,7 +1770,10 @@ function _dict_to_node(d::AbstractDict)
         checks=Check[_dict_to_check(c) for c in get(d, "check", Any[])],
         codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
         tables=Table[_dict_to_table(t) for t in get(d, "table", Any[])],
-        panels=String[string(p) for p in get(d, "panel", Any[])],
+        raws=RawBlock[
+            RawBlock(Symbol(r["id"]), _anchor(Symbol(r["id"])), r["html"]) for
+            r in get(d, "raw", Any[])
+        ],
         texts=Prose[
             Prose(Symbol(t["id"]), _anchor(Symbol(t["id"])), t["source"]) for
             t in get(d, "text", Any[])

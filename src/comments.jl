@@ -65,7 +65,11 @@ end
 # The node kinds every face shows comments on (Conventions › Faces).
 const _COMMENT_CARRIERS = (:page, :section, :figure, :table)
 const _KIND_NAMES = Dict(
-    :part => "part", :text => "prose block", :code => "code block", :check => "check"
+    :part => "part",
+    :text => "prose block",
+    :code => "code block",
+    :check => "check",
+    :raw => "raw block",
 )
 
 # Every node id in `doc`, with its kind.
@@ -78,6 +82,7 @@ function _node_kinds(doc)
         foreach(n -> kinds[n.id] = :table, c.tables)
         foreach(n -> kinds[n.id] = :code, c.codes)
         foreach(n -> kinds[n.id] = :check, c.checks)
+        foreach(n -> kinds[n.id] = :raw, c.raws)
         return foreach(s -> visit(s, :section), c.sections)
     end
     foreach(pg -> visit(pg, :page), doc.pages)

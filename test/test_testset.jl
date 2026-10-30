@@ -207,10 +207,10 @@ end
             checks=[Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
             codes=[CodeBlock(:c1, "c1", "E = f(x)", "", "", "julia")],
             tables=[tbl],
-            panels=["<p>raw panel</p>"],
+            raws=[Pinax.RawBlock(:r1, "r1", "<p>raw panel</p>")],
             texts=[Pinax.Prose(:d1, "d1", "a description")],
             content=Pair{Symbol,Int}[
-                :text => 1, :code => 1, :check => 1, :table => 1, :panel => 1
+                :text => 1, :code => 1, :check => 1, :table => 1, :raw => 1
             ],
         )
         p = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
@@ -218,10 +218,9 @@ end
         @test only(back.texts).source == "a description"
         @test back.tables[1].caption == "a caption"
         @test back.tables[1].rows == Vector{Any}[Any[10, -0.1], Any[20, ""]]  # missing → its cell text
-        @test back.panels == ["<p>raw panel</p>"]
-        @test back.content == Pair{Symbol,Int}[
-            :text => 1, :code => 1, :check => 1, :table => 1, :panel => 1
-        ]
+        @test only(back.raws).id === :r1 && only(back.raws).html == "<p>raw panel</p>"
+        @test back.content ==
+            Pair{Symbol,Int}[:text => 1, :code => 1, :check => 1, :table => 1, :raw => 1]
         render_test_report([p]; out=joinpath(dir, "rep"))
         html = read(joinpath(dir, "rep", "html", "f_jl.html"), String)
         @test all(
@@ -382,9 +381,9 @@ end
         end
     end
 
-    @testset "fold places captured tables / panels / figures; dump warns on a figure" begin
+    @testset "fold places captured tables / raw blocks / figures; dump warns on a figure" begin
         # Drive the fold over a node carrying every content kind (a live PinaxTestSet holds the same
-        # `TestNode` a merged dump loads), so the :table / :panel / :figure branches all run and land
+        # `TestNode` a merged dump loads), so the :table / :raw / :figure branches all run and land
         # on the page in declaration order.
         fig = Pinax.Figure(
             :f,
@@ -412,15 +411,15 @@ end
             checks=[Check(:t0, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true)],
             figures=[fig],
             tables=[tbl],
-            panels=["<p>hand built</p>"],
-            content=[:panel => 1, :table => 1, :figure => 1, :check => 1],
+            raws=[Pinax.RawBlock(:hb, "hb", "<p>hand built</p>")],
+            content=[:raw => 1, :table => 1, :figure => 1, :check => 1],
         )
         root = TestNode("Pkg"; children=[node])
         dir = mktempdir()
         Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
         html = read(joinpath(dir, "r", "html", "test_x_jl.html"), String)
         @test occursin("a table caption", html)   # the @table folded onto the page
-        @test occursin("hand built", html)         # the @raw panel folded onto the page
+        @test occursin("hand built", html)         # the @raw block folded onto the page
         # the dump carries checks + structure and WARNS (never silently drops) a test's figure
         @test isfile(Pinax.dump_test_report(root, joinpath(dir, "d.toml")))
     end

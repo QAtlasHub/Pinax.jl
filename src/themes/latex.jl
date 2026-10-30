@@ -171,7 +171,7 @@ function _latex_emit_fig!(theme::LaTeXBase, fig, assetdir, ctx)
     return nothing
 end
 
-# Emit a container's figures + tables in declaration order (@raw panels are HTML, skipped in LaTeX;
+# Emit a container's content in declaration order (a @raw block is HTML: left out, and said so;
 # checks are rendered by the container's check table, not inline).
 function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx; page=nothing)
     for (_, node) in _content_items(c)
@@ -195,9 +195,7 @@ end
 emit_node(theme::LaTeXBase, t::Table, ctx) = emit_table(theme, t, ctx)
 emit_node(theme::LaTeXBase, b::CodeBlock, ctx) = emit_code(theme, b, ctx)
 function emit_node(::LaTeXBase, r::RawBlock, ctx)
-    return _latex_left_out!(
-        ctx, r.container, "a @raw block is HTML, which has no LaTeX form"
-    )
+    return _latex_left_out!(ctx, r.anchor, "a @raw block is HTML, which has no LaTeX form")
 end
 
 # A `@code` block → a verbatim listing of the source, then its captured output.

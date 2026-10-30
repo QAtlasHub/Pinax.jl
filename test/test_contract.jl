@@ -48,7 +48,8 @@ function _contract_document!()
         end
         @page :p2 "Page Two" begin
             @table [(model="TFIM", gap=1.0), (model="XXZ", gap=0.0)] caption = "rows of named tuples"
-            @raw "<b>gallery only</b>"   # no agent form: recorded in `diagnostics`
+            @raw "<b>verbatim HTML</b>"   # carried as its HTML, under a generated id
+            @figure error("no plotting backend") caption = "broken"   # a `diagnostics` entry
         end
     end
     return Pinax.current_document()
@@ -69,7 +70,7 @@ end
     # Drift is a failure, never a silent rewrite: regenerate on purpose (see the top of this file).
     @test emitted == read(fixture, String)
     # The fixture holds what the contract promises pinax-mcp: every node kind, both verdicts, a
-    # verdict-less page, a status and a diagnostic.
+    # verdict-less page, a status, a @raw block and a diagnostic.
     for token in (
         "\"status\":\"draft\"",
         "\"kind\":\"figure\"",
@@ -85,7 +86,9 @@ end
         "\"depth\":1",                      # a page carries depth like a section
         "\"summary\":\"\"",                  # text the author did not write is the empty string
         "\"code_id\":\"",                    # a check points at its code block by id
-        "\"diagnostics\":[{\"severity\":\"WARNING\",\"item\":\"p2\"",
+        "\"kind\":\"raw\"",
+        "\"raws\":[{\"id\":\"p2_raw_",
+        "\"diagnostics\":[{\"severity\":\"ERROR\",\"item\":\"p2_fig_",
     )
         @test occursin(token, emitted)
     end

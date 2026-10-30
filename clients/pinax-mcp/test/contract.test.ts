@@ -56,5 +56,5 @@ test("every content ref in the emitted fixture resolves to a unit", () => {
 
 test("the outline ends with the document's diagnostics", () => {
   const o = loadAtlas(emitted).outline();
-  assert.match(o, /## Diagnostics\n- \[WARNING\] p2: a @raw block is HTML/);
+  assert.match(o, /## Diagnostics\n- \[ERROR\] p2_fig_\w+: materialize failed/);
 });
