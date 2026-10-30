@@ -1218,7 +1218,9 @@ function _emit_node!(
     # HERE only — never in the counts, so an ignored subtree still fails the suite if it is red.
     for ch in n.children
         ch.ignore && continue
-        if page_when(ch.description)
+        # A file is a page only at the top level: a page is never written inside another page
+        # (Conventions › Structure), so a file-like testset inside one is a section of it.
+        if page_when(ch.description) && _ctx_container() === nothing
             # Page ids are GLOBAL. Under a CI matrix (issue #69 K) the same file appears in every cell,
             # so `id_prefix` qualifies the id per cell — distinct pages under distinct `@part`s, no
             # spurious duplicate-id collisions.

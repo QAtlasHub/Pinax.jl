@@ -569,7 +569,7 @@ function _agent_md_content(io, c, outdir, comments, as_table)
         elseif kind === :table
             _agent_md_table(io, item)
         elseif kind === :check
-            _agent_md_check(io, item)
+            nothing   # listed under the container's verdict band, ahead of the content
         elseif kind === :code
             _agent_md_code(io, item)
         elseif kind === :section   # a nested section, in declaration order
@@ -591,10 +591,14 @@ function _agent_md_heading(sec)
 end
 
 # A container's verdict over its subtree as one bold line ("" when it holds no checks).
+# A container's verdict band over its subtree, then its own checks — the same place every face puts
+# them, ahead of the content (Conventions › Faces).
 function _agent_md_verdict(io, c)
     v = verdict(c)
     v === nothing && return nothing
-    return println(io, "**", c.title, "   ", v.passed, "/", v.total, " ", v.verdict, "**")
+    println(io, "**", c.title, "   ", v.passed, "/", v.total, " ", v.verdict, "**")
+    foreach(chk -> _agent_md_check(io, chk), c.checks)
+    return nothing
 end
 
 function _agent_md_section(io, sec, outdir, comments, as_table)
@@ -622,10 +626,7 @@ function _agent_markdown(doc::Document, outdir, comments, as_table)
         println(io, "\n### ", pg.title, "  [id: ", pg.id, "]", badge)
         _agent_md_verdict(io, pg)
         pg.summary === nothing || println(io, "_", pg.summary, "_")
-        _agent_md_content(io, pg, outdir, comments, as_table)
-        for sec in pg.sections
-            _agent_md_section(io, sec, outdir, comments, as_table)
-        end
+        _agent_md_content(io, pg, outdir, comments, as_table)   # sections included, in order
     end
     return String(take!(io))
 end

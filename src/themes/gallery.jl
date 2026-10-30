@@ -807,17 +807,13 @@ function emit_foot(theme::GalleryBase, io, doc, katex_mode, interactive, rdiag)
     return println(io, "</body></html>")
 end
 
-# A page's body: its own (page-as-leaf) description / raw panels / figures, then — if it has any
-# in-page subsections — a Contents nav and the sections, then the page's own co-located comments.
+# A page's body, laid out like any container: its verdict band and own checks, a Contents nav when it
+# has sections, then its content in declaration order (sections included), then its comments.
 function emit_page(theme::GalleryBase, pg, ctx)
     io = ctx.io
     pg.summary === nothing ||
         println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
-    # checks lead (verdict band + check table); @figures follow.
     _emit_checks!(theme, pg, ctx)
-    _emit_content(
-        theme, pg, joinpath(ctx.outdir, "assets", "figures", pg.anchor), pg.layout, ctx
-    )
     if !isempty(pg.sections)
         println(io, "<nav><strong>Contents</strong>")
         for sec in _all_sections(pg)
@@ -836,10 +832,15 @@ function emit_page(theme::GalleryBase, pg, ctx)
             )
         end
         println(io, "</nav>")
-        for sec in pg.sections
-            emit_section(theme, sec, pg, ctx)
-        end
     end
+    _emit_content(
+        theme,
+        pg,
+        joinpath(ctx.outdir, "assets", "figures", pg.anchor),
+        pg.layout,
+        ctx;
+        page=pg,
+    )
     emit_comments(theme, pg.anchor, ctx)   # the page (file node) can carry its own comments
     return nothing
 end
@@ -1118,19 +1119,16 @@ function emit_document(
             println(io, "<section class=\"page\" id=\"", pg.anchor, "\"><h1>", h1, "</h1>")
             pg.summary === nothing ||
                 println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
-            # checks lead (verdict band + check table); @figures follow
             _emit_checks!(theme, pg, ctx)
-            # page-as-leaf content (the global TOC nav above already lists the sections)
+            # its content in declaration order (the global TOC nav above already lists sections)
             _emit_content(
                 theme,
                 pg,
                 joinpath(ctx.outdir, "assets", "figures", pg.anchor),
                 pg.layout,
-                ctx,
+                ctx;
+                page=pg,
             )
-            for sec in pg.sections
-                emit_section(theme, sec, pg, ctx)
-            end
             emit_comments(theme, pg.anchor, ctx)
             println(io, "</section>")
         end

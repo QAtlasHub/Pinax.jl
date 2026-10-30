@@ -307,15 +307,14 @@ end
 
 function emit_page(theme::LaTeXBase, pg, ctx)
     io = ctx.io
-    # a page = one \section; its page-level (page-as-leaf) desc + figures, then its subsections
+    # a page = one \section; then its content in declaration order (its subsections included)
     println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
     # checks lead (tabular of the page's own checks + a verdict line over its subtree)
     _latex_checks!(theme, pg, ctx)
-    _latex_emit_content!(theme, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
+    _latex_emit_content!(
+        theme, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx; page=pg
+    )
     emit_comments(theme, pg.anchor, ctx)
-    for sec in pg.sections
-        emit_section(theme, sec, pg, ctx)
-    end
     return nothing
 end
 

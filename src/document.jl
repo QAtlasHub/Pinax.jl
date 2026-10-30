@@ -275,13 +275,9 @@ mutable struct Page
     tables::Vector{Table}            # page-level @table artifacts (page-as-leaf)
     checks::Vector{Check}            # page-level checks (Test's @test written in the page body)
     codes::Vector{CodeBlock}         # page-level @code snippet+output blocks
-    content::Vector{Pair{Symbol,Int}}  # declaration order of figures/tables/panels/checks/codes
+    content::Vector{Pair{Symbol,Int}}  # declaration order of texts/figures/tables/panels/checks/codes/sections
     status::Symbol                   # maturity: :draft (a manuscript) or :final (default, the published
     # version). Validated by `_status`; what kind of page it is never lives here.
-    # A page keeps its top-level sections apart from `content`, so this records where the latest one
-    # was written in that order (`length(content)` then; -1 for none) — what `@caption` needs to tell
-    # "directly after a section" from "directly after a figure" (#159).
-    last_section_at::Int
 end
 
 # Every check in a container's subtree: its own, then each nested section's, in declaration order.
@@ -646,7 +642,15 @@ end
 
 "Document settings + reset of the implicit document. `@pinaxsetup theme=… index=… numbering=… debug=…`"
 macro pinaxsetup(args...)
-    return _call(:reset!, (), _kwspecs(args))
+    return _call(:_pinaxsetup!, (), _kwspecs(args))
+end
+# `@pinaxsetup` starts a new document, so it cannot be written inside an open part, page or section.
+function _pinaxsetup!(; kwargs...)
+    (CTX.part === nothing && CTX.page === nothing && CTX.section === nothing) || error(
+        "@pinaxsetup inside an open @part/@page/@section — it starts a new document, so it is " *
+        "written before any of them",
+    )
+    return reset!(; kwargs...)
 end
 
 "Diagnostics mode. `@debug_mode true`"
@@ -716,7 +720,12 @@ end
 function _enter_page!(id, title; summary=nothing, layout=nothing, status=nothing)
     id = _symbol_id(id, "page")
     CTX.section === nothing || error(
-        "@page :$(id) inside @section :$(CTX.section.id) — a page cannot be nested in a section",
+        "@page :$(id) inside @section :$(CTX.section.id) — a page is written at the top level " *
+        "or directly inside a @part",
+    )
+    CTX.page === nothing || error(
+        "@page :$(id) inside @page :$(CTX.page.id) — a page is written at the top level or " *
+        "directly inside a @part",
     )
     layout === nothing ||
         layout in (:grid, :single, :wide) ||
@@ -746,7 +755,6 @@ function _enter_page!(id, title; summary=nothing, layout=nothing, status=nothing
         CodeBlock[],
         Pair{Symbol,Int}[],
         st,
-        -1,
     )
     push!(doc.pages, pg)
     CTX.page = pg
@@ -792,6 +800,17 @@ end
 
 function _enter_part!(id, title; desc=nothing, status=nothing)
     id = _symbol_id(id, "part")
+    open = if CTX.section !== nothing
+        "@section :$(CTX.section.id)"
+    elseif CTX.page !== nothing
+        "@page :$(CTX.page.id)"
+    elseif CTX.part !== nothing
+        "@part :$(CTX.part)"
+    else
+        nothing
+    end
+    open === nothing ||
+        error("@part :$(id) inside $(open) — a part is written at the top level")
     doc = _ensure_document!()
     _claim!(id, "part")
     # register (id => title) once, in declaration order, for the grouped navigation
@@ -851,13 +870,10 @@ function _enter_section!(id, title; by=nothing, summary=nothing, layout=nothing)
         parent,
         Section[],
     )
-    if parent === nothing
-        push!(pg.sections, sec)
-        pg.last_section_at = length(pg.content)
-    else
-        push!(parent.sections, sec)
-        push!(parent.content, :section => length(parent.sections))
-    end
+    # a page and a section are the same kind of container: a child sits in its content order
+    owner = parent === nothing ? pg : parent
+    push!(owner.sections, sec)
+    push!(owner.content, :section => length(owner.sections))
     CTX.section = sec
     return sec
 end
@@ -1241,12 +1257,6 @@ function _set_caption!(s)
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@caption outside of a @section or @page")
-    c isa Page &&
-        c.last_section_at == length(c.content) &&
-        error(
-            "Pinax: @caption in \"$(c.anchor)\" follows a section, which carries no caption — " *
-            "@caption names only the node written immediately before it",
-        )
     isempty(c.content) && error(
         "Pinax: @caption in \"$(c.anchor)\" has nothing before it to name — write it directly " *
         "after a @figure, @table, @code or @test, or pass `caption=` to that node",

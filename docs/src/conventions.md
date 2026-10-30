@@ -16,7 +16,7 @@ or pull request that tracks the gap.
   - `@section` inside a `@page` or another `@section`.
 - A page and a section are the same kind of container. Each holds its content in declaration order:
   prose (`@desc`), figures, tables, code blocks, checks, `@raw` blocks and child sections, freely
-  interleaved. (in progress, #172)
+  interleaved.
 - Depth is counted from the part: `@part` 0, `@page` 1, a top-level `@section` 2, and so on.
 - Each backend turns depth into a heading in **one** function, used for pages and sections alike;
   no emitter hard-codes a heading command. (in progress, #172)
