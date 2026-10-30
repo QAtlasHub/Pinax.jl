@@ -36,7 +36,7 @@ using JSON
     function comments!(out)
         mkpath(out)
         f = joinpath(out, "comments.toml")
-        for id in (:pg, :sec, :fig)
+        for id in (:pg, :sec, :fig, :tbl)
             Pinax.add_comment(f, id, "NOTE_$(id)"; author="me")
         end
     end
@@ -46,6 +46,12 @@ using JSON
         out = joinpath(tmp, "g")
         comments!(out)
         g = read(Pinax.render(; out=out), String)
+        # every stored comment rides in the page's JSON blob for the browser layer; a node shows a
+        # comment only if it is rendered outside it
+        g = replace(
+            g,
+            r"<script type=\"application/json\" id=\"pinax-committed\">.*?</script>"s => "",
+        )
         for needle in (
             "PART_T",
             "id=\"pg\"",
@@ -62,6 +68,7 @@ using JSON
             "NOTE_pg",
             "NOTE_sec",
             "NOTE_fig",
+            "NOTE_tbl",
         )
             @test occursin(needle, g)
         end
@@ -87,6 +94,7 @@ using JSON
             "NOTE\\_pg",
             "NOTE\\_sec",
             "NOTE\\_fig",
+            "NOTE\\_tbl",
         )
             @test occursin(needle, lx)
         end
@@ -107,7 +115,8 @@ using JSON
         fig = only(pg["figures"])
         @test fig["id"] == "fig" && fig["caption"] == "FIG_CAP"
         @test only(fig["comments"])["text"] == "NOTE_fig"
-        @test only(pg["tables"])["id"] == "tbl"
+        tbl = only(pg["tables"])
+        @test tbl["id"] == "tbl" && only(tbl["comments"])["text"] == "NOTE_tbl"
         cd = only(c for c in pg["codes"] if c["id"] == "cd")
         @test occursin("CODE_VALUE", cd["source"])
         chk = only(pg["checks"])
@@ -126,5 +135,41 @@ using JSON
         @test any(
             d -> d["item"] == "pg" && occursin("@raw", d["message"]), aj["diagnostics"]
         )
+    end
+
+    # A comment is stored under an id. One whose id names no node (a generated id changes with its
+    # node's content), or names a kind that carries no comments, is shown by no face: every face
+    # says so in its diagnostics instead of dropping it.
+    @testset "a comment no face can show is a diagnostic" begin
+        function stray!(out)
+            mkpath(out)
+            f = joinpath(out, "comments.toml")
+            Pinax.add_comment(f, :pg_fig_gone, "ORPHAN"; author="me")
+            Pinax.add_comment(f, :cd, "ON_CODE"; author="me")
+        end
+        doc!()
+        g = joinpath(tmp, "sg")
+        stray!(g)
+        html = read(Pinax.render(; out=g), String)
+        diag = html[first(findfirst("id=\"diagnostics\"", html)):end]
+        @test occursin("pg_fig_gone", diag) && occursin("names no node", diag)
+        @test occursin("cd", diag) && occursin("code block", diag)
+
+        doc!()
+        l = joinpath(tmp, "sl")
+        stray!(l)
+        Pinax.render(; out=l, theme=:latex)
+        ld = read(joinpath(l, "diagnostics.md"), String)
+        @test occursin("pg_fig_gone", ld) && occursin("code block", ld)
+
+        doc!()
+        a = joinpath(tmp, "sa")
+        stray!(a)
+        Pinax.render(; out=a, theme=:agent)
+        ds = JSON.parse(read(joinpath(a, "agent.json"), String))["diagnostics"]
+        @test any(
+            d -> d["item"] == "pg_fig_gone" && occursin("names no node", d["message"]), ds
+        )
+        @test any(d -> d["item"] == "cd" && occursin("code block", d["message"]), ds)
     end
 end

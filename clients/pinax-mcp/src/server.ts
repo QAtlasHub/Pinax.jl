@@ -31,6 +31,10 @@ const MIME: Record<string, string> = {
   ".pdf": "application/pdf",
   ".json": "application/json",
 };
+// The unit kinds every Pinax face shows comments on; a comment on any other kind would be stored and
+// shown nowhere (Conventions › Faces), so add_comment refuses it.
+const COMMENT_CARRIERS = new Set(["page", "section", "figure", "table"]);
+
 const mimeFor = (p: string): string => MIME[extname(p).toLowerCase()] ?? "application/octet-stream";
 const isTextual = (m: string): boolean =>
   m.startsWith("text/") || m === "image/svg+xml" || m === "application/json";
@@ -117,7 +121,7 @@ export function createServer(atlas: Atlas, opts: ServerOptions = {}): Server {
     {
       name: "add_comment",
       description:
-        "Append a comment to a unit (by id) in the Pinax comment store (comments.toml). The agent end of the comment loop: the note is written durably; re-render the document to bake it into the gallery / agent.json.",
+        "Append a comment to a page, section, figure or table (by id) in the Pinax comment store (comments.toml); every face shows comments on those kinds only. The agent end of the comment loop: the note is written durably; re-render the document to bake it into the gallery / agent.json.",
       inputSchema: {
         type: "object",
         properties: {
@@ -217,7 +221,12 @@ export function createServer(atlas: Atlas, opts: ServerOptions = {}): Server {
         const id = String(a.id ?? "");
         const text = String(a.text ?? "");
         if (!id || !text) return err("add_comment requires 'id' and 'text'");
-        if (!atlas.unit(id)) return err(`no unit with id '${id}' in this document`);
+        const unit = atlas.unit(id);
+        if (!unit) return err(`no unit with id '${id}' in this document`);
+        if (!COMMENT_CARRIERS.has(unit.kind))
+          return err(
+            `a comment on a ${unit.kind} is shown nowhere: comment on a page, section, figure or table (the ${unit.kind}'s container is '${unit.parent ?? ""}')`,
+          );
         const turns = opts.store.addComment(id, text, String(a.author ?? "llm"));
         return ok(
           `comment added to '${id}' (now ${turns.length} turn(s)). Re-render the document to bake it into the gallery / agent.json.`,

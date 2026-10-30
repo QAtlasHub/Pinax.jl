@@ -59,6 +59,8 @@ or pull request that tracks the gap.
   | section of a nested `@testset` | its description | `energy_conv` |
 
   The same content twice in one container gets `-2`, `-3`. A generated id is never an error.
+- A generated id changes when its node's own content does, so a comment stored under it then names
+  no node (and the diagnostics say so). Give a node you expect to discuss an explicit id.
 - Displayed numbers ("Fig. 3", "Sec. 2.1") are positional and separate from ids. Adding a figure
   renumbers the display, never an id.
 
@@ -127,7 +129,9 @@ or pull request that tracks the gap.
   and the table of its own checks (when its subtree holds checks), then its content in declaration
   order, then its comments.
 - A comment is stored under its node's id, and every face shows it on that node — a page, a
-  section or a figure.
+  section, a figure or a table. A comment no face can show — its id names no node, or a node of
+  another kind — is a diagnostic in every face, as is a comment store that does not parse; pinax-mcp's
+  `add_comment` refuses the other kinds.
 - The `agent.json` shape is a contract. The pinax-mcp fixture is generated from the emitter
   (`test/test_contract.jl`) and checked against the consumer schema, which must name every key the
   emitter writes. (#169)

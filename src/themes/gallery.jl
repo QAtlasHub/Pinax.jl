@@ -1113,7 +1113,7 @@ function emit_document(
     end
     bib = _load_bib(doc.meta.bib_sources, rdiag)
     citenums, citeorder = _gallery_citations(doc, bib)
-    comments, bookmarks = read_comments(comments_file)
+    comments, bookmarks = _read_comments(doc, comments_file, rdiag)
     features = doc.meta.features
     interactive = any(in(features), (:comments, :bookmarks, :export))
     katex_mode = doc.meta.katex
@@ -1301,7 +1301,7 @@ function _gallery_heading(d::Int, anchor, ctx)
     )
 end
 
-# Render the id-keyed comment turns for a node (a figure or a section) inline, co-located with their
+# Render the id-keyed comment turns for a node (a page, a section, a figure or a table) inline, co-located with their
 # target so the binding is visually unambiguous (notes 01 §4): the communication layer over the
 # figures (me / advisor / LLM). Author + markdown body, rendered server-side (raw HTML escaped).
 function emit_comments(theme::GalleryBase, anchor, ctx)
@@ -1432,6 +1432,7 @@ function emit_table(theme::GalleryBase, tbl, ctx)
         emit_text(theme, tbl.caption, tbl.anchor, ctx; block=false),
         "</figcaption>",
     )
+    emit_comments(theme, tbl.anchor, ctx)   # co-located, as in a figure's card
     return println(io, "</figure>")
 end
 

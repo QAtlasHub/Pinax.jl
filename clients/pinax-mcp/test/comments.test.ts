@@ -90,6 +90,13 @@ test("add_comment is exposed only with --comments and persists over MCP", { time
     // commenting on an id not in the document is rejected
     const bad = await client.callTool({ name: "add_comment", arguments: { id: "ghost", text: "x" } });
     assert.equal(bad.isError, true);
+
+    // a table carries comments; a check does not (no face would show it), so it is refused
+    const tbl = await client.callTool({ name: "add_comment", arguments: { id: "p1_tbl1", text: "ok" } });
+    assert.match((tbl.content as any)[0].text, /comment added to 'p1_tbl1'/);
+    const chk = await client.callTool({ name: "add_comment", arguments: { id: "s1_t1", text: "x" } });
+    assert.equal(chk.isError, true);
+    assert.match((chk.content as any)[0].text, /shown nowhere.*'s1'/);
   } finally {
     await client.close();
   }

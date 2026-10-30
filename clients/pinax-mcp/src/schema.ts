@@ -23,6 +23,7 @@ export const TableNodeZ = z
     code: z.string(),
     header: z.array(z.string()),
     rows: z.array(z.array(z.unknown())),
+    comments: z.array(CommentZ).optional(), // the table's own thread, as a figure carries one
   })
   .passthrough();
 

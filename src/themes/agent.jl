@@ -153,7 +153,8 @@ function _agent_comments!(anchor, ctx)
     return print(ctx.io, "]")
 end
 
-# One @table -> a JSON object (header + native-typed rows). A table is already the LLM-native form.
+# One @table -> a JSON object (header + native-typed rows, then its comments). A table is already the
+# LLM-native form.
 function emit_table(::AgentBase, tbl, ctx)
     io = ctx.io
     print(
@@ -180,7 +181,9 @@ function emit_table(::AgentBase, tbl, ctx)
         end
         print(io, "]")
     end
-    print(io, "]}")
+    print(io, "],\"comments\":")
+    _agent_comments!(tbl.anchor, ctx)
+    print(io, "}")
     return nothing
 end
 
@@ -584,6 +587,7 @@ function _agent_md_content(io, c, outdir, comments, as_table, rdiag)
             _agent_md_fig(io, item, outdir, comments, as_table)
         elseif kind === :table
             _agent_md_table(io, item)
+            _agent_md_notes(io, item.anchor, comments)
         elseif kind === :check
             nothing   # listed under the container's verdict band, ahead of the content
         elseif kind === :code
@@ -627,7 +631,7 @@ function _agent_md_verdict(io, c)
     return nothing
 end
 
-# A page's or section's own comment thread, at its end (where the gallery and LaTeX put it).
+# A node's comment thread, after it (where the gallery and LaTeX put it).
 function _agent_md_notes(io, anchor, comments)
     for c in get(comments, Symbol(anchor), Comment[])
         println(io, "- note (", c.author, "): ", c.text)
@@ -701,8 +705,8 @@ function emit_document(
     cache::RenderCache;
     comments_file::AbstractString=joinpath(outdir, "comments.toml"),
 )
-    comments, _bm = read_comments(comments_file)
     rdiag = DiagEntry[]
+    comments, _bm = _read_comments(doc, comments_file, rdiag)
     mkpath(outdir)
     ctx = AgentCtx(IOBuffer(), String(outdir), comments, cache, rdiag)
     # agent.json first: it materializes the figures agent.md then reads. agent.md ends with every

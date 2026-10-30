@@ -285,7 +285,9 @@ function emit_table(theme::LaTeXBase, tbl, ctx)
         println(io, join((_texesc(_cellstr(c)) for c in row), " & "), " ", rowend)
     end
     println(io, "\\hline\\end{tabular}")
-    return println(io, "\\end{table}")
+    println(io, "\\end{table}")
+    emit_comments(theme, tbl.anchor, ctx)   # a table's comments follow it, as a figure's do
+    return nothing
 end
 
 # The one place a section's depth becomes a LaTeX heading. A page is `\\section` (depth 1), so a
@@ -355,7 +357,7 @@ function emit_document(
     ids = Dict{Symbol,String}(id => n.anchor for (id, n) in doc.refs)
     bib = _load_bib(doc.meta.bib_sources, rdiag)
     _, citeorder = _gallery_citations(doc, bib)
-    comments, _bm = read_comments(comments_file)
+    comments, _bm = _read_comments(doc, comments_file, rdiag)
     title = isempty(doc.meta.title) ? "Pinax gallery" : doc.meta.title
     ctx = LaTeXCtx(io, ids, comments, cache, rdiag, String(outdir))
 

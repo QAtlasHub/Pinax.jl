@@ -120,4 +120,16 @@ using Test
         @test occursin("look at this peak", card)
         @test occursin("<span class=\"author\">me</span>", card)
     end
+
+    @testset "an unparseable store is a diagnostic, not silence" begin
+        f = joinpath(tmp, "broken.toml")
+        write(f, "[comment\nthis is not toml")
+        @test Pinax.read_comments(f) ==
+            (Dict{Symbol,Vector{Pinax.Comment}}(), Set{Symbol}())
+        Pinax.reset!()
+        @page :p "P" begin end
+        html = read(Pinax.render(; out=site("sbroken"), comments_file=f), String)
+        diag = html[first(findfirst("id=\"diagnostics\"", html)):end]
+        @test occursin("broken.toml", diag) && occursin("does not parse", diag)
+    end
 end

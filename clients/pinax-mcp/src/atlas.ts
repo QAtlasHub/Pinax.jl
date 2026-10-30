@@ -190,6 +190,7 @@ export class Atlas {
       } else if (u.kind === "table") {
         const cellStr = (c: unknown) => (c == null ? "" : String(c)); // avoid [object Object] / nested-array join
         consider(u, "cells", (n.rows ?? []).map((r: unknown[]) => r.map(cellStr).join(" ")).join(" | "));
+        for (const c of n.comments ?? []) consider(u, "comment", `${c.author}: ${c.text}`);
       } else {
         consider(u, "desc", n.desc);
         if (u.kind === "page") consider(u, "summary", n.summary);

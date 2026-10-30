@@ -33,16 +33,20 @@ end
     read_comments(path) -> (comments, bookmarks)
 
 Read an id-keyed comments TOML. Returns `comments::Dict{Symbol,Vector{Comment}}` (id -> turns, in
-file order) and `bookmarks::Set{Symbol}`. A missing or unparseable file yields empties (non-fatal).
+file order) and `bookmarks::Set{Symbol}`. A missing or unparseable file yields empties (non-fatal);
+rendering reports an unparseable one in the document's diagnostics.
 """
-function read_comments(path::AbstractString)
+read_comments(path::AbstractString) = _parse_comments(path)[1:2]
+
+# `read_comments`, plus the parse error of an unreadable store (`nothing` when it parsed or is absent).
+function _parse_comments(path::AbstractString)
     comments = Dict{Symbol,Vector{Comment}}()
     bookmarks = Set{Symbol}()
-    isfile(path) || return comments, bookmarks
+    isfile(path) || return comments, bookmarks, nothing
     data = try
         TOML.parsefile(path)
-    catch
-        return comments, bookmarks
+    catch e
+        return comments, bookmarks, e
     end
     for (id, entries) in get(data, "comment", Dict{String,Any}())
         entries isa AbstractVector || continue
@@ -54,6 +58,58 @@ function read_comments(path::AbstractString)
     end
     for (id, on) in get(data, "bookmark", Dict{String,Any}())
         on === true && push!(bookmarks, Symbol(id))
+    end
+    return comments, bookmarks, nothing
+end
+
+# The node kinds every face shows comments on (Conventions › Faces).
+const _COMMENT_CARRIERS = (:page, :section, :figure, :table)
+const _KIND_NAMES = Dict(
+    :part => "part", :text => "prose block", :code => "code block", :check => "check"
+)
+
+# Every node id in `doc`, with its kind.
+function _node_kinds(doc)
+    kinds = Dict{Symbol,Symbol}(pid => :part for (pid, _) in doc.parts)
+    function visit(c, kind)
+        kinds[c.id] = kind
+        foreach(n -> kinds[n.id] = :text, c.texts)
+        foreach(n -> kinds[n.id] = :figure, c.figures)
+        foreach(n -> kinds[n.id] = :table, c.tables)
+        foreach(n -> kinds[n.id] = :code, c.codes)
+        foreach(n -> kinds[n.id] = :check, c.checks)
+        return foreach(s -> visit(s, :section), c.sections)
+    end
+    foreach(pg -> visit(pg, :page), doc.pages)
+    return kinds
+end
+
+# The comments a face renders `doc` with. A comment no face can show — the store does not parse, its
+# id names no node, or it names a kind that carries no comments — goes into `rdiag`, never silently
+# nowhere.
+function _read_comments(doc, path::AbstractString, rdiag)
+    comments, bookmarks, err = _parse_comments(path)
+    err === nothing || push!(
+        rdiag,
+        DiagEntry(
+            ERROR,
+            basename(path),
+            "the comment store does not parse, so no comment is shown: $(sprint(showerror, err))",
+        ),
+    )
+    kinds = _node_kinds(doc)
+    for id in sort!(collect(keys(comments)))
+        k = get(kinds, id, nothing)
+        msg = if k === nothing
+            "a comment names no node in this document, so it is shown nowhere. A generated id " *
+            "changes with its node's content: give a node you discuss an explicit id."
+        elseif !(k in _COMMENT_CARRIERS)
+            "a comment on a $(_KIND_NAMES[k]) is shown nowhere: comments are shown on pages, " *
+            "sections, figures and tables."
+        else
+            continue
+        end
+        push!(rdiag, DiagEntry(WARNING, string(id), msg))
     end
     return comments, bookmarks
 end
