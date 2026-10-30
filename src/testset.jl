@@ -434,9 +434,9 @@ end
 
 # ── recovering the NUMBERS out of a test's expression ────────────────
 #
-# `isapprox(got, want; rtol=…, atol=…)` / `got ≈ want` → (got, want, tol, kind), or nothing.
-# The Expr arrives with its arguments already EVALUATED (that is what `Test` records), so these are
-# the real numbers the assertion actually compared.
+# `isapprox(got, want; rtol=…, atol=…)` / `got ≈ want` → (; got, want, atol, rtol), with isapprox's
+# own defaults filled in, or nothing. The Expr arrives with its arguments already EVALUATED (that is
+# what `Test` records), so these are the real numbers the assertion actually compared.
 function _approx_numbers(e::Expr)
     e.head === :call || return nothing
     f = e.args[1]
@@ -460,21 +460,27 @@ function _approx_numbers(e::Expr)
         end
     end
     length(pos) >= 2 || return nothing
-    got, want = pos[1], pos[2]
-    # isapprox is `|x-y| <= max(atol, rtol*max(|x|,|y|))`. A Check carries ONE kind, so report the
-    # one that actually governs: relative when there is a nonzero reference, else absolute.
-    if rtol !== nothing && rtol > 0 && abs(want) > 0
-        return (got, want, rtol, :rel)
-    elseif atol !== nothing && atol > 0
-        return (got, want, atol, :abs)
-    elseif rtol !== nothing && rtol > 0
-        return (got, want, rtol, :rel)
-    end
-    return nothing
+    a = something(atol, 0.0)
+    # isapprox's default: rtol = √eps when no atol is given, 0 when one is.
+    r = something(rtol, a > 0 ? 0.0 : sqrt(eps(Float64)))
+    return (; got=pos[1], want=pos[2], atol=a, rtol=r)
 end
 _approx_numbers(::Any) = nothing
 
+# A recorded number. `Test` stores a failing expression as a string and it is reparsed, which turns a
+# NaN/Inf value back into an identifier (and -Inf into a call): read those as the floats they were
+# (#116), so a diverged computation keeps its numbers instead of losing them.
 _tofloat(x::Real) = Float64(x)
+function _tofloat(x::Symbol)
+    x in (:NaN, :NaN64, :NaN32, :NaN16) && return NaN
+    x in (:Inf, :Inf64, :Inf32, :Inf16) && return Inf
+    return nothing
+end
+function _tofloat(x::Expr)
+    (x.head === :call && length(x.args) == 2 && x.args[1] === :-) || return nothing
+    v = _tofloat(x.args[2])
+    return v === nothing ? nothing : -v
+end
 _tofloat(x::Any) = nothing
 
 _margin(c::Check) = c.tol > 0 ? c.delta / c.tol : 0.0
@@ -502,26 +508,32 @@ end
 function _check_from(expr, label::AbstractString, passed::Bool, i::Int)
     id = Symbol("t", i)
     nums = _approx_numbers(expr)
-    if nums === nothing
-        got = passed ? 1.0 : 0.0
-        return Check(
-            id,
-            String(label),
-            got,
-            1.0,
-            abs(got - 1.0),
-            0.5,
-            :abs,
-            passed,
-            "",
-            "",
-            false,
-            true,
-        )
+    nums === nothing && return _indicator_check(id, label, passed)
+    (; got, want, atol, rtol) = nums
+    # No margin exists for a non-finite value or a zero tolerance: say so on the check, flagged as an
+    # indicator, rather than emitting a non-finite delta or fabricated numbers (#116).
+    (isfinite(got) && isfinite(want)) || return _indicator_check(
+        id, "$(label)  [got = $(got), want = $(want): no margin]", passed
+    )
+    # isapprox passes iff |x-y| <= max(atol, rtol*max(|x|,|y|)) (#115). Record the term that
+    # governs, so `delta <= tol` is exactly that test: absolute when atol is the larger bound, else
+    # relative to max(|x|,|y|).
+    scale = max(abs(got), abs(want))
+    atol <= 0 &&
+        rtol * scale <= 0 &&
+        return _indicator_check(id, "$(label)  [zero tolerance: no margin]", passed)
+    if atol >= rtol * scale
+        return Check(id, String(label), got, want, abs(got - want), atol, :abs, passed)
     end
-    got, want, tol, kind = nums
-    delta = kind === :rel ? abs(got - want) / abs(want) : abs(got - want)
-    return Check(id, String(label), got, want, delta, tol, kind, passed)
+    return Check(id, String(label), got, want, abs(got - want) / scale, rtol, :rel, passed)
+end
+
+# A 1/0 pass indicator: every assertion still shows up in the verdict, but carries no margin.
+function _indicator_check(id, label, passed)
+    got = passed ? 1.0 : 0.0
+    return Check(
+        id, String(label), got, 1.0, abs(got - 1.0), 0.5, :abs, passed, "", "", false, true
+    )
 end
 
 # ── the tree DTO (Test-free) ─────────────────────────────────────────
@@ -934,7 +946,8 @@ function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, 
             push!(gy, c.got)
             push!(my, _margin(c))
             push!(ok, c.pass)
-            tolabs = c.kind === :rel ? c.tol * abs(c.want) : c.tol
+            # the pass boundary isapprox applies: rel is relative to max(|got|,|want|) (#115)
+            tolabs = c.kind === :rel ? c.tol * max(abs(c.got), abs(c.want)) : c.tol
             push!(want, c.want)
             push!(lo, c.want - tolabs)
             push!(hi, c.want + tolabs)

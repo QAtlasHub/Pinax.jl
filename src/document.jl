@@ -131,9 +131,11 @@ _cellstr(x) = x === missing ? "" : string(x)
 
 """
 A single PASS/FAIL check (a `Test` `@test` recorded into a container) — one assertion of a computed
-value against a reference. `delta` is the resolved deviation (relative or absolute per `kind`),
-`pass` is `delta <= tol`. Renders to a row of the gallery's fixed test-report, a LaTeX tabular row,
-and a native-typed JSON object in `agent.json` (the machine-readable verdict).
+value against a reference. `delta` is the deviation under the term that governs the bound — `:abs`
+is `|got - want|`, `:rel` is `|got - want| / max(|got|, |want|)`, as `isapprox` defines them — so
+`pass` is `delta <= tol`. An `indicator` check (no recoverable numbers) is a 1/0 and carries no
+margin. Renders to a row of the container's check table, a LaTeX tabular row, and a native-typed
+JSON object in `agent.json` (the machine-readable verdict).
 """
 mutable struct Check
     id::Symbol

@@ -89,7 +89,8 @@ end
         pass = Test.Pass(
             :test, :(isapprox(a, b)), :(isapprox(1.0, 1.0098; rtol=0.01)), nothing
         )
-        @test _approx_numbers(_result_data_expr(pass)) == (1.0, 1.0098, 0.01, :rel)
+        @test _approx_numbers(_result_data_expr(pass)) ==
+            (; got=1.0, want=1.0098, atol=0.0, rtol=0.01)
 
         fail = Test.Fail(
             :test,
@@ -100,7 +101,8 @@ end
             LineNumberNode(1),
             false,
         )
-        @test _approx_numbers(_result_data_expr(fail)) == (0.5, 0.9, 0.01, :rel)
+        @test _approx_numbers(_result_data_expr(fail)) ==
+            (; got=0.5, want=0.9, atol=0.0, rtol=0.01)
     end
 
     @testset "check carries the margin, not just a verdict" begin
@@ -110,9 +112,8 @@ end
         @test c.got == 1.0 && c.want == 1.0098 && c.tol == 0.01 && c.kind === :rel
         @test c.delta / c.tol > 0.9   # passed, but spent 97% of its budget
 
-        # `pass` comes from Julia's own verdict, never from delta <= tol: isapprox mixes atol and
-        # rtol in a way a single-kind Check cannot reproduce, and a report that disagrees with the
-        # test runner is worse than no report.
+        # `pass` comes from Julia's own verdict, never from delta <= tol (which reproduces the same
+        # isapprox bound, #115): a report that disagrees with the test runner is worse than none.
         atol_pass = Test.Pass(
             :test, :x, :(isapprox(0.0, 1.0e-9; atol=1.0e-8, rtol=0.01)), nothing
         )
@@ -125,7 +126,10 @@ end
 
     @testset "atol governs when there is no usable reference" begin
         p = Test.Pass(:test, :x, :(isapprox(0.001, 0.0; atol=0.01)), nothing)
-        @test _approx_numbers(_result_data_expr(p)) == (0.001, 0.0, 0.01, :abs)
+        @test _approx_numbers(_result_data_expr(p)) ==
+            (; got=0.001, want=0.0, atol=0.01, rtol=0.0)
+        c = _check_for(p, 1)
+        @test (c.kind, c.tol) == (:abs, 0.01)
     end
 
     @testset "margin figure needs no plotting backend" begin
