@@ -326,6 +326,7 @@ function emit_page(theme::LaTeXBase, pg, ctx)
     io = ctx.io
     # a page = one \section; then its content in declaration order (its subsections included)
     println(io, _latex_heading(1, pg.title, pg.anchor, ctx))
+    pg.status === :draft && println(io, "\\par\\noindent\\textit{Draft.}")   # its maturity, as every face shows it
     # checks lead (tabular of the page's own checks + a verdict line over its subtree)
     _latex_checks!(theme, pg, ctx)
     _latex_emit_content!(

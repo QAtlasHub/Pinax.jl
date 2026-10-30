@@ -210,5 +210,53 @@ end
     idx = read(
         joinpath(Pinax.render(; out=joinpath(tmp, "site")) |> dirname, "index.html"), String
     )
-    @test occursin("card-status", idx)            # gallery badges the draft page
+    @test occursin("pinax-status", idx)           # gallery badges the draft page
+end
+
+# A page is named on the index cards, in the :toc index, in a one-page file's Contents and in its own
+# heading; one helper writes its badges (a :draft status, then the verdict over its subtree) in every
+# one of those places (#168). LaTeX marks a draft page under its heading.
+@testset "one page badge, wherever a page is named" begin
+    tmp = mktempdir()
+    draft = "<span class=\"pinax-status\">draft</span>"
+    pass = "<span class=\"pinax-vbadge pinax-vbadge-pass\">PASS 1/1</span>"
+    two!(; index=:cards) = begin
+        Pinax.reset!(; title="badges", index=index)
+        @page :d "Draft" status = :draft begin
+            @test true
+        end
+        @page :f "Final" begin end
+    end
+
+    two!()
+    Pinax.render(; out=joinpath(tmp, "cards"))
+    idx = read(joinpath(tmp, "cards", "index.html"), String)
+    @test occursin(draft, idx) && occursin(pass, idx)
+    @test count("pinax-status", idx) == 1   # the draft card only (the CSS is in style.css)
+    d = read(joinpath(tmp, "cards", "d.html"), String)
+    @test occursin(string("Draft ", draft, " ", pass, "</h1>"), d)
+
+    two!(; index=:toc)
+    Pinax.render(; out=joinpath(tmp, "toc"))
+    toc = read(joinpath(tmp, "toc", "index.html"), String)
+    @test occursin(string("Draft</a> ", draft, " ", pass), toc)
+
+    Pinax.reset!(; title="one")
+    @page :d "Draft" status = :draft begin
+        @test true
+    end
+    one = read(Pinax.render(; out=joinpath(tmp, "one")), String)
+    @test occursin(string("Draft ", draft, " ", pass, "</h1>"), one)   # its heading
+    @test occursin(string("Draft ", draft, " ", pass, "</a>"), one)    # the Contents entry
+
+    lx = read(Pinax.render(; out=joinpath(tmp, "l"), theme=:latex), String)
+    @test occursin("\\section{Draft}\\label{d}\n\\par\\noindent\\textit{Draft.}", lx)
+
+    # a failing subtree badges FAIL (checked on the helper: a failing check would fail this suite)
+    Pinax.reset!()
+    @page :x "X" begin end
+    pg = only(Pinax.current_document().pages)
+    push!(pg.checks, Pinax.Check(:c, "c", 1.0, 2.0, 1.0, 0.5, :abs, false))
+    @test Pinax._page_badges(pg) ==
+        " <span class=\"pinax-vbadge pinax-vbadge-fail\">FAIL 0/1</span>"
 end

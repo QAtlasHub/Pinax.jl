@@ -242,7 +242,10 @@ const _GALLERY_CSS = """
   .card-thumb-pdf{width:100%;height:100%;border:0;background:#fff;pointer-events:none}
   .card-body{padding:.7rem .9rem}
   .card-title{font-weight:600;font-size:1.05rem}
-  .card-status{display:inline-block;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.03em;color:var(--warn);background:var(--warn-bg);border:1px solid var(--warn);border-radius:6px;padding:0 .35rem;margin-left:.4rem;vertical-align:middle}
+  .pinax-status,.pinax-vbadge{display:inline-block;font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.03em;border-radius:6px;padding:0 .35rem;margin-left:.4rem;vertical-align:middle}
+  .pinax-status{color:var(--warn);background:var(--warn-bg);border:1px solid var(--warn)}
+  .pinax-vbadge-pass{color:var(--ok);background:var(--ok-bg);border:1px solid var(--ok)}
+  .pinax-vbadge-fail{color:var(--bad);background:var(--bad-bg);border:1px solid var(--bad)}
   .card-summary{color:var(--mut);font-size:.9rem;margin-top:.2rem}
   .card-sections{margin-top:.5rem;font-size:.85rem;color:var(--mut)}
   .card-sections .sec-item{padding:.1rem 0}
@@ -893,7 +896,16 @@ function _emit_toc_nav(doc::Document, io; has_bib::Bool=false)
     pagelink(pg) = begin
         n = _page_nfigs(pg)
         cnt = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
-        println(io, "<a href=\"#", pg.anchor, "\">", _esc(pg.title), cnt, "</a>")
+        println(
+            io,
+            "<a href=\"#",
+            pg.anchor,
+            "\">",
+            _esc(pg.title),
+            _page_badges(pg),
+            cnt,
+            "</a>",
+        )
         for sec in _all_sections(pg)
             sn = length(sec.figures)
             scnt = sn > 0 ? string(" <span class=\"nfig\">(", sn, ")</span>") : ""
@@ -930,6 +942,31 @@ function _emit_toc_nav(doc::Document, io; has_bib::Bool=false)
     return println(io, "</nav>")
 end
 
+# A page's badges, wherever the page is named (index card, :toc entry, Contents entry, its heading):
+# its status when it is a :draft, then the verdict over its subtree when that holds checks.
+function _page_badges(pg)
+    out = if pg.status === :final
+        ""
+    else
+        string(" <span class=\"pinax-status\">", _esc(string(pg.status)), "</span>")
+    end
+    v = verdict(pg)
+    v === nothing && return out
+    cls = v.verdict == "PASS" ? "pinax-vbadge-pass" : "pinax-vbadge-fail"
+    return string(
+        out,
+        " <span class=\"pinax-vbadge ",
+        cls,
+        "\">",
+        v.verdict,
+        " ",
+        v.passed,
+        "/",
+        v.total,
+        "</span>",
+    )
+end
+
 # The index: one card per page (thumbnail + title + summary + counts) linking to `<page>.html`.
 # `rich=true` (index level :rich) additionally lists each page's sections beneath its summary.
 function _emit_cards(doc::Document, io, outdir, bookmarks; rich::Bool=false)
@@ -942,11 +979,7 @@ function _emit_cards(doc::Document, io, outdir, bookmarks; rich::Bool=false)
             io,
             "<div class=\"card-body\"><div class=\"card-title\">",
             _esc(pg.title),
-            if pg.status === :final
-                ""
-            else
-                string(" <span class=\"card-status\">", _esc(string(pg.status)), "</span>")
-            end,
+            _page_badges(pg),
             "</div>",
         )
         pg.summary === nothing ||
@@ -1000,7 +1033,15 @@ function _emit_toc_index(doc::Document, io)
     item(pg) = begin
         nfig = _page_nfigs(pg)
         nsec = length(pg.sections)
-        print(io, "<li><a href=\"", pg.anchor, ".html\">", _esc(pg.title), "</a>")
+        print(
+            io,
+            "<li><a href=\"",
+            pg.anchor,
+            ".html\">",
+            _esc(pg.title),
+            "</a>",
+            _page_badges(pg),
+        )
         pg.summary === nothing ||
             print(io, " <span class=\"toc-summary\">— ", _esc(pg.summary), "</span>")
         print(io, " <span class=\"toc-meta\">(", _count_meta(nsec, nfig), ")</span></li>")
@@ -1120,7 +1161,11 @@ function emit_document(
         _emit_toc_nav(doc, io; has_bib=(!isempty(citeorder)))
         for pg in doc.pages
             pnum = get(nums, pg.anchor, "")
-            h1 = isempty(pnum) ? _esc(pg.title) : string(_esc(pnum), ". ", _esc(pg.title))
+            h1 = string(
+                isempty(pnum) ? "" : string(_esc(pnum), ". "),
+                _esc(pg.title),
+                _page_badges(pg),
+            )
             oh, ch = _gallery_heading(1, pg.anchor, ctx)
             println(io, "<section class=\"page\" id=\"", pg.anchor, "\">", oh, h1, ch)
             emit_page(theme, pg, ctx)   # the global TOC nav above already lists its sections
@@ -1148,7 +1193,9 @@ function emit_document(
             "</a></nav>",
         )
         pnum = get(nums, pg.anchor, "")
-        h1 = isempty(pnum) ? _esc(pg.title) : string(_esc(pnum), ". ", _esc(pg.title))
+        h1 = string(
+            isempty(pnum) ? "" : string(_esc(pnum), ". "), _esc(pg.title), _page_badges(pg)
+        )
         oh, ch = _gallery_heading(1, pg.anchor, ctx)
         println(io, oh, h1, ch)
         n = _page_nfigs(pg)
