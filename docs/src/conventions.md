@@ -13,7 +13,10 @@ or pull request that tracks the gap.
   written:
   - `@part` at the top level;
   - `@page` at the top level or directly inside a `@part`;
-  - `@section` inside a `@page` or another `@section`.
+  - `@section` inside a `@page` or another `@section`;
+  - `@pinaxsetup` before any of them. It starts a new document, and every document setting is
+    written there (`@pinaxsetup debug = true`). `@debug_mode true` still works during 0.2 with a
+    warning and is removed afterwards.
 - A page and a section are the same kind of container. Each holds its content in declaration order:
   prose (`@desc`), figures, tables, code blocks, checks, `@raw` blocks and child sections, freely
   interleaved.

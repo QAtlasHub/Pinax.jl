@@ -654,13 +654,19 @@ function _pinaxsetup!(; kwargs...)
 end
 
 """
-`@debug_mode` was removed in 0.2: it said what `@pinaxsetup debug=true` says, and a setting has one
-spelling. Using it raises an error that names the replacement.
+`@debug_mode true` is deprecated during 0.2 and is removed afterwards: a setting is written in the
+`@pinaxsetup` that starts the document (`@pinaxsetup debug = true`). Until then it still switches
+debug on the open document without starting a new one, and warns once.
 """
 macro debug_mode(x)
-    return :(error(
-        "Pinax: `@debug_mode` was removed in 0.2 — write `@pinaxsetup debug = true`."
-    ))
+    return :(_debug_mode!($(esc(x))))
+end
+function _debug_mode!(on)
+    @warn "Pinax: `@debug_mode` is deprecated — add `debug = true` to the `@pinaxsetup` that " *
+        "starts the document. `@pinaxsetup` starts a new document, so writing it in place of " *
+        "`@debug_mode` would discard everything written above it." maxlog = 1
+    _ensure_document!().meta.debug = on
+    return nothing
 end
 
 "Declare the .bib source(s) used to resolve `@cite`. `@bibliography \"refs/a.bib\" …`"

@@ -161,8 +161,13 @@ using Test
     end
 
     @testset "one way to say a thing, and a wrong argument is an error" begin
+        # `@debug_mode` is deprecated during 0.2: it still switches debug on the open document
+        # without starting a new one, and its warning says where the replacement goes.
         Pinax.reset!()
-        @test_throws "@pinaxsetup debug" @debug_mode true
+        @page :kept "Kept" begin end
+        @test_logs (:warn, r"deprecated.*debug = true.*@pinaxsetup.*discard") @debug_mode true
+        @test Pinax.current_document().meta.debug
+        @test [p.id for p in Pinax.current_document().pages] == [:kept]
         Pinax.reset!()
         @test_throws "Symbol" @page :p "P" begin
             @thumbnail "not an id"
