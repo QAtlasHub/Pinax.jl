@@ -289,9 +289,9 @@ end
     end
 
     @testset "the seam: content macros route into the open testset (A)" begin
-        # A PinaxTestSet on the stack IS the container — @figure/@desc land in it, in declaration
-        # order, through the one seam Pinax._current_container(). No @page/@section, no CTX; the
-        # gens are deferred, so nothing is plotted here.
+        # A PinaxTestSet on the stack is an adapter over ONE tree node (#173): @figure/@desc land in
+        # its `TestNode`, in declaration order, through the one seam Pinax._current_container(). No
+        # @page/@section, no CTX; the gens are deferred, so nothing is plotted here.
         root = PinaxTestSet("cap-root")
         captured = nothing
         Ext._with_testset(root) do
@@ -300,10 +300,12 @@ end
             @desc md"a description"
             @figure "plotB"
         end
-        @test captured === root
-        @test length(root.figures) == 2
-        @test root.desc !== nothing && occursin("a description", root.desc.source)
-        @test root.content == [:figure => 1, :figure => 2]   # @desc sets desc, not content order
+        @test root.node isa TestNode
+        @test captured === root.node
+        @test !any(f -> hasfield(PinaxTestSet, f), (:figures, :checks, :content, :nbroken))
+        @test length(root.node.figures) == 2
+        @test root.node.desc !== nothing && occursin("a description", root.node.desc.source)
+        @test root.node.content == [:figure => 1, :figure => 2]   # @desc sets desc, not content order
     end
 
     @testset "the seam is inert inside a stock testset, report off (invariant V)" begin
@@ -321,9 +323,9 @@ end
     end
 
     @testset "fold places captured tables / panels / figures; dump warns on a figure" begin
-        # Drive the fold over a node carrying every content kind (a live PinaxTestSet and a merged
-        # TestNode share this duck-typed shape), so the :table / :panel / :figure branches all run and
-        # land on the page in declaration order.
+        # Drive the fold over a node carrying every content kind (a live PinaxTestSet holds the same
+        # `TestNode` a merged dump loads), so the :table / :panel / :figure branches all run and land
+        # on the page in declaration order.
         fig = Pinax.Figure(
             :f,
             "f",
@@ -751,7 +753,7 @@ end
             @test isapprox(1.0, 1.0009; rtol=0.01)   # records a check into the captured testset
             @caption "energy"
         end
-        @test root.checks[end].label == "energy"     # the caption renamed the quantity
+        @test root.node.checks[end].label == "energy"     # the caption renamed the quantity
 
         # …and with nothing before it (no figure, no check) it is a loud diagnostic, not an error
         Pinax.reset!()
@@ -784,7 +786,7 @@ end
         Ext._with_testset(root) do
             Test.record(root, fail)
         end
-        @test root.checks[end].source == "test_x.jl:42" && !root.checks[end].pass
+        @test root.node.checks[end].source == "test_x.jl:42" && !root.node.checks[end].pass
 
         # …round-trips through a shard dump…
         dir = mktempdir()
@@ -971,7 +973,7 @@ end
             @code E = 1.0 + 1.0 / 8
             @assert E ≈ 1.125
         end
-        @test length(root.codes) == 1 && root.codes[1].output == "1.125"
+        @test length(root.node.codes) == 1 && root.node.codes[1].output == "1.125"
 
         dir = mktempdir()
         n = TestNode(

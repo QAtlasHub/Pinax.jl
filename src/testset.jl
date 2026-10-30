@@ -535,29 +535,34 @@ function _indicator_check(id, label, passed)
     )
 end
 
-# ── the tree DTO (Test-free) ─────────────────────────────────────────
+# ── the test tree (Test-free) ────────────────────────────────────────
 #
-# `TestNode` is the **serialisation DTO** for the shard dump — the testset tree with `Test` and its
-# closures factored OUT. It is NOT a second document model: the live tree is `PinaxTestSet` objects
-# (in the extension) holding Pinax's own structs directly, and the fold below is duck-typed so it
-# walks EITHER a live `PinaxTestSet` (direct render) or a merged `TestNode` (a sharded run). A
-# `TestNode` carries the same container fields as a `PinaxTestSet` (figures/tables/panels/desc +
-# content order) so that one fold serves both; the TOML dump currently persists checks + structure
-# only (a `Figure.gen` is a closure and cannot cross the process boundary — carrying user figures
-# through a shard is the E/L follow-up), so a loaded `TestNode` has those extra vectors empty.
+# `TestNode` is the ONE shape of a captured suite: a live run builds it (each `PinaxTestSet` in the
+# extension is a thin `AbstractTestSet` adapter holding one, #173), a shard dumps and reloads it, and
+# the fold below walks it. It is a container in its own right — the same payload a `Section` carries
+# (id/anchor, figures/tables/panels/codes/checks/desc + content order) — so a content macro inside a
+# test pushes into it through the `_current_container()` seam exactly as into a section.
+#
+# It is not a `Section` because a section's place in the document is not known while the suite runs:
+# whether a testset is a page (a file), a section, a grouping to flatten, or one sample of a swept
+# `@testset for` is decided by the fold, from its siblings and `page_when`, after the run. The TOML
+# dump persists checks + structure + tables/codes/desc (a `Figure.gen` is a closure and cannot cross
+# the process boundary — carrying user figures through a shard is the E/L follow-up), so a loaded
+# `TestNode` has no figures.
 #
 # This is what makes sharded CI work. Eight shards each run a disjoint set of test FILES; instead of
 # eight disconnected galleries, each shard dumps its tree (no rendering at all) and one later job
 # merges the trees and renders the single coherent gallery: one page per test file.
-struct TestNode
+mutable struct TestNode
     description::String
+    id::Symbol                  # the slug of `description` — what content-macro ids are built from
+    anchor::String
     elapsed::Float64
     ignore::Bool                # @pinaxignore: ran and counted, but kept out of the document
     checks::Vector{Check}       # one per Pass / Fail / Error recorded directly here
     nbroken::Int                # @test_broken / skipped: counted, never a Check — see below
     nerror::Int                 # how many of the failing checks were ERRORS rather than plain fails
     children::Vector{TestNode}
-    # container payload — same shape a `PinaxTestSet` captures live (the closure-free DTO half).
     figures::Vector{Figure}
     tables::Vector{Table}
     panels::Vector{String}
@@ -581,8 +586,11 @@ function TestNode(
     desc::Union{Desc,Nothing}=nothing,
     content::Vector{Pair{Symbol,Int}}=Pair{Symbol,Int}[],
 )
+    id = _slug(description)
     return TestNode(
         String(description),
+        id,
+        _anchor(id),
         Float64(elapsed),
         ignore,
         checks,
@@ -762,7 +770,7 @@ end
 #   • C3 three or more nested loops → innermost = x, ALL outer bindings join into ONE legend key.
 #   • C4 a render-side `x_axis=` override is deferred: the code is the figure spec (innermost = x).
 #
-# The whole thing is Test-free and duck-typed over the same shape `_emit_node!` already walks, so a
+# The whole thing is Test-free and walks the same `TestNode` tree `_emit_node!` does, so a
 # sharded run gets its sweeps too: a dump carries child descriptions + checks, and the fold rebuilds the
 # convergence figure from the merged tree with no extra machinery.
 
@@ -1189,10 +1197,10 @@ end
 # spread across its @sections (that is the whole nesting), so the page-level margin figure cannot be
 # rebuilt from the page container alone — it has to be accumulated on the way down.
 #
-# `n` is duck-typed: a live `PinaxTestSet` (direct render — carries user `@figure`/`@desc`/… too) or
-# a merged `TestNode` (a sharded run — checks + structure only). Same fold either way.
+# `n` is a live run's tree (it carries user `@figure`s too) or a merged shard dump (no figures) — the
+# same `TestNode` either way, so there is one fold.
 function _emit_node!(
-    n,
+    n::TestNode,
     page_when::Function,
     seen::Set{Symbol},
     acc::Vector{Check}=Check[];
@@ -1263,15 +1271,15 @@ function _emit_node!(
 end
 
 # Move THIS node's own captured content (desc + figures/tables/panels + checks) into the CTX
-# container just entered, preserving declaration order. A live `PinaxTestSet` carries the full
-# interleaved `content`; a merged `TestNode` carries checks with empty `content`, so fall back to the
-# checks in that case. Uses `_ctx_container()` (never the probe) — the fold builds the doc in `CTX`.
-function _emit_own_content!(n, acc::Vector{Check})
+# container just entered, preserving declaration order. A captured node carries the full interleaved
+# `content`; one without it (a legacy dump, or a node built by hand) falls back to its checks. Uses
+# `_ctx_container()` (never the probe) — the fold builds the doc in `CTX`.
+function _emit_own_content!(n::TestNode, acc::Vector{Check})
     c = _ctx_container()
     c === nothing && return acc
     n.desc === nothing || (c.desc = n.desc)
-    # A merged shard `TestNode` carries checks + codes but no interleaved `content` (a live
-    # `PinaxTestSet` does) — place them directly, checks then codes, so a dumped `@code` still shows.
+    # No interleaved `content` (a legacy dump, a hand-built node) — place checks then codes directly,
+    # so a dumped `@code` still shows.
     if isempty(n.content) && (!isempty(n.checks) || !isempty(n.codes))
         for chk in n.checks
             _place_check!(c, chk, acc)

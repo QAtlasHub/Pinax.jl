@@ -15,9 +15,9 @@
 #            `Test.finish` it has 1.
 #
 # TestShards answers both with a registered provider (`register_unit_provider!`), and the provider
-# belongs HERE: it needs the counts out of `PinaxTestSet`, which is ours and private, while its side
-# of the seam is one function call and no types of theirs. The reverse placement would have TestShards
-# reading six private fields of a type it does not own.
+# belongs HERE: it needs the counts out of `PinaxTestSet`'s tree, which is ours and private, while
+# its side of the seam is one function call and no types of theirs. The reverse placement would have
+# TestShards reading private fields of a type it does not own.
 module PinaxTestShardsExt
 
 using Pinax: Pinax
@@ -89,7 +89,7 @@ sweep is not folded.
 """
 function _attach_evidence!(ts, prefix::Symbol=Pinax._slug(ts.description))
     ev = TestShards.evidence(ts)
-    isempty(ev) || _push_evidence_table!(ts, ev, prefix)
+    isempty(ev) || _push_evidence_table!(ts.node, ev, prefix)
     for c in ts.children
         _attach_evidence!(c, prefix)
     end
@@ -130,16 +130,16 @@ Pinax converts each result into a `Check` as it is recorded rather than keeping 
 BROKEN test is counted without becoming a check at all (it did not pass, but the runner is content,
 and calling it a failure would paint the unit red).
 """
-function _fold(ts)
-    kids = [_fold(c) for c in ts.children]
-    nerror = ts.nerror
+_fold(ts) = _fold_node(ts.node)
+function _fold_node(n)
+    kids = [_fold_node(c) for c in n.children]
     return (;
-        name=ts.description,
-        duration=isnan(ts.elapsed) ? 0.0 : ts.elapsed,
-        npass=count(c -> c.pass, ts.checks) + sum(k -> k.npass, kids; init=0),
-        nfail=count(c -> !c.pass, ts.checks) - nerror + sum(k -> k.nfail, kids; init=0),
-        nerror=nerror + sum(k -> k.nerror, kids; init=0),
-        nbroken=ts.nbroken + sum(k -> k.nbroken, kids; init=0),
+        name=n.description,
+        duration=isnan(n.elapsed) ? 0.0 : n.elapsed,
+        npass=count(c -> c.pass, n.checks) + sum(k -> k.npass, kids; init=0),
+        nfail=count(c -> !c.pass, n.checks) - n.nerror + sum(k -> k.nfail, kids; init=0),
+        nerror=n.nerror + sum(k -> k.nerror, kids; init=0),
+        nbroken=n.nbroken + sum(k -> k.nbroken, kids; init=0),
         sections=kids,
     )
 end
