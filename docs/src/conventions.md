@@ -76,8 +76,9 @@ the gap.
 
 - A caption can be given two ways: `caption=` on `@figure` / `@table`, or `@caption` written
   directly after the node.
-- `@caption` attaches to the node **immediately before it**. If there is none, or that node cannot
-  carry a caption, it is an error. It never reaches back to an earlier figure. (#159)
+- `@caption` attaches to the node **immediately before it**: a `@figure`, `@table` or `@code` (its
+  caption) or a `@test` (the check's label). If there is none, or that node cannot carry a caption
+  (`@raw`, a section), it is an error. It never reaches back to an earlier figure.
 
 ## Faces
 
@@ -101,5 +102,7 @@ These are not settled yet. Each will move into a section above once decided.
 - **`@desc`.** What a second `@desc` in one container means, and whether `@desc` keeps its position
   in content order.
 - **`@raw`.** What form it takes in `agent.json`.
+- **A second caption on one node.** Today a later caption replaces an earlier one (`caption=` then
+  `@caption`, or two `@caption`s in a row). Whether that should be an error instead.
 - **The figure form in `agent.json`.** A plotted-data table may not convey a plot's features. This
   is to be measured before the form changes.

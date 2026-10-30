@@ -268,6 +268,10 @@ mutable struct Page
     content::Vector{Pair{Symbol,Int}}  # declaration order of figures/tables/panels/checks/codes
     status::Symbol                   # maturity: :draft (a manuscript) or :final (default, the published
     # version). Validated by `_status`; what kind of page it is never lives here.
+    # A page keeps its top-level sections apart from `content`, so this records where the latest one
+    # was written in that order (`length(content)` then; -1 for none) — what `@caption` needs to tell
+    # "directly after a section" from "directly after a figure" (#159).
+    last_section_at::Int
 end
 
 # Every check in a container's subtree: its own, then each nested section's, in declaration order.
@@ -673,6 +677,7 @@ function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing, status
         CodeBlock[],
         Pair{Symbol,Int}[],
         st,
+        -1,
     )
     push!(doc.pages, pg)
     CTX.page = pg
@@ -776,6 +781,7 @@ function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=
     )
     if parent === nothing
         push!(pg.sections, sec)
+        pg.last_section_at = length(pg.content)
     else
         push!(parent.sections, sec)
         push!(parent.content, :section => length(parent.sections))
@@ -1124,14 +1130,17 @@ function _normalize_table(data, header)
 end
 
 """
-Name the **preceding** item (like `\\caption`), overwriting any caption/label set before it:
+Name the node written **immediately before** it (like `\\caption`), replacing that node's caption:
 
-  - after a `@figure` → the figure's caption;
-  - after a `@test` / `@expect` → the **check's quantity name** (its label). This is how a swept
+  - after a `@figure`, `@table` or `@code` → its caption (the same as passing `caption=`);
+  - after a `@test` → the **check's quantity name** (its label). This is how a swept
     `@testset for` names the quantity a convergence figure plots — `@test isapprox(E, oracle; rtol=…)`
     followed by `@caption "energy"` titles the check (and its convergence figure) `energy` instead of
     the raw expression (issue #69 C). Grouping is by this label, so every iteration's `@caption` folds
     the sweep into one named quantity.
+
+It never reaches back past another node to an earlier one (#159): with nothing before it, or after a
+node that carries no caption (`@raw`, a child `@section`), it is an error where it is written.
 """
 macro caption(x)
     return quote
@@ -1141,15 +1150,30 @@ end
 function _set_caption!(s)
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    if c !== nothing && !isempty(c.content) && c.content[end][1] === :check
-        c.checks[c.content[end][2]].label = string(s)   # name the check's quantity
-    elseif c !== nothing && !isempty(c.figures)
-        c.figures[end].caption = string(s)
+    c === nothing && error("@caption outside of a @section or @page")
+    c isa Page &&
+        c.last_section_at == length(c.content) &&
+        error(
+            "Pinax: @caption in \"$(c.anchor)\" follows a section, which carries no caption — " *
+            "@caption names only the node written immediately before it",
+        )
+    isempty(c.content) && error(
+        "Pinax: @caption in \"$(c.anchor)\" has nothing before it to name — write it directly " *
+        "after a @figure, @table, @code or @test, or pass `caption=` to that node",
+    )
+    kind, i = c.content[end]
+    if kind === :check
+        c.checks[i].label = string(s)   # name the check's quantity
+    elseif kind === :figure
+        c.figures[i].caption = string(s)
+    elseif kind === :table
+        c.tables[i].caption = string(s)
+    elseif kind === :code
+        c.codes[i].caption = string(s)
     else
-        _diag!(
-            WARNING,
-            c === nothing ? "?" : c.anchor,
-            "@caption with no preceding @figure or @test",
+        error(
+            "Pinax: @caption in \"$(c.anchor)\" follows a $(kind), which carries no caption — " *
+            "@caption names only the node written immediately before it",
         )
     end
     return nothing

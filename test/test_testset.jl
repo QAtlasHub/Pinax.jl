@@ -812,14 +812,11 @@ end
         end
         @test root.node.checks[end].label == "energy"     # the caption renamed the quantity
 
-        # …and with nothing before it (no figure, no check) it is a loud diagnostic, not an error
+        # …and with nothing before it (no figure, no check) it is an error where it is written (#159)
         Pinax.reset!()
-        @page :orphan "P" begin
+        @test_throws "nothing before it" @page :orphan "P" begin
             @caption "nothing to name"
         end
-        @test any(
-            e -> occursin("no preceding", e.message), Pinax.current_document().diag.entries
-        )
     end
 
     @testset "a failing check carries file:line — the failure payload (I)" begin

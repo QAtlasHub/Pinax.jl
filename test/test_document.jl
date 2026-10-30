@@ -89,15 +89,51 @@ const SIDE = Ref(0)   # for checking @figure deferral
         @test figs[1].caption == "override"
         @test figs[2].caption == "only"
 
-        # @caption in a section with no figure is non-fatal -> WARNING
+        # @caption names the node IMMEDIATELY before it — never an earlier figure (#159)
         Pinax.reset!()
         @page :p "P" begin
+            @section :s "S" begin
+                @figure 1
+                @caption "fig a"
+                @table (x=[1], y=[2])
+                @caption "the table"
+                @code E = 1.0 + 1.0
+                @caption "the energy"
+            end
+        end
+        sec = Pinax.current_document().pages[1].sections[1]
+        @test sec.figures[1].caption == "fig a"      # not overwritten by the table's caption
+        @test sec.tables[1].caption == "the table"
+        @test sec.codes[1].caption == "the energy"
+
+        # nothing before it, or a node that carries no caption, is an error where it is written
+        Pinax.reset!()
+        @test_throws "nothing before it" @page :p "P" begin
             @section :s "S" begin
                 @caption md"orphan"
             end
         end
-        diag = Pinax.current_document().diag.entries
-        @test any(e -> e.severity == Pinax.WARNING && occursin("caption", e.message), diag)
+        Pinax.reset!()
+        @test_throws "carries no caption" @page :p "P" begin
+            @figure 1
+            @raw "<b>x</b>"
+            @caption "meant for the figure"
+        end
+        Pinax.reset!()
+        @test_throws "carries no caption" @page :p "P" begin
+            @figure 1
+            @section :s "S" begin end
+            @caption "never reaches back past the section to the figure"
+        end
+        @test Pinax.current_document().pages[1].figures[1].caption == ""
+        Pinax.reset!()
+        @test_throws "carries no caption" @page :p "P" begin
+            @section :s "S" begin
+                @figure 1
+                @section :t "T" begin end
+                @caption "nor past a nested one"
+            end
+        end
     end
 
     @testset "thumbnail resolution (explicit > marker > top > none)" begin
