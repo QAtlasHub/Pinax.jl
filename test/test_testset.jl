@@ -180,8 +180,11 @@ end
         # ONE gallery, one page per test FILE — the shard boundary is invisible in the output…
         @test occursin("test_a.jl", md) && occursin("test_b.jl", md)
         @test !occursin("shard", lowercase(md))
-        # …and the check ids are renumbered across the merge rather than colliding at t1
-        @test occursin("t1 —", md) && occursin("t2 —", md)
+        # …and the check ids never collide across the merge: each is its page's anchor plus the hash
+        # of its source text (#123), not a counter that every shard restarts at t1
+        ids = [string(c.id) for p in Pinax.current_document().pages for c in p.checks]
+        @test allunique(ids)
+        @test any(startswith("test_a_jl_t"), ids) && any(startswith("test_b_jl_t"), ids)
     end
 
     @testset "a dump carries everything but the figure closure (issue #67)" begin

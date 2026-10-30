@@ -69,13 +69,14 @@ end
         _mixed!()
         Pinax.render(; out=joinpath(tmp, "a"), theme=:agent)
         aj = read(joinpath(tmp, "a", "agent.json"), String)
-        v = "\"verdict\":{\"verdict\":\"FAIL\",\"passed\":2,\"total\":3,\"failed\":[\"aa_t3\"]}"
+        id1, _, id3 = (string(c.id) for c in _sec(:aa).checks)   # stable ids (#123)
+        v = "\"verdict\":{\"verdict\":\"FAIL\",\"passed\":2,\"total\":3,\"failed\":[\"$(id3)\"]}"
         @test count(v, aj) == 2                       # the page and the section, over the subtree
         @test occursin("\"status\":\"final\"", aj)
         @test !occursin("\"benchmark\"", aj)          # no page kind of its own any more
-        @test occursin("\"checks\":[{\"id\":\"aa_t1\"", aj)
+        @test occursin("\"checks\":[{\"id\":\"$(id1)\"", aj)
         @test occursin("\"pass\":false", aj) && occursin("\"pass\":true", aj)
-        @test occursin("{\"kind\":\"check\",\"id\":\"aa_t3\"}", aj)   # content refs resolve
+        @test occursin("{\"kind\":\"check\",\"id\":\"$(id3)\"}", aj)   # content refs resolve
         am = read(joinpath(tmp, "a", "agent.md"), String)
         @test occursin("2/3 FAIL", am)
         @test occursin("[FAIL]", am)
@@ -150,7 +151,8 @@ end
         end
         Pinax.render(; out=joinpath(tmp, "o"), theme=CheckOverrideAgent())
         @test occursin(
-            "\"custom_chk\":\"s_t1\"", read(joinpath(tmp, "o", "agent.json"), String)
+            "\"custom_chk\":\"$(only(_sec(:s).checks).id)\"",
+            read(joinpath(tmp, "o", "agent.json"), String),
         )
     end
 

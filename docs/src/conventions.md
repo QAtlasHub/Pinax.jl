@@ -32,6 +32,10 @@ the gap.
   node is written**, naming both. There is no automatic renaming, so ids and links stay stable.
 - Anchors are hierarchical paths (`page.section.subsection`), so equal ids under different parents
   do not collide.
+- A check's id is its container's anchor plus a short stable hash of its source text (for example
+  `energy_t0k3x9q2`), so adding or reordering other checks never renumbers it. The same text twice in
+  one container gets `-2`, `-3`. A code block's id hashes its code, so shifting lines never moves it.
+  (#123)
 - Comments, cross-references and `agent.json` all address a node by the same id. There is no second
   naming scheme.
 

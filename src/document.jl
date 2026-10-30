@@ -174,6 +174,30 @@ function Check(id, label, got, want, delta, tol, kind, pass, source, code_anchor
     )
 end
 
+# FNV-1a (32-bit) in base 36: the same on every machine and Julia version (unlike `Base.hash`), so the
+# ids built from it are stable across runs (#123).
+function _stable_hash(s::AbstractString)
+    h = 0x811c9dc5
+    for b in codeunits(s)
+        h = (h ⊻ b) * 0x01000193
+    end
+    return string(h; base=36, pad=7)
+end
+
+# A check's id: its container's anchor plus the stable hash of its source text, so adding or
+# reordering other checks never renumbers it (#123). The same text twice in one container is
+# disambiguated in order: `…-2`, `…-3`.
+function _check_id(c, key::AbstractString)
+    base = Symbol(_anchor(Symbol(c.anchor)), "_t", _stable_hash(key))
+    taken = Set(ch.id for ch in c.checks)
+    base in taken || return base
+    k = 2
+    while Symbol(base, "-", k) in taken
+        k += 1
+    end
+    return Symbol(base, "-", k)
+end
+
 # A copy of `c` with some fields replaced — so a fold can renumber or tag a check it does not own
 # without mutating the caller's object (#130).
 function _copy_check(c::Check; kw...)

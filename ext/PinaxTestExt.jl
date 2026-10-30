@@ -139,7 +139,7 @@ end
 
 function _push_container_check!(c, res)
     chk = _check_from(_result_data_expr(res), _label(res), res isa Test.Pass, 0)
-    chk.id = Symbol(c.id, "_t", length(c.checks) + 1)
+    chk.id = Pinax._check_id(c, chk.label)   # stable: container + source text (#123)
     chk.source = _source_str(res)
     blk = _code_block_for(res)
     if blk !== nothing

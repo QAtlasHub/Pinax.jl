@@ -51,7 +51,7 @@ end
         @test Pinax.verdict(_sec(:empty)) === nothing
         v = Pinax.verdict(_sec(:a))
         @test (v.passed, v.total, v.verdict) == (1, 2, "FAIL")
-        @test v.failed == ["b_t1"]
+        @test v.failed == [string(only(_sec(:b).checks).id)]
         vb = Pinax.verdict(_sec(:b))
         @test (vb.passed, vb.total) == (0, 1)
     end
@@ -76,7 +76,7 @@ end
         Pinax.render(; out=out, theme=:agent)
         js = read(joinpath(out, "agent.json"), String)
         @test occursin(
-            "\"verdict\":{\"verdict\":\"FAIL\",\"passed\":1,\"total\":2,\"failed\":[\"a_t2\"]}",
+            "\"verdict\":{\"verdict\":\"FAIL\",\"passed\":1,\"total\":2,\"failed\":[\"$(_sec(:a).checks[2].id)\"]}",
             js,
         )
         @test occursin("\"id\":\"empty\"", js) && occursin("\"verdict\":null", js)
@@ -117,10 +117,11 @@ end
                 e
             end
             @test err isa Pinax.ChecksFailed
-            @test err.failed == ["a_t1"]
+            fid = string(only(_sec(:a).checks).id)
+            @test err.failed == [fid]
             @test isfile(joinpath(out, "index.html"))   # the failing page is on disk to look at
             @test err.path == joinpath(out, "index.html")
-            @test occursin("a_t1", sprint(showerror, err))
+            @test occursin(fid, sprint(showerror, err))
         end
     end
 end

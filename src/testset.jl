@@ -322,9 +322,9 @@ end
 """
     _test_code_block(file, line) -> CodeBlock | nothing
 
-The `@code` artifact for the assertion at `file:line` — the code that produced it. The id is derived
-from the line span, so every sample of a `@testset for` (the same line, N iterations) maps to ONE
-block: the sweep shows its specification once, not once per point.
+The `@code` artifact for the assertion at `file:line` — the code that produced it. The id hashes
+the code text (#123), so shifted lines never move it, and every sample of a `@testset for` (the same
+code, N iterations) maps to ONE block: the sweep shows its specification once, not once per point.
 """
 function _test_code_block(file::AbstractString, line::Integer)
     fa = _file_ast(file)
@@ -360,9 +360,8 @@ function _test_code_block(file::AbstractString, line::Integer)
     body = vcat(head, out)
     src = _dedent(body)
     hdr == 0 || (src = string(src, "\nend"))
-    id = Symbol(
-        "code_", _slug(basename(String(file))), "_", first(pieces)[1], "_", last(pieces)[2]
-    )
+    # keyed on the code itself, not its line span, so shifting lines never changes it (#123)
+    id = Symbol("code_", _slug(basename(String(file))), "_", _stable_hash(src))
     return CodeBlock(id, _anchor(id), src, "", "", "julia")
 end
 
@@ -891,7 +890,7 @@ end
 # Render a swept level: a convergence + margin figure per quantity, then every sample check placed flat
 # (binding-tagged) so the page's pass/fail counts and `agent.json` verdict stay exactly what they were —
 # the sweep changes only how the checks are DRAWN, never the verdict.
-function _emit_sweep!(n, counter::Ref{Int}, page_when::Function, acc::Vector{Check})
+function _emit_sweep!(n, page_when::Function, acc::Vector{Check})
     c = _ctx_container()
     samples = _sweep_samples!(
         Tuple{Vector{Pair{Symbol,String}},Check}[], n, Pair{Symbol,String}[], page_when
@@ -914,7 +913,7 @@ function _emit_sweep!(n, counter::Ref{Int}, page_when::Function, acc::Vector{Che
     end
     for (bind, chk) in samples
         tagged = _copy_check(chk; label=string(chk.label, "  [", _binding_str(bind), "]"))
-        _place_check!(c, tagged, counter, acc)
+        _place_check!(c, tagged, acc)
     end
     return acc
 end
@@ -1194,18 +1193,17 @@ end
 # a merged `TestNode` (a sharded run — checks + structure only). Same fold either way.
 function _emit_node!(
     n,
-    counter::Ref{Int},
     page_when::Function,
     seen::Set{Symbol},
     acc::Vector{Check}=Check[];
     id_prefix::AbstractString="",
 )
-    _emit_own_content!(n, counter, acc)
+    _emit_own_content!(n, acc)
     # A level whose children are all canonical `@testset for` samples is a SWEEP, not a stack of
     # sections: fold it into convergence + margin figures (issue #69 C). Only inside an open container
     # (a page/section) — never at the root, where children are files and the grouping-flatten runs.
     if _ctx_container() !== nothing && _is_swept(n, page_when)
-        _emit_sweep!(n, counter, page_when, acc)
+        _emit_sweep!(n, page_when, acc)
         return acc
     end
     # Nested testsets become pages (a file) or sections (a group). @pinaxignore'd ones are skipped
@@ -1222,7 +1220,7 @@ function _emit_node!(
             _enter_page!(pid, ch.description; summary=_summary_line(ch))
             try
                 page_checks = Check[]
-                _emit_node!(ch, counter, page_when, seen, page_checks; id_prefix=id_prefix)
+                _emit_node!(ch, page_when, seen, page_checks; id_prefix=id_prefix)
                 append!(acc, page_checks)
                 # Back at page level (every section closed), so the figure lands on the page.
                 _push_margin_figure!(pid, page_checks)
@@ -1234,7 +1232,7 @@ function _emit_node!(
             # `@testset "MyPkg"` that most runtests wrap everything in) → flatten it: its children
             # become top-level pages, exactly as `_collect_rows!` already treats it. A section needs a
             # page, which a grouping at this level does not provide.
-            _emit_node!(ch, counter, page_when, seen, acc; id_prefix=id_prefix)
+            _emit_node!(ch, page_when, seen, acc; id_prefix=id_prefix)
         else
             # A child that parses as a canonical binding but is being rendered as a SECTION means its
             # siblings are not a consistent sweep (mixed/partial) — so we did not fold. Say so once
@@ -1255,7 +1253,7 @@ function _emit_node!(
             )
             _enter_section!(sid, ch.description; summary=_summary_line(ch))
             try
-                _emit_node!(ch, counter, page_when, seen, acc; id_prefix=id_prefix)
+                _emit_node!(ch, page_when, seen, acc; id_prefix=id_prefix)
             finally
                 _exit_section!()
             end
@@ -1268,7 +1266,7 @@ end
 # container just entered, preserving declaration order. A live `PinaxTestSet` carries the full
 # interleaved `content`; a merged `TestNode` carries checks with empty `content`, so fall back to the
 # checks in that case. Uses `_ctx_container()` (never the probe) — the fold builds the doc in `CTX`.
-function _emit_own_content!(n, counter::Ref{Int}, acc::Vector{Check})
+function _emit_own_content!(n, acc::Vector{Check})
     c = _ctx_container()
     c === nothing && return acc
     n.desc === nothing || (c.desc = n.desc)
@@ -1276,7 +1274,7 @@ function _emit_own_content!(n, counter::Ref{Int}, acc::Vector{Check})
     # `PinaxTestSet` does) — place them directly, checks then codes, so a dumped `@code` still shows.
     if isempty(n.content) && (!isempty(n.checks) || !isempty(n.codes))
         for chk in n.checks
-            _place_check!(c, chk, counter, acc)
+            _place_check!(c, chk, acc)
         end
         for blk in n.codes
             _push_auto_code!(c, blk)
@@ -1285,7 +1283,7 @@ function _emit_own_content!(n, counter::Ref{Int}, acc::Vector{Check})
     end
     for (kind, i) in n.content
         if kind === :check
-            _place_check!(c, n.checks[i], counter, acc)
+            _place_check!(c, n.checks[i], acc)
         elseif kind === :figure
             push!(c.figures, n.figures[i])
             push!(c.content, :figure => length(c.figures))
@@ -1306,10 +1304,9 @@ end
 
 # Assign the render-time id (t1, t2, … so a merge renumbers cleanly rather than N shards colliding at
 # t1) and place the check into the current container + content order + margin accumulator.
-function _place_check!(c, chk::Check, counter::Ref{Int}, acc::Vector{Check})
-    counter[] += 1
+function _place_check!(c, chk::Check, acc::Vector{Check})
     # a copy: the fold must not renumber (or later tag) the tree's own Check (#130)
-    chk = _copy_check(chk; id=Symbol("t", counter[]))
+    chk = _copy_check(chk; id=_check_id(c, chk.label))   # stable: container + source text (#123)
     push!(c.checks, chk)
     push!(c.content, :check => length(c.checks))
     push!(acc, chk)
@@ -1469,7 +1466,6 @@ function render_test_report(
     overview=nothing,
 )
     reset!(; title=title)
-    counter = Ref(0)
     seen = Set{Symbol}((:overview, :per_file, :provenance))   # ids the overview page already owns
     # An overview page first: one row per file, so the whole suite is one glance — and the SAME rows
     # land in agent.json as data, so an LLM reads the suite without scraping a log.
@@ -1496,7 +1492,7 @@ function render_test_report(
     finally
         _exit_page!()
     end
-    _emit_node!(root, counter, page_when, seen)
+    _emit_node!(root, page_when, seen)
     return _render_report_doc(current_document(), out)
 end
 
@@ -1552,7 +1548,6 @@ function _render_matrix(
 )
     pairs = [(r, c) for (r, c) in zip(roots, cells) if !isempty(c)]
     reset!(; title=title)
-    counter = Ref(0)
     seen = Set{Symbol}((:overview, :per_file, :provenance))
     allfiles = reduce(vcat, (r.children for (r, _) in pairs); init=TestNode[])
     rowsroot = TestNode(
@@ -1593,7 +1588,7 @@ function _render_matrix(
     for (r, c) in pairs
         _enter_part!(Symbol("cell_", _slug(c)), c)
         try
-            _emit_node!(r, counter, page_when, seen; id_prefix=string(_slug(c), "_"))
+            _emit_node!(r, page_when, seen; id_prefix=string(_slug(c), "_"))
         finally
             _exit_part!()
         end
