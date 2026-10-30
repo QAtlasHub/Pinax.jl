@@ -136,7 +136,7 @@ end
 
 - [PASS] t1 — isapprox(1.0, 1.0098; rtol = 0.01): got 1.0, want 1.0098 (Δ 0.0097 vs tol 0.01 rel)
 
-_What this test established (`evidence!`)._  [table: unit_a_jl_tight_tbl1]
+_What this test established (`evidence!`)._  [table: unit_a_jl_tight_evidence]
 | established | value |
 | --- | --- |
 | achieved | 0.0097 |

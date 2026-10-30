@@ -14,7 +14,7 @@ using ParamIO
     @part :thermal "Thermal" desc = md"prior-work reproduction" begin
         @page :energy "Energy" summary = "Control: N, g" begin
             @desc md"energy vs T"
-            @figure svg params = (N=24, g=0.5)
+            @figure svg params = (N=24, g=0.5) id = :energy_fig1
             @caption "E/N"
         end
     end

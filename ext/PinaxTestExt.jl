@@ -111,18 +111,12 @@ function PinaxContainerSet(desc::AbstractString; kw...)
     return PinaxContainerSet(String(desc), sec, _outer_of(parent), true)
 end
 
-# A testset's section id is generated from its description, not written by the author, so a repeat
-# (the same `@testset "conv"` in a loop) is disambiguated with `-2`, `-3` — as check ids are — rather
-# than raising the duplicate-id error an author-written id gets.
-function _section_id(base::Symbol)
-    pg, parent = Pinax.CTX.page, Pinax.CTX.section
-    siblings = Set(s.id for s in (parent === nothing ? pg.sections : parent.sections))
-    base in siblings || return base
-    k = 2
-    while Symbol(base, "-", k) in siblings
-        k += 1
-    end
-    return Symbol(base, "-", k)
+# A testset's section id is generated, not written by the author: the container's id plus the
+# description, so it is unique in the document, and a repeat (the same `@testset "conv"` in a loop)
+# becomes `-2`, `-3` — as any generated id does — rather than raising (Conventions › Identity).
+function _section_id(slug::Symbol)
+    c = something(Pinax.CTX.section, Pinax.CTX.page)
+    return Pinax._free_id(Symbol(c.id, "_", slug))
 end
 
 function Test.finish(ts::PinaxContainerSet)

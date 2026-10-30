@@ -18,7 +18,7 @@ end
     Pinax.reset!(; title="dispatch")
     @page :p "P" begin
         @section :s "S" begin
-            @figure svg
+            @figure svg id = :s_fig1
             @caption "cap"
         end
     end
@@ -77,7 +77,7 @@ end
     @page :p "P" begin
         @section :s "S" begin
             @desc md"d"
-            @figure svg
+            @figure svg id = :s_fig1
             @caption "c"
         end
     end

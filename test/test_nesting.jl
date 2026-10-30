@@ -71,9 +71,7 @@ end
             s = s.sections[1]
         end
         @test depths == 2:7
-        @test anchors == [
-            "s2", "s2.s3", "s2.s3.s4", "s2.s3.s4.s5", "s2.s3.s4.s5.s6", "s2.s3.s4.s5.s6.s7"
-        ]
+        @test anchors == ["s2", "s3", "s4", "s5", "s6", "s7"]   # the id is the anchor
         # every figure in the tree is resolvable by id
         doc = Pinax.resolve!(Pinax.current_document())
         @test length(doc.refs) == 1 + 6 + 6   # page + sections + figures
@@ -102,8 +100,8 @@ end
         @test occursin("\\par\\noindent\\textbf{S6}", tex)
         @test occursin("\\par\\noindent\\textbf{S7}", tex)
         diag = read(joinpath(out, "diagnostics.md"), String)
-        @test occursin("s2.s3.s4.s5.s6", diag) && occursin("depth 6", diag)
-        @test occursin("s2.s3.s4.s5.s6.s7", diag) && occursin("depth 7", diag)
+        @test occursin("s6", diag) && occursin("depth 6", diag)
+        @test occursin("s7", diag) && occursin("depth 7", diag)
     end
 
     @testset "gallery: <h2>…<h6>, then an aria-level heading" begin

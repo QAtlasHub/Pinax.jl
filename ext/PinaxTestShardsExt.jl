@@ -98,10 +98,11 @@ end
 
 function _push_evidence_table!(node, ev, prefix::Symbol)
     rows = Vector{Any}[Any[k, ev[k]] for k in sort!(collect(keys(ev)))]
+    # one evidence table per node, so its generated id needs no hash (Conventions › Identity)
     id = if node.id === prefix
-        Pinax._auto_table_id(node)
+        Symbol(prefix, "_evidence")
     else
-        Symbol(prefix, :_, node.id, "_tbl", length(node.tables) + 1)
+        Symbol(prefix, :_, node.id, "_evidence")
     end
     tbl = Pinax.Table(
         id,

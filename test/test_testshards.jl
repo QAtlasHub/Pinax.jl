@@ -153,7 +153,7 @@ end
         @test i_ach !== nothing && i_tol !== nothing && first(i_ach) < first(i_tol)
         # it landed on the section that recorded it, not on the page — and the table id is
         # UNIT-qualified, so two files each with a `@testset "tight"` cannot share one anchor
-        @test occursin("\"id\":\"unit_a_jl_tight_tbl1\"", agent)
+        @test occursin("\"id\":\"unit_a_jl_tight_evidence\"", agent)
     end
 
     @testset "TestShards' own records are unchanged" begin

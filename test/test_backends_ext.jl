@@ -48,7 +48,7 @@ _has_parse_error(ex) = ex isa Expr && (ex.head === :error || any(_has_parse_erro
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" begin
-                @figure MockFig("a") caption = "mock"
+                @figure MockFig("a") caption = "mock" id = :s_fig1
             end
         end
         html = read(Pinax.render(; out=outdir), String)

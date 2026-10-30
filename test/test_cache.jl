@@ -78,8 +78,8 @@ using Test
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" begin
-                @figure svg1
-                @figure svg2
+                @figure svg1 id = :s_fig1
+                @figure svg2 id = :s_fig2
             end
         end
         Pinax.render(; out=outdir)
@@ -91,7 +91,7 @@ using Test
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" begin
-                @figure svg1
+                @figure svg1 id = :s_fig1
             end
         end
         Pinax.render(; out=outdir)

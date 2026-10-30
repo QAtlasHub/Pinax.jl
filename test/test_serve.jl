@@ -9,7 +9,7 @@ using Downloads: Downloads
     Pinax.reset!()
     @page :p "P" begin
         @section :s "S" begin
-            @figure svg
+            @figure svg id = :s_fig1
         end
     end
     out = joinpath(tmp, "site")

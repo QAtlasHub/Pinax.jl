@@ -24,7 +24,7 @@ end
         @test pg.tables[1].header == ["T", "M"]
         @test pg.tables[1].rows == [[1.0, 0.5], [2.0, 0.6]]   # columnar -> row-major
         @test pg.tables[1].caption == "m(t)"
-        @test pg.tables[1].id == :p_tbl1
+        @test startswith(string(pg.tables[1].id), "p_tbl_")   # container id + a hash of its code
         s = pg.sections[1]
         @test s.tables[1].header == ["a", "b"]                # matrix + explicit header
         @test s.tables[1].rows == [[1, 2], [3, 4]]
@@ -112,7 +112,7 @@ end
         tmp = mktempdir()
         Pinax.reset!(; title="x")
         @page :p "P" begin
-            @table (a=[1, 2], b=[3, 4])
+            @table (a=[1, 2], b=[3, 4]) id = :p_tbl1
         end
         Pinax.render(; out=joinpath(tmp, "a"), theme=TableOverrideAgent())
         j = read(joinpath(tmp, "a", "agent.json"), String)
@@ -126,10 +126,10 @@ end
         write(svg, "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>")
         Pinax.reset!(; title="T")
         @page :p "P" begin
-            @figure svg
+            @figure svg id = :p_fig1
             @caption "FIGONE"
-            @table (a=[1], b=[2]) caption = "TBLONE"
-            @figure svg
+            @table (a=[1], b=[2]) caption = "TBLONE" id = :p_tbl1
+            @figure svg id = :p_fig2
             @caption "FIGTWO"
         end
         ord(s) =

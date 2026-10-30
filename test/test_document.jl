@@ -60,8 +60,8 @@ const SIDE = Ref(0)   # for checking @figure deferral
             end
         end
         figs = Pinax.current_document().pages[1].sections[1].figures
-        @test figs[1].id === :s_fig1
-        @test figs[1].anchor == "s_fig1"
+        @test startswith(string(figs[1].id), "s_fig_")   # container id + a hash of its code
+        @test figs[1].anchor == string(figs[1].id)        # the id is the anchor
         @test figs[2].id === :custom
     end
 
@@ -140,25 +140,25 @@ const SIDE = Ref(0)   # for checking @figure deferral
         Pinax.reset!()
         @page :a "A" begin
             @thumbnail :picked
-            @section :s "S" begin
+            @section :sa "S" begin
                 @figure 1
             end
         end
         @page :b "B" begin
-            @section :s "S" begin
+            @section :sb "S" begin
                 @figure 1
                 @figure 2 thumbnail = true
             end
         end
         @page :c "C" begin
-            @section :s "S" begin
+            @section :sc "S" begin
                 @figure 1
                 @figure 2
             end
         end
         @page :d "D" begin
             @no_thumbnail
-            @section :s "S" begin
+            @section :sd "S" begin
                 @figure 1
             end
         end

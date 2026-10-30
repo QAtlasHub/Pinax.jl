@@ -50,7 +50,7 @@ plot_energy() = plot(0.1:0.05:2, β -> 1 / β; xlabel = "β", ylabel = "E/N", le
     end
 end
 
-render(out = "site")               # -> site/index.html + assets/figures/…/energy_fig1.svg
+render(out = "site")               # -> site/index.html + assets/figures/…/energy_fig_<hash>.svg
 ```
 
 Then preview it, or render the same document another way:

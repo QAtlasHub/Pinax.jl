@@ -113,7 +113,7 @@ using Test
         Pinax.reset!()
         @page :bm "BM" begin
             @figure svg                 # first figure (raster) — the default thumbnail…
-            @figure pdf                 # …but this one is bookmarked, so it should win
+            @figure pdf id = :bm_fig2   # …but this one is bookmarked, so it should win
         end
         @page :other "Other" begin
             @figure svg

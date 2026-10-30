@@ -19,8 +19,8 @@ using Test
         @page :eq "Thermal" begin
             @section :energy "Energy vs T" begin
                 @desc md"E/N comparison"
-                @figure svg1 caption = "panel A"
-                @figure svg2
+                @figure svg1 caption = "panel A" id = :energy_fig1
+                @figure svg2 id = :energy_fig2
             end
         end
         path = Pinax.render(; out=outdir)
@@ -35,7 +35,7 @@ using Test
         @test occursin("E/N comparison", html)           # desc rendered
         @test occursin("href=\"#energy\"", html)         # index/TOC link
 
-        # assets materialized + referenced (auto ids: <sec>_fig1/2)
+        # assets materialized + referenced (at assets/figures/<page>/<section>/<id>)
         a1 = joinpath(outdir, "assets", "figures", "eq", "energy", "energy_fig1.svg")
         a2 = joinpath(outdir, "assets", "figures", "eq", "energy", "energy_fig2.svg")
         @test isfile(a1)
@@ -107,7 +107,7 @@ using Test
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" begin
-                @figure pdf
+                @figure pdf id = :s_fig1
             end
         end
         html = read(Pinax.render(; out=outdir), String)
@@ -129,7 +129,7 @@ using Test
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" begin
-                @figure csv
+                @figure csv id = :s_fig1
             end
         end
         html = read(Pinax.render(; out=outdir), String)
@@ -225,7 +225,7 @@ using Test
             @section :s "S" begin
                 @desc md"intro prose"
                 @raw raw"<table class='cov'><tr><td>24</td></tr></table>"
-                @figure svg1
+                @figure svg1 id = :s_fig1
             end
         end
         html = read(Pinax.render(; out=outdir), String)

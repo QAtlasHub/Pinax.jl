@@ -37,14 +37,14 @@ or pull request that tracks the gap.
 ## Identity
 
 - Every node has an id, a `Symbol`, **unique in the whole document** across all kinds: parts,
-  pages, sections, prose blocks, figures, tables, code blocks and checks. (in progress, #172)
+  pages, sections, prose blocks, figures, tables, code blocks and checks.
 - The id is the node's only name. It is its HTML anchor, the key its comments are stored under, its
   address in `agent.json` and pinax-mcp, and what `@ref` points at. There is no second naming
-  scheme. (in progress, #172)
+  scheme.
 - An id the **author writes** is never renamed. A collision is an error raised where the second
   node is written, naming the id.
 - An id **Pinax generates** is the container's id plus a short stable hash of the node's own
-  content, so adding, removing or reordering other nodes never changes it. (in progress, #172)
+  content, so adding, removing or reordering other nodes never changes it.
 
   | node | hashed content | example |
   |---|---|---|

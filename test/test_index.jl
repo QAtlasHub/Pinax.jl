@@ -35,12 +35,12 @@ using Test
     @testset "default :cards index shows the page summary (not the section breakdown)" begin
         Pinax.reset!()
         @page :a "Alpha" summary = "alpha blurb" begin
-            @section :s "Sec A" summary = "inner a" begin
+            @section :sa "Sec A" summary = "inner a" begin
                 @figure svg
             end
         end
         @page :b "Beta" begin   # no summary
-            @section :s "Sec B" begin
+            @section :sb "Sec B" begin
                 @figure svg
             end
         end
@@ -56,7 +56,7 @@ using Test
     @testset "index=:rich adds a per-section breakdown under each card" begin
         @pinaxsetup index = :rich   # also resets the implicit document
         @page :a "Alpha" summary = "alpha blurb" begin
-            @section :s "Sec A" summary = "inner a" begin
+            @section :sa "Sec A" summary = "inner a" begin
                 @figure svg
             end
             @section :t "Sec T" begin   # section without a summary
@@ -64,7 +64,7 @@ using Test
             end
         end
         @page :b "Beta" begin
-            @section :s "Sec B" begin
+            @section :sb "Sec B" begin
                 @figure svg
             end
         end
@@ -84,7 +84,7 @@ using Test
             end
         end
         @page :b "Beta" begin
-            @section :s "S" begin
+            @section :sb "S" begin
                 @figure svg
             end
         end

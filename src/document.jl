@@ -338,6 +338,7 @@ mutable struct Document
     bib::Dict{Symbol,Any}         # @cite resolution table (later)
     diag::Diagnostics
     newcommands::Dict{String,String}
+    ids::Dict{Symbol,String}      # every id written so far => what holds it (Conventions › Identity)
 end
 function Document(meta::DocMeta=DocMeta())
     return Document(
@@ -350,6 +351,7 @@ function Document(meta::DocMeta=DocMeta())
         Dict{Symbol,Any}(),
         Diagnostics(),
         Dict{String,String}(),
+        Dict{Symbol,String}(),
     )
 end
 
@@ -509,33 +511,81 @@ end
 
 # Anchor used both in HTML attributes and as a filesystem path component, so restrict it to a safe charset.
 _anchor(id::Symbol) = replace(string(id), r"[^A-Za-z0-9_-]" => "_")
-# Container = a Section or a page-as-leaf Page; both have `.id` and `.figures`.
-_auto_fig_id(c) = Symbol(string(c.id), "_fig", length(c.figures) + 1)
-_auto_table_id(c) = Symbol(string(c.id), "_tbl", length(c.tables) + 1)
-_auto_code_id(c) = Symbol(string(c.id), "_code", length(c.codes) + 1)
+# ── identity (Conventions › Identity) ───────────────────────────────
+#
+# Every id is unique in the whole document and is the node's only name: its anchor, comment key and
+# agent.json address. An id the AUTHOR writes is claimed as written and a collision is an error where
+# the second node is written. An id Pinax GENERATES is the container's id plus a short stable hash of
+# the node's own content, so inserting a node renames nothing; a repeat of the same content gets
+# `-2`, `-3`, and never errors.
 
-# Ids are never renamed (Conventions › Identity), so a collision is an error where the second node is
-# written. Figures, tables and code blocks share one id namespace per container; the same id in
-# another container does not collide (anchors are hierarchical).
-function _claim_id!(c, id::Symbol, what::AbstractString)
-    for (kind, xs) in (("figure", c.figures), ("table", c.tables), ("code block", c.codes))
-        any(x -> x.id === id, xs) && error(
-            "Pinax: duplicate id :$(id) in \"$(c.anchor)\" — this $(what) reuses the id of a " *
-            "$(kind) already written there. Ids are never renamed: give one of them another `id=`" *
-            (what == "figure" ? " (or other `params`)." : "."),
-        )
-    end
+function _symbol_id(id, what)
+    id isa Symbol && return id
+    return error("Pinax: the id of a $(what) is a Symbol — write `:$(id)`, not $(repr(id))")
+end
+
+# Claim an id the author wrote, in the document-wide registry.
+function _claim!(id::Symbol, what::AbstractString)
+    doc = _ensure_document!()
+    prev = get(doc.ids, id, nothing)
+    prev === nothing || error(
+        "Pinax: duplicate id :$(id) — this $(what) reuses the id of the $(prev) written earlier. Ids " *
+        "are unique in the whole document and never renamed: give one of them another id.",
+    )
+    doc.ids[id] = what
     return id
+end
+
+# The first of `base`, `base-2`, `base-3`, … that `taken` does not hold.
+function _free_id(base::Symbol, taken)
+    taken(base) || return base
+    k = 2
+    while taken(Symbol(base, "-", k))
+        k += 1
+    end
+    return Symbol(base, "-", k)
+end
+_free_id(base::Symbol) = _free_id(base, id -> haskey(_ensure_document!().ids, id))
+
+# The id of a content node in container `c`: the author's, claimed, or one generated from `base`. A
+# test node is folded into a document only after the run, so inside one the ids are kept unique
+# among its own nodes; the fold places them.
+function _node_id!(c, id, base::Symbol, what::AbstractString)
+    where = string(what, " in \"", c.anchor, "\"")
+    if c isa Union{Page,Section}
+        return if id === nothing
+            _claim!(_free_id(base), where)
+        else
+            _claim!(_symbol_id(id, what), where)
+        end
+    end
+    taken(x) = any(n -> n.id === x, Iterators.flatten((c.figures, c.tables, c.codes)))
+    id === nothing && return _free_id(base, taken)
+    sid = _symbol_id(id, what)
+    taken(sid) && error(
+        "Pinax: duplicate id :$(sid) — this $(where) reuses an id already written there. Ids are " *
+        "never renamed: give one of them another id.",
+    )
+    return sid
 end
 
 # Stringify the @figure expression for change detection, stripping source line numbers so that
 # moving a figure to a different line does not spuriously invalidate its cache entry (notes 10).
 _code_str(expr) = string(expr isa Expr ? Base.remove_linenums!(deepcopy(expr)) : expr)
 
-# A filesystem-safe, param-derived tag for a figure id, or `nothing`. The PinaxParamIOExt extension
-# specializes this on a ParamIO.DataKey (so a sweep keeps each figure's id across reordering); the
-# core has no param scheme and returns `nothing`.
+# A canonical string for a figure's `params`, hashed into its generated id. The PinaxParamIOExt
+# extension specializes this on a ParamIO.DataKey (its canonical key); anything else uses its repr.
 _param_tag(params) = nothing
+_params_key(params) = (
+    t=_param_tag(params);
+    if t !== nothing
+        t
+    elseif params === nothing
+        ""
+    else
+        repr(params)
+    end
+)
 
 # Structured description of a figure's `params` binding — an ordered `Vector{Pair{String,Any}}` of
 # axis => value — for the agent backend's data-reconciliation view (an LLM sees the bound axes, not a
@@ -546,15 +596,6 @@ _params_describe(params) = nothing
 _params_describe(nt::NamedTuple) = Pair{String,Any}[string(k) => v for (k, v) in pairs(nt)]
 function _params_describe(d::AbstractDict)
     return Pair{String,Any}[string(k) => d[k] for k in sort!(collect(keys(d)); by=string)]
-end
-
-# Figure id: an explicit `id` wins; else a param-derived tag (via the extension); else positional.
-# `c` is the enclosing container (a Section, or a page-as-leaf Page).
-function _fig_id(c, id, params)
-    id === nothing || return id
-    tag = _param_tag(params)
-    tag === nothing && return _auto_fig_id(c)
-    return Symbol(string(c.id), "_", tag)
 end
 
 function _diag!(sev::Severity, item, msg)
@@ -660,7 +701,8 @@ function _status(s)
     return error("Pinax: status must be :draft or :final (got $(repr(st))).")
 end
 
-function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing, status=nothing)
+function _enter_page!(id, title; summary=nothing, layout=nothing, status=nothing)
+    id = _symbol_id(id, "page")
     CTX.section === nothing || error(
         "@page :$(id) inside @section :$(CTX.section.id) — a page cannot be nested in a section",
     )
@@ -670,10 +712,7 @@ function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing, status
             "Pinax: @page layout= must be :grid, :single, or :wide (got $(repr(layout)))."
         )
     doc = _ensure_document!()
-    any(p -> p.id === id, doc.pages) && error(
-        "Pinax: duplicate page id :$(id) — a page with this id is already written. Ids are never " *
-        "renamed: give this @page another id.",
-    )
+    _claim!(id, "page")
     # status resolution: explicit @page status= wins; else inherit the open @part's
     # default status; else :final (the ordinary shaped/curated page).
     st = status === nothing ? get(doc.part_status, CTX.part, :final) : _status(status)
@@ -739,8 +778,10 @@ macro part(args...)
     end
 end
 
-function _enter_part!(id::Symbol, title; desc=nothing, status=nothing)
+function _enter_part!(id, title; desc=nothing, status=nothing)
+    id = _symbol_id(id, "part")
     doc = _ensure_document!()
+    _claim!(id, "part")
     # register (id => title) once, in declaration order, for the grouped navigation
     any(p -> first(p) === id, doc.parts) || push!(doc.parts, id => string(title))
     desc === nothing || (doc.part_descs[id] = Desc(string(desc)))
@@ -768,15 +809,12 @@ macro section(args...)
     end
 end
 
-function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=nothing)
+function _enter_section!(id, title; by=nothing, summary=nothing, layout=nothing)
+    id = _symbol_id(id, "section")
     pg = CTX.page
     pg === nothing && error("@section outside of a @page")
     parent = CTX.section
-    any(s -> s.id === id, parent === nothing ? pg.sections : parent.sections) && error(
-        "Pinax: duplicate id :$(id) — a sibling section with this id is already written in " *
-        "\"$(parent === nothing ? pg.anchor : parent.anchor)\". Ids are never renamed: give this " *
-        "@section another id.",
-    )
+    _claim!(id, string("section in \"", (parent === nothing ? pg : parent).anchor, "\""))
     layout === nothing ||
         layout in (:grid, :single, :wide) ||
         error(
@@ -785,8 +823,7 @@ function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=
     sec = Section(
         id,
         string(title),
-        # a hierarchical path, so equal ids under different parents never share an anchor
-        parent === nothing ? _anchor(id) : string(parent.anchor, ".", _anchor(id)),
+        _anchor(id),   # the id is the anchor: ids are unique in the whole document
         by,
         nothing,
         summary === nothing ? nothing : string(summary),
@@ -877,7 +914,8 @@ function _push_figure!(;
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@figure outside of a @section or @page")
-    fid = _claim_id!(c, _fig_id(c, id, params), "figure")
+    base = Symbol(c.id, "_fig_", _stable_hash(string(code, "|", _params_key(params))))
+    fid = _node_id!(c, id, base, "figure")
     fig = Figure(
         fid, _anchor(fid), string(caption), params, gen, code, thumbnail, String[], data
     )
@@ -926,7 +964,7 @@ function _push_table!(; data, code, caption="", id=nothing, header=nothing, para
             "$(length(hdr)) columns — check `header=` length or ragged rows",
         )
     end
-    tid = _claim_id!(c, id === nothing ? _auto_table_id(c) : Symbol(id), "table")
+    tid = _node_id!(c, id, Symbol(c.id, "_tbl_", _stable_hash(string(code))), "table")
     tbl = Table(tid, _anchor(tid), string(caption), hdr, rows, code, params)
     push!(c.tables, tbl)
     push!(c.content, :table => length(c.tables))
@@ -1086,7 +1124,6 @@ function _push_code!(;
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@code outside of a @section or @page")
-    cid = _claim_id!(c, id === nothing ? _auto_code_id(c) : Symbol(id), "code block")
     # Prefer the source as WRITTEN over the deparsed normal form (`_verbatim_code`, which returns
     # `nothing` when the file is not readable — a REPL, a Documenter `@example`).
     src = string(source)
@@ -1094,6 +1131,7 @@ function _push_code!(;
         v = _verbatim_code(at[1], at[2], ast)
         v === nothing || (src = v)
     end
+    cid = _node_id!(c, id, Symbol(c.id, "_code_", _stable_hash(src)), "code block")
     blk = CodeBlock(cid, _anchor(cid), src, string(output), string(caption), string(lang))
     push!(c.codes, blk)
     push!(c.content, :code => length(c.codes))
