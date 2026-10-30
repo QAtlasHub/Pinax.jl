@@ -514,6 +514,20 @@ _auto_fig_id(c) = Symbol(string(c.id), "_fig", length(c.figures) + 1)
 _auto_table_id(c) = Symbol(string(c.id), "_tbl", length(c.tables) + 1)
 _auto_code_id(c) = Symbol(string(c.id), "_code", length(c.codes) + 1)
 
+# Ids are never renamed (Conventions › Identity), so a collision is an error where the second node is
+# written. Figures, tables and code blocks share one id namespace per container; the same id in
+# another container does not collide (anchors are hierarchical).
+function _claim_id!(c, id::Symbol, what::AbstractString)
+    for (kind, xs) in (("figure", c.figures), ("table", c.tables), ("code block", c.codes))
+        any(x -> x.id === id, xs) && error(
+            "Pinax: duplicate id :$(id) in \"$(c.anchor)\" — this $(what) reuses the id of a " *
+            "$(kind) already written there. Ids are never renamed: give one of them another `id=`" *
+            (what == "figure" ? " (or other `params`)." : "."),
+        )
+    end
+    return id
+end
+
 # Stringify the @figure expression for change detection, stripping source line numbers so that
 # moving a figure to a different line does not spuriously invalidate its cache entry (notes 10).
 _code_str(expr) = string(expr isa Expr ? Base.remove_linenums!(deepcopy(expr)) : expr)
@@ -656,6 +670,10 @@ function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing, status
             "Pinax: @page layout= must be :grid, :single, or :wide (got $(repr(layout)))."
         )
     doc = _ensure_document!()
+    any(p -> p.id === id, doc.pages) && error(
+        "Pinax: duplicate page id :$(id) — a page with this id is already written. Ids are never " *
+        "renamed: give this @page another id.",
+    )
     # status resolution: explicit @page status= wins; else inherit the open @part's
     # default status; else :final (the ordinary shaped/curated page).
     st = status === nothing ? get(doc.part_status, CTX.part, :final) : _status(status)
@@ -754,6 +772,11 @@ function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=
     pg = CTX.page
     pg === nothing && error("@section outside of a @page")
     parent = CTX.section
+    any(s -> s.id === id, parent === nothing ? pg.sections : parent.sections) && error(
+        "Pinax: duplicate id :$(id) — a sibling section with this id is already written in " *
+        "\"$(parent === nothing ? pg.anchor : parent.anchor)\". Ids are never renamed: give this " *
+        "@section another id.",
+    )
     layout === nothing ||
         layout in (:grid, :single, :wide) ||
         error(
@@ -854,7 +877,7 @@ function _push_figure!(;
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@figure outside of a @section or @page")
-    fid = _fig_id(c, id, params)
+    fid = _claim_id!(c, _fig_id(c, id, params), "figure")
     fig = Figure(
         fid, _anchor(fid), string(caption), params, gen, code, thumbnail, String[], data
     )
@@ -903,7 +926,7 @@ function _push_table!(; data, code, caption="", id=nothing, header=nothing, para
             "$(length(hdr)) columns — check `header=` length or ragged rows",
         )
     end
-    tid = id === nothing ? _auto_table_id(c) : id
+    tid = _claim_id!(c, id === nothing ? _auto_table_id(c) : Symbol(id), "table")
     tbl = Table(tid, _anchor(tid), string(caption), hdr, rows, code, params)
     push!(c.tables, tbl)
     push!(c.content, :table => length(c.tables))
@@ -1063,7 +1086,7 @@ function _push_code!(;
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@code outside of a @section or @page")
-    cid = id === nothing ? _auto_code_id(c) : Symbol(id)
+    cid = _claim_id!(c, id === nothing ? _auto_code_id(c) : Symbol(id), "code block")
     # Prefer the source as WRITTEN over the deparsed normal form (`_verbatim_code`, which returns
     # `nothing` when the file is not readable — a REPL, a Documenter `@example`).
     src = string(source)

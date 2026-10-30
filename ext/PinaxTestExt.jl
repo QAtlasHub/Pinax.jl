@@ -107,8 +107,22 @@ end
 # where a testset becomes a child section of whatever container is open.
 function PinaxContainerSet(desc::AbstractString; kw...)
     parent = _enclosing_testset()
-    sec = Pinax._enter_section!(_slug(desc), String(desc))
+    sec = Pinax._enter_section!(_section_id(_slug(desc)), String(desc))
     return PinaxContainerSet(String(desc), sec, _outer_of(parent), true)
+end
+
+# A testset's section id is generated from its description, not written by the author, so a repeat
+# (the same `@testset "conv"` in a loop) is disambiguated with `-2`, `-3` — as check ids are — rather
+# than raising the duplicate-id error an author-written id gets.
+function _section_id(base::Symbol)
+    pg, parent = Pinax.CTX.page, Pinax.CTX.section
+    siblings = Set(s.id for s in (parent === nothing ? pg.sections : parent.sections))
+    base in siblings || return base
+    k = 2
+    while Symbol(base, "-", k) in siblings
+        k += 1
+    end
+    return Symbol(base, "-", k)
 end
 
 function Test.finish(ts::PinaxContainerSet)

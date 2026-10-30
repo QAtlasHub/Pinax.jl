@@ -15,7 +15,7 @@ using ParamIO
             @section :s "S" by = "system.g" begin
                 @figure svg params = k(1.0)
                 @figure svg params = k(0.5)
-                @figure svg params = k(1.0)
+                @figure svg params = k(1.0) id = :residual_g1   # same key: its own id
             end
         end
         html = read(Pinax.render(; out=site("f1")), String)
@@ -24,6 +24,16 @@ using ParamIO
         @test first(findfirst("system.g = 0.5", html)) <
             first(findfirst("system.g = 1.0", html))   # 0.5 group before 1.0
         @test count("class=\"facet\"", html) == 2       # two groups
+    end
+
+    @testset "two figures with one key in one section collide: an error, never a rename" begin
+        Pinax.reset!()
+        @test_throws "duplicate id" @page :p "P" begin
+            @section :s "S" by = "system.g" begin
+                @figure svg params = k(1.0)
+                @figure svg params = k(1.0)
+            end
+        end
     end
 
     @testset "figure missing the facet param -> (unset) group" begin

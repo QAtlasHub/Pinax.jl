@@ -36,6 +36,9 @@ the gap.
   `energy_t0k3x9q2`), so adding or reordering other checks never renumbers it. The same text twice in
   one container gets `-2`, `-3`. A code block's id hashes its code, so shifting lines never moves it.
   (#123)
+- Those are ids Pinax **generates**, so a repeat is disambiguated, never an error. The same holds for
+  the section a nested `@testset "x"` opens: its id comes from the description, and a second `"x"`
+  in one container becomes `x-2`. Only an id the author wrote raises on collision.
 - Comments, cross-references and `agent.json` all address a node by the same id. There is no second
   naming scheme.
 
