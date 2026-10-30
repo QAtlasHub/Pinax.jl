@@ -1,51 +1,51 @@
-[assets_figures_ising_magnetization_magnetization_fig1]
-assets = ["assets/figures/ising/magnetization/magnetization_fig1.svg"]
-key = "9650777677222241367"
-
-[assets_figures_fractals_koch_koch_fig2]
-assets = ["assets/figures/fractals/koch/koch_fig2.svg"]
-key = "2278480250791806452"
-
-[assets_figures_fractals_curves_curves_fig2]
-assets = ["assets/figures/fractals/curves/curves_fig2.svg"]
+[assets_figures_fractals_curves_curves_fig_1tvczhk]
+assets = ["assets/figures/fractals/curves/curves_fig_1tvczhk.svg"]
 key = "858553945307169039"
 
-[assets_figures_fractals_koch_koch_fig3]
-assets = ["assets/figures/fractals/koch/koch_fig3.svg"]
-key = "15651390996702131197"
-
-[assets_figures_attractors_lorenz_lorenz_fig1]
-assets = ["assets/figures/attractors/lorenz/lorenz_fig1.svg"]
+[assets_figures_attractors_lorenz_lorenz_fig_17jhj8g]
+assets = ["assets/figures/attractors/lorenz/lorenz_fig_17jhj8g.svg"]
 key = "8090713534257672684"
 
-[assets_figures_attractors_rossler_rossler_fig2]
-assets = ["assets/figures/attractors/rossler/rossler_fig2.svg"]
-key = "17308904936857713432"
+[assets_figures_fractals_koch_koch_fig_0tityr7]
+assets = ["assets/figures/fractals/koch/koch_fig_0tityr7.svg"]
+key = "2278480250791806452"
 
-[assets_figures_fractals_curves_curves_fig1]
-assets = ["assets/figures/fractals/curves/curves_fig1.svg"]
-key = "4946029671456074529"
+[assets_figures_fractals_koch_koch_fig_09qvbt7]
+assets = ["assets/figures/fractals/koch/koch_fig_09qvbt7.svg"]
+key = "15651390996702131197"
 
-[assets_figures_ising_dynamics_dynamics_system_T_2_27__sample_1]
-assets = ["assets/figures/ising/dynamics/dynamics_system_T_2_27__sample_1.gif"]
-key = "16729635603851436543"
-
-[assets_figures_attractors_lorenz_lorenz_fig2]
-assets = ["assets/figures/attractors/lorenz/lorenz_fig2.svg"]
-key = "928395089261489386"
-
-[assets_figures_fractals_koch_koch_fig1]
-assets = ["assets/figures/fractals/koch/koch_fig1.svg"]
-key = "14898794113231730345"
-
-[assets_figures_attractors_rossler_rossler_fig1]
-assets = ["assets/figures/attractors/rossler/rossler_fig1.svg"]
+[assets_figures_attractors_rossler_rossler_fig_115n4b8]
+assets = ["assets/figures/attractors/rossler/rossler_fig_115n4b8.svg"]
 key = "11296541113319536178"
 
-[assets_figures_fractals_curves_curves_fig3]
-assets = ["assets/figures/fractals/curves/curves_fig3.svg"]
+[assets_figures_fractals_curves_curves_fig_0e1j93s]
+assets = ["assets/figures/fractals/curves/curves_fig_0e1j93s.svg"]
+key = "4946029671456074529"
+
+[assets_figures_ising_dynamics_dynamics_fig_0nufs5w]
+assets = ["assets/figures/ising/dynamics/dynamics_fig_0nufs5w.gif"]
+key = "16729635603851436543"
+
+[assets_figures_fractals_curves_curves_fig_1igzp0b]
+assets = ["assets/figures/fractals/curves/curves_fig_1igzp0b.svg"]
 key = "12759831972172919973"
 
-[assets_figures_attractors_lorenz_lorenz_fig3]
-assets = ["assets/figures/attractors/lorenz/lorenz_fig3.svg"]
+[assets_figures_fractals_koch_koch_fig_0w85di0]
+assets = ["assets/figures/fractals/koch/koch_fig_0w85di0.svg"]
+key = "14898794113231730345"
+
+[assets_figures_ising_magnetization_magnetization_fig_1wmyftc]
+assets = ["assets/figures/ising/magnetization/magnetization_fig_1wmyftc.svg"]
+key = "9650777677222241367"
+
+[assets_figures_attractors_rossler_rossler_fig_047nk3c]
+assets = ["assets/figures/attractors/rossler/rossler_fig_047nk3c.svg"]
+key = "17308904936857713432"
+
+[assets_figures_attractors_lorenz_lorenz_fig_10mrxif]
+assets = ["assets/figures/attractors/lorenz/lorenz_fig_10mrxif.svg"]
+key = "928395089261489386"
+
+[assets_figures_attractors_lorenz_lorenz_fig_0ijwd1k]
+assets = ["assets/figures/attractors/lorenz/lorenz_fig_0ijwd1k.svg"]
 key = "2302342124608047297"
