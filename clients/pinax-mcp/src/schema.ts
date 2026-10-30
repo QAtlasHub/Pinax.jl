@@ -104,6 +104,7 @@ export interface SectionT {
   codes?: z.infer<typeof CodeZ>[];
   checks?: z.infer<typeof CheckZ>[];
   content?: z.infer<typeof ContentRefZ>[];
+  comments?: z.infer<typeof CommentZ>[];
   sections?: SectionT[];
   [k: string]: unknown;
 }
@@ -121,6 +122,7 @@ export const SectionZ: z.ZodType<SectionT> = z.lazy(() =>
       codes: z.array(CodeZ).optional(),
       checks: z.array(CheckZ).optional(),
       content: z.array(ContentRefZ).optional(),
+      comments: z.array(CommentZ).optional(), // the section's own thread, as a figure carries one
       sections: z.array(SectionZ).optional(),
     })
     .passthrough(),
@@ -141,6 +143,7 @@ export const PageZ = z
     verdict: VerdictZ.nullable().optional(),
     checks: z.array(CheckZ).optional(),
     content: z.array(ContentRefZ).optional(),
+    comments: z.array(CommentZ).optional(), // the page's own thread, as a figure carries one
     sections: z.array(SectionZ),
   })
   .passthrough();

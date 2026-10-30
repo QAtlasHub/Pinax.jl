@@ -274,7 +274,7 @@ function Test.finish(ts::PinaxTestSet)
         println(
             "\nPinax test report: ",
             _summary_line(n),
-            "\n  rendered → $(ts.out)_html/  $(ts.out)_agent/",
+            "\n  rendered → $(joinpath(ts.out, "html"))/  $(joinpath(ts.out, "agent"))/",
         )
     end
     # Stay a well-behaved testset: a failing suite must still fail the process (invariant IV — a
@@ -361,7 +361,7 @@ function _finalize_test_capture!(root::PinaxTestSet)
         println(
             "\nPinax test report: ",
             _summary_line(n),
-            "\n  rendered → $(root.out)_html/  $(root.out)_agent/",
+            "\n  rendered → $(joinpath(root.out, "html"))/  $(joinpath(root.out, "agent"))/",
         )
     end
     nfail, nerr = _nfail(n), _nerror(n)

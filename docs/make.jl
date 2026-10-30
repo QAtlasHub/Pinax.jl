@@ -103,7 +103,7 @@ let build = joinpath(@__DIR__, "build")
     # downloaded one into ../pinax-report-dl/. Nothing produces that artifact yet (#120), so this is
     # the standing half of the wiring: it is never re-run here, because the report is meant to be a
     # CI run's own output rather than a second test pass during the docs build.
-    let src = joinpath(@__DIR__, "..", "pinax-report-dl", "pinax-report_html"),
+    let src = joinpath(@__DIR__, "..", "pinax-report-dl", "pinax-report", "html"),
         dst = joinpath(build, "test-report")
 
         if isdir(src)

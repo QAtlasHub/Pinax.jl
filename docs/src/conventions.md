@@ -122,7 +122,9 @@ or pull request that tracks the gap.
   face and the kind, never a silent omission. (#168)
 - Every container is laid out in the same order in every face: its heading, then its verdict band
   and the table of its own checks (when its subtree holds checks), then its content in declaration
-  order.
+  order, then its comments.
+- A comment is stored under its node's id, and every face shows it on that node — a page, a
+  section or a figure.
 - The `agent.json` shape is a contract. The pinax-mcp fixture is generated from the emitter
   (`test/test_contract.jl`) and checked against the consumer schema, which must name every key the
   emitter writes. (#169)
@@ -136,7 +138,7 @@ or pull request that tracks the gap.
 
 - `out` is always a **directory**. `render` writes one face into it; `report` and the test reports
   write `out/html/` and `out/agent/`, and every face of one document reads the one
-  `out/comments.toml`. (in progress, #172)
+  `out/comments.toml`.
 
 ## Rendering and data
 

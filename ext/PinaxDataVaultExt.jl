@@ -92,8 +92,15 @@ function Pinax.report(
     recipe(pairs)
     _READS[] = Dict(r.key => r.read_sha256 for r in reads)
     try
-        gallery = Pinax.render(; out="$(out)_html", theme=:gallery, vault, study, kwargs...)
-        agent = Pinax.render(; out="$(out)_agent", theme=:agent, vault, study, kwargs...)
+        # `out` is a directory (Conventions › Output): one face per subdirectory, one comment store
+        cf = get(kwargs, :comments_file, joinpath(out, "comments.toml"))
+        kw = (; (k => v for (k, v) in kwargs if k !== :comments_file)...)
+        gallery = Pinax.render(;
+            out=joinpath(out, "html"), theme=:gallery, vault, study, comments_file=cf, kw...
+        )
+        agent = Pinax.render(;
+            out=joinpath(out, "agent"), theme=:agent, vault, study, comments_file=cf, kw...
+        )
         return (; gallery, agent, n=length(pairs), reads, render_observation)
     finally
         _READS[] = nothing

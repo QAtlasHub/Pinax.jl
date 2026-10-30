@@ -88,8 +88,9 @@ names the bytes the recipe saw), hands the `(key, dict)` pairs to the project-su
 (which builds the doc with `@page`/`@figure`/`@table`), then renders the human gallery
 **and** the agent.json with the vault wired in (data-fingerprint cache tracking +
 provenance). The driver — discover, load, render, lineage — is project-independent; only
-`recipe` is project-specific. Requires `using DataVault` (which also loads ParamIO); the
-core method errors with a hint when the extension is not loaded.
+`recipe` is project-specific. `out` is a directory: the faces go to `out/html/` and `out/agent/`,
+which share `out/comments.toml`. Requires `using DataVault` (which also loads ParamIO); the core
+method errors with a hint when the extension is not loaded.
 
 `reads` has one record per key — its canonical id, file, `read_sha256`, and what the key's
 `.done` recorded (`result_sha256`, `observation`, `completed_at`) — so a registry can say which

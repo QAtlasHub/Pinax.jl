@@ -39,8 +39,8 @@ when adding any node type: it needs a human render **and** an agent-data form.
   fingerprint; provenance recorded).
 - **Bridge a sweep** `report(vault, recipe; title, out)` — discover the vault's `:done` keys, load
   each Dict, hand the `(key, dict)` pairs to a project `recipe` (which builds the doc), render
-  gallery + agent.json into the SIBLING directories `<out>_html/` and `<out>_agent/` (not under
-  `out`). Driver project-independent; only `recipe` is project-specific.
+  gallery + agent.json into `<out>/html/` and `<out>/agent/`, which share `<out>/comments.toml`
+  (`out` is always a directory). Driver project-independent; only `recipe` is project-specific.
   `sweep_mean(pairs, quantity, axis)` is a generic scalar-vs-swept-param reduction.
 
 ## Contracts that trip up callers — read this

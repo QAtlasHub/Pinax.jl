@@ -122,7 +122,7 @@ end
         ok, log, _, rep = captured_run()
         @test ok
         @test occursin("2/2 units ran", log)
-        html = read(joinpath(rep * "_html", "unit_a_jl.html"), String)
+        html = read(joinpath(joinpath(rep, "html"), "unit_a_jl.html"), String)
         # the checks reached Pinax at all — the assertion that fails without the provider
         @test occursin("PASS", html)
         # …with their NUMBERS: 1.0 against 1.0098 spent 97% of its tolerance
@@ -132,7 +132,7 @@ end
         # …and each check shows the code that produced it, as a @code block
         @test occursin("@test isapprox(1.0, 1.0098; rtol=0.01)", html)
         # one page per unit, and the second unit is there too
-        @test isfile(joinpath(rep * "_html", "unit_b_jl.html"))
+        @test isfile(joinpath(joinpath(rep, "html"), "unit_b_jl.html"))
     end
 
     @testset "what a test established becomes content, not only a record" begin
@@ -140,10 +140,10 @@ end
         # the provider attaches it as a @table on the node that recorded it — legible for a reader,
         # and native rows in agent.json, where it is the binding for reconciling a claim.
         _, _, _, rep = captured_run()
-        html = read(joinpath(rep * "_html", "unit_a_jl.html"), String)
+        html = read(joinpath(joinpath(rep, "html"), "unit_a_jl.html"), String)
         @test occursin("What this test established", html)
         @test occursin("closed form", html) && occursin("tolerance", html)
-        agent = read(joinpath(rep * "_agent", "agent.json"), String)
+        agent = read(joinpath(joinpath(rep, "agent"), "agent.json"), String)
         # native rows, and sorted keys so a rebuild is the same table rather than the same facts
         # in a different order
         @test occursin("[\"achieved\",0.0097]", agent)
@@ -185,11 +185,11 @@ end
             out=joinpath(dir, "rep"),
             overview=Pinax.completeness_overview(whole),
         )
-        html = read(joinpath(dir, "rep_html", "overview.html"), String)
+        html = read(joinpath(dir, "rep", "html", "overview.html"), String)
         @test occursin("Every unit ran exactly once", html)
         @test occursin("units observed", html) &&
             occursin("every unit ran exactly once", html)
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
         @test occursin("[\"units observed\",2]", agent)      # native, not "2"
         @test occursin("\"id\":\"completeness\"", agent)
 
@@ -202,10 +202,10 @@ end
             out=joinpath(d2, "rep"),
             overview=Pinax.completeness_overview(holed),
         )
-        h2 = read(joinpath(d2, "rep_html", "overview.html"), String)
+        h2 = read(joinpath(d2, "rep", "html", "overview.html"), String)
         @test occursin("Completeness FAILED", h2)
         @test occursin("1 unit never ran", h2) && occursin("position 2", h2)
-        @test occursin("FAILED", read(joinpath(d2, "rep_agent", "agent.json"), String))
+        @test occursin("FAILED", read(joinpath(d2, "rep", "agent", "agent.json"), String))
     end
 
     @testset "sharded, the shards merge into one document" begin
@@ -226,7 +226,7 @@ end
         @test length(readdir(dumps)) == 2
         merged = joinpath(mktempdir(), "merged")
         Pinax.render_test_report(readdir(dumps; join=true); out=merged, title="Merged")
-        md = read(joinpath(merged * "_agent", "agent.md"), String)
+        md = read(joinpath(joinpath(merged, "agent"), "agent.md"), String)
         # Both units, ONE page each — a per-shard document would repeat them. Asserted on the ids
         # rather than on the ABSENCE of the word "shard": TestShards' own name contains it, and the
         # provenance table carries the repository name, so the tidier assertion is a false positive

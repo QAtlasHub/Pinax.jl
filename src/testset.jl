@@ -38,7 +38,7 @@ Each test *file* (a `.jl`-named `@testset`) becomes a page, each nested
 `@testset` a section, each `@test` a `Check` carrying its real `got`/`want`/`tol` — and, by default,
 a `@code` block holding the source that produced it, so a reader sees what was measured and not only
 whether it passed. Writes
-`<out>_html` + `<out>_agent`; with `dump` set, dumps the tree there instead (a sharded CI shard) for
+`<out>/html/` + `<out>/agent/`; with `dump` set, dumps the tree there instead (a sharded CI shard) for
 [`render_test_report`](@ref) to merge later. A red suite still fails the process — the report never
 changes the verdict. A suite may also draw (`@desc`/`@figure`/`@table`/…); that content is captured,
 and is a no-op under a bare `Pkg.test()`.
@@ -125,7 +125,7 @@ function install_test_capture!()
     return _install_test_capture!()
 end
 
-"Where the test report is written (`PINAX_TEST_OUT`, default `test-report`) → `<out>_html` + `<out>_agent`."
+"Where the test report is written (`PINAX_TEST_OUT`, default `test-report`) → `<out>/html/` + `<out>/agent/`."
 report_out() = get(ENV, "PINAX_TEST_OUT", "test-report")
 
 "Report title (`PINAX_TEST_TITLE`, default `Test report`) — the document title + overview heading."
@@ -1460,8 +1460,8 @@ CI log that expires: a completeness verdict ("every unit ran exactly once"), the
 about what was skipped. Its content leads the page, above the fixed tables. If the hook throws, that is a
 diagnostic in the report, not a failed render.
 
-Writes `<out>_html` (the human gallery) and `<out>_agent` (`agent.json`), following the same
-convention as [`report`](@ref).
+Writes `<out>/html/` (the human gallery) and `<out>/agent/` (`agent.json`), which share one
+`<out>/comments.toml` — the same layout as [`report`](@ref).
 
 ```julia
 render_test_report(dumps; out="test-report", overview = () -> begin
@@ -1515,8 +1515,10 @@ function _render_report_doc(doc, out)
     for pg in doc.pages, c in _subtree_checks(pg)
         c.reported = true
     end
-    gallery = render(doc; out="$(out)_html", theme=:gallery)
-    agent = render(doc; out="$(out)_agent", theme=:agent)
+    # `out` is a directory (Conventions › Output): one face per subdirectory, one comment store
+    cf = joinpath(out, "comments.toml")
+    gallery = render(doc; out=joinpath(out, "html"), theme=:gallery, comments_file=cf)
+    agent = render(doc; out=joinpath(out, "agent"), theme=:agent, comments_file=cf)
     return (; gallery, agent)
 end
 

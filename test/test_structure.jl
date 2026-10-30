@@ -143,4 +143,20 @@ using Test
         @test occursin("@raw", diag)
         @test occursin("empty_tbl", diag)
     end
+
+    @testset "out is a directory: one face per subdirectory, one comment store" begin
+        out = joinpath(tmp, "report")
+        mkpath(out)
+        node = Pinax.TestNode(
+            "test_x.jl"; checks=[Pinax.Check(:t, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)]
+        )
+        Pinax.add_comment(
+            joinpath(out, "comments.toml"), :test_x_jl, "SHARED_NOTE"; author="me"
+        )
+        res = Pinax.render_test_report(Pinax.TestNode("T"; children=[node]); out=out)
+        @test res.gallery == joinpath(out, "html", "index.html")
+        @test res.agent == joinpath(out, "agent", "agent.json")
+        @test occursin("SHARED_NOTE", read(joinpath(out, "html", "test_x_jl.html"), String))
+        @test occursin("SHARED_NOTE", read(joinpath(out, "agent", "agent.md"), String))
+    end
 end

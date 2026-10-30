@@ -193,6 +193,7 @@ export class Atlas {
       } else {
         consider(u, "desc", n.desc);
         if (u.kind === "page") consider(u, "summary", n.summary);
+        for (const c of n.comments ?? []) consider(u, "comment", `${c.author}: ${c.text}`);
       }
     }
     return hits;

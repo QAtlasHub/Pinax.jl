@@ -135,13 +135,22 @@ function emit_figure(theme::AgentBase, fig, ctx)
     else
         print(io, "null")
     end
-    print(io, ",\"comments\":[")
-    for (i, c) in enumerate(get(ctx.comments, Symbol(fig.anchor), Comment[]))
-        i == 1 || print(io, ",")
-        print(io, "{\"author\":", _jsonstr(c.author), ",\"text\":", _jsonstr(c.text), "}")
-    end
-    print(io, "]}")
+    print(io, ",\"comments\":")
+    _agent_comments!(fig.anchor, ctx)
+    print(io, "}")
     return nothing
+end
+
+# The id-keyed comment thread of any node (a figure, a page, a section) as `[{author, text}]`.
+function _agent_comments!(anchor, ctx)
+    print(ctx.io, "[")
+    for (i, c) in enumerate(get(ctx.comments, Symbol(anchor), Comment[]))
+        i == 1 || print(ctx.io, ",")
+        print(
+            ctx.io, "{\"author\":", _jsonstr(c.author), ",\"text\":", _jsonstr(c.text), "}"
+        )
+    end
+    return print(ctx.io, "]")
 end
 
 # One @table -> a JSON object (header + native-typed rows). A table is already the LLM-native form.
@@ -374,6 +383,8 @@ function _agent_container!(theme::AgentBase, c, pg, assetdir, ctx)
     _agent_codes!(theme, c.codes, ctx)
     print(io, ",\"content\":")
     _agent_content!(c, ctx)
+    print(io, ",\"comments\":")   # a page or section carries its own thread, as a figure does
+    _agent_comments!(c.anchor, ctx)
     # the section tree: children nest inside their parent's object, in declaration order
     print(io, ",\"sections\":[")
     for (j, child) in enumerate(c.sections)
@@ -616,6 +627,14 @@ function _agent_md_verdict(io, c)
     return nothing
 end
 
+# A page's or section's own comment thread, at its end (where the gallery and LaTeX put it).
+function _agent_md_notes(io, anchor, comments)
+    for c in get(comments, Symbol(anchor), Comment[])
+        println(io, "- note (", c.author, "): ", c.text)
+    end
+    return nothing
+end
+
 function _agent_md_section(io, sec, outdir, comments, as_table, rdiag)
     println(
         io,
@@ -628,6 +647,7 @@ function _agent_md_section(io, sec, outdir, comments, as_table, rdiag)
     _agent_md_verdict(io, sec)
     sec.summary === nothing || println(io, "_", sec.summary, "_")
     _agent_md_content(io, sec, outdir, comments, as_table, rdiag)
+    _agent_md_notes(io, sec.anchor, comments)
     return nothing
 end
 
@@ -659,6 +679,7 @@ function _agent_markdown(doc::Document, outdir, comments, as_table, rdiag)
         _agent_md_verdict(io, pg)
         pg.summary === nothing || println(io, "_", pg.summary, "_")
         _agent_md_content(io, pg, outdir, comments, as_table, rdiag)   # sections included, in order
+        _agent_md_notes(io, pg.anchor, comments)
     end
     return String(take!(io))
 end

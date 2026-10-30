@@ -176,7 +176,7 @@ end
         @test back.children[1].checks[1].want === 1.0098
 
         Pinax.render_test_report([d1, d2]; out=joinpath(dir, "m"), title="Merged")
-        md = read(joinpath(dir, "m_agent", "agent.md"), String)
+        md = read(joinpath(dir, "m", "agent", "agent.md"), String)
         # ONE gallery, one page per test FILE — the shard boundary is invisible in the output…
         @test occursin("test_a.jl", md) && occursin("test_b.jl", md)
         @test !occursin("shard", lowercase(md))
@@ -223,7 +223,7 @@ end
             :text => 1, :code => 1, :check => 1, :table => 1, :panel => 1
         ]
         render_test_report([p]; out=joinpath(dir, "rep"))
-        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+        html = read(joinpath(dir, "rep", "html", "f_jl.html"), String)
         @test all(
             occursin(k, html) for
             k in ("a description", "a caption", "raw panel", "E = f(x)")
@@ -252,12 +252,12 @@ end
                 @raw "<p id=\"cinote\">from the merge job</p>"
             end,
         )
-        html = read(joinpath(dir, "rep_html", "overview.html"), String)
+        html = read(joinpath(dir, "rep", "html", "overview.html"), String)
         @test occursin("Every unit ran exactly once", html)
         @test occursin("units observed", html) && occursin("Completeness", html)
         @test occursin("id=\"cinote\"", html)
         # …and it is DATA in agent.json, not only pixels — the table rows are native
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
         @test occursin("units observed", agent) &&
             occursin("\"caption\":\"Completeness\"", agent)
         # the fixed tables are still there, and the hook's desc sits above them
@@ -272,9 +272,9 @@ end
             overview=() -> error("boom"),
         )
         # diagnostics are document-level, so they land on the gallery's index, not on the page
-        h2 = read(joinpath(d2, "rep_html", "index.html"), String)
+        h2 = read(joinpath(d2, "rep", "html", "index.html"), String)
         @test occursin("Diagnostics", h2) && occursin("boom", h2)   # named, with the cause
-        @test isfile(joinpath(d2, "rep_html", "overview.html"))     # …and the report still rendered
+        @test isfile(joinpath(d2, "rep", "html", "overview.html"))     # …and the report still rendered
     end
 
     @testset "a broken test is counted, never painted red" begin
@@ -335,7 +335,7 @@ end
 
             root = suite(pass; out=joinpath(dir, "r"), dump="")
             @test at_root(() -> Test.finish(root)) === root
-            @test isfile(joinpath(dir, "r_html", "index.html"))
+            @test isfile(joinpath(dir, "r", "html", "index.html"))
             @test !isnan(root.node.elapsed)
 
             d = joinpath(dir, "s.toml")
@@ -345,12 +345,12 @@ end
             ign = suite(pass; out=joinpath(dir, "ign"), dump="")
             ign.node.ignore = true
             at_root(() -> Test.finish(ign))
-            @test !isdir(joinpath(dir, "ign_html"))
+            @test !isdir(joinpath(dir, "ign", "html"))
 
             @test_throws "1 failed" at_root(
                 () -> Test.finish(suite(fail; out=joinpath(dir, "red"), dump=""))
             )
-            @test isfile(joinpath(dir, "red_html", "index.html"))   # rendered before it throws
+            @test isfile(joinpath(dir, "red", "html", "index.html"))   # rendered before it throws
 
             # the delegation's atexit hook: an empty root (a precompile / cache-flags probe) is left
             # alone; a captured one dumps or renders exactly like `finish`
@@ -364,7 +364,7 @@ end
                     suite(pass; out=joinpath(dir, "fin"), dump="")
                 ),
             )
-            @test isfile(joinpath(dir, "fin_html", "index.html"))
+            @test isfile(joinpath(dir, "fin", "html", "index.html"))
         end
     end
 
@@ -418,7 +418,7 @@ end
         root = TestNode("Pkg"; children=[node])
         dir = mktempdir()
         Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
-        html = read(joinpath(dir, "r_html", "test_x_jl.html"), String)
+        html = read(joinpath(dir, "r", "html", "test_x_jl.html"), String)
         @test occursin("a table caption", html)   # the @table folded onto the page
         @test occursin("hand built", html)         # the @raw panel folded onto the page
         # the dump carries checks + structure and WARNS (never silently drops) a test's figure
@@ -441,10 +441,10 @@ end
         dir = mktempdir()
         Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
         # duplicate page ids disambiguated → both files render (no silent overwrite)
-        @test isfile(joinpath(dir, "r_html", "test_a_jl.html"))
-        @test isfile(joinpath(dir, "r_html", "test_a_jl-2.html"))
+        @test isfile(joinpath(dir, "r", "html", "test_a_jl.html"))
+        @test isfile(joinpath(dir, "r", "html", "test_a_jl-2.html"))
         # section ids are page-qualified; the sibling collision within test_a.jl took the `-2` suffix
-        html = read(joinpath(dir, "r_html", "test_a_jl.html"), String)
+        html = read(joinpath(dir, "r", "html", "test_a_jl.html"), String)
         @test occursin("test_a_jl_basics", html) && occursin("test_a_jl_basics-2", html)
         # both collisions are surfaced as loud diagnostics (never silent)
         dups = count(
@@ -512,7 +512,7 @@ end
             # ---- bare run (no preamble): stock Test, red fails, nothing rendered ----
             r = run_script("using Pinax, Test\ninclude($(runtests))\n")
             @test !r.ok                                   # the top-level DefaultTestSet throws on red
-            @test !isdir(joinpath(dir, "rep_agent"))      # no report — a bare run is untouched
+            @test !isdir(joinpath(dir, "rep", "agent"))      # no report — a bare run is untouched
 
             # ---- delegation preamble: capture + render + exit code + @pinaxignore ----
             r = run_script(
@@ -520,11 +520,11 @@ end
             )
             @test !r.ok                                   # red suite fails the process (atexit exit(1))
             @test occursin("Pinax test report", r.log)
-            md = read(joinpath(dir, "rep_agent", "agent.md"), String)
+            md = read(joinpath(dir, "rep", "agent", "agent.md"), String)
             @test occursin("1/2 FAIL", md)                # verdict preserved on the file's page
             @test occursin("got 0.5, want 0.9", md)       # the failing check kept its real numbers
             @test occursin("convergence of E against the oracle", md)  # a @desc inside a test reached it
-            @test isfile(joinpath(dir, "rep_html", "test_demo_jl.html"))
+            @test isfile(joinpath(dir, "rep", "html", "test_demo_jl.html"))
             @test !occursin("noisy fixture", md)          # @pinaxignore dropped it (it still ran)
 
             # ---- the suite-side way in: same capture, without owning the `Pkg.test` call ----
@@ -537,7 +537,7 @@ end
             )
             @test !r.ok                                   # red suite still fails the process
             @test occursin("Pinax test report", r.log)
-            md_suite = read(joinpath(dir, "suite_agent", "agent.md"), String)
+            md_suite = read(joinpath(dir, "suite", "agent", "agent.md"), String)
             @test occursin("1/2 FAIL", md_suite)          # same verdict as the preamble produced
             @test occursin("got 0.5, want 0.9", md_suite) # same numbers
             @test occursin("convergence of E against the oracle", md_suite)
@@ -551,7 +551,7 @@ end
             )
             @test !r.ok                                   # the top-level DefaultTestSet throws on red
             @test !occursin("Pinax test report", r.log)   # nothing rendered, nothing dumped
-            @test !isdir(joinpath(dir, "test-report_agent"))   # not even at the default `out`
+            @test !isdir(joinpath(dir, "test-report", "agent"))   # not even at the default `out`
 
             # ---- idempotent: preamble AND suite call, still one root ----
             # A `runtests.jl` carrying the call is still a valid target for `Pinax.test()`, so the two
@@ -563,7 +563,7 @@ end
             )
             @test !r.ok
             @test length(collect(eachmatch(r"Pinax test report", r.log))) == 1
-            md_once = read(joinpath(dir, "once_agent", "agent.md"), String)
+            md_once = read(joinpath(dir, "once", "agent", "agent.md"), String)
             @test occursin("1/2 FAIL", md_once)           # the surviving root is the one that captured
 
             # ---- asked for, but there is no `Test` to capture: say so, do not fail silently ----
@@ -576,7 +576,7 @@ end
             )
             @test r.ok                                    # a warning, not an error
             @test occursin("is not loaded", r.log)
-            @test !isdir(joinpath(dir, "notest_agent"))
+            @test !isdir(joinpath(dir, "notest", "agent"))
         end
     end
 
@@ -617,8 +617,8 @@ end
         # green suite → Pinax.test succeeds and renders, from a suite with no @pinaxtestset in sight
         out = joinpath(dir, "rep")
         @test run_it(joinpath(dir, "suite.jl"), out)
-        @test isfile(joinpath(out * "_html", "ok_jl.html"))
-        md = read(joinpath(out * "_agent", "agent.md"), String)
+        @test isfile(joinpath(joinpath(out, "html"), "ok_jl.html"))
+        md = read(joinpath(joinpath(out, "agent"), "agent.md"), String)
         @test occursin("a description written inside a plain @testset", md)
 
         # red suite → Pinax.test re-throws (process fails): a report never turns a red suite green
@@ -658,8 +658,8 @@ end
             @test _is_swept(file, _looks_like_a_file)
             out = joinpath(mktempdir(), "rep")
             render_test_report(TestNode("Test report"; children=[file]); out=out)
-            html = read(joinpath(out * "_html", "test_conv_jl.html"), String)
-            md = read(joinpath(out * "_agent", "agent.md"), String)
+            html = read(joinpath(joinpath(out, "html"), "test_conv_jl.html"), String)
+            md = read(joinpath(joinpath(out, "agent"), "agent.md"), String)
             @test occursin("Convergence of", html)                 # the derived figure
             @test occursin("test_conv_jl_conv_1", md)              # convergence fig id
             @test occursin("test_conv_jl_swpmargin_1", md)         # margin-vs-axis fig id
@@ -681,7 +681,7 @@ end
             @test _is_swept(file, _looks_like_a_file)
             out = joinpath(mktempdir(), "rep")
             render_test_report(TestNode("Test report"; children=[file]); out=out)
-            html = read(joinpath(out * "_html", "test_nest_jl.html"), String)
+            html = read(joinpath(joinpath(out, "html"), "test_nest_jl.html"), String)
             @test occursin("χ = 8", html) && occursin("χ = 16", html)   # the two legend series
         end
 
@@ -693,7 +693,7 @@ end
             @test _is_swept(file, _looks_like_a_file)
             out = joinpath(mktempdir(), "rep")
             render_test_report(TestNode("Test report"; children=[file]); out=out)
-            html = read(joinpath(out * "_html", "test_cat_jl.html"), String)
+            html = read(joinpath(joinpath(out, "html"), "test_cat_jl.html"), String)
             @test occursin("TFIM", html) && occursin("Heisenberg", html) # string ticks, not numbers
         end
 
@@ -708,9 +708,9 @@ end
             @test !_is_swept(file, _looks_like_a_file)              # not a consistent sweep
             out = joinpath(mktempdir(), "rep")
             render_test_report(TestNode("Test report"; children=[file]); out=out)
-            files = readdir(out * "_html")
+            files = readdir(joinpath(out, "html"))
             txt = join(
-                read(joinpath(out * "_html", f), String) for
+                read(joinpath(joinpath(out, "html"), f), String) for
                 f in files if endswith(f, ".html")
             )
             @test occursin("a smoke check", txt)                   # rendered as an ordinary section
@@ -745,7 +745,7 @@ end
                     "PINAX_TEST_OUT" => joinpath(dir, "rep"),
                 )
                 run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=devnull))
-                md = read(joinpath(dir, "rep_agent", "agent.md"), String)
+                md = read(joinpath(dir, "rep", "agent", "agent.md"), String)
                 @test occursin("Convergence of", md)                   # the sweep figure, from a real forloop
                 @test occursin("[χ = 8]", md) && occursin("[χ = 32]", md)
                 @test occursin("1/3", md)                              # verdict preserved (only χ=32 passes)
@@ -780,7 +780,7 @@ end
             )
             out = joinpath(mktempdir(), "rep")
             render_test_report(n; out=out)
-            md = read(joinpath(out * "_agent", "agent.md"), String)
+            md = read(joinpath(joinpath(out, "agent"), "agent.md"), String)
             @test occursin("Provenance", md) && occursin("feat/x", md)
         end
 
@@ -858,7 +858,7 @@ end
             TestNode("Test report"; children=[TestNode("test_x.jl"; checks=[srcchk()])]);
             out=joinpath(dir, "rep"),
         )
-        aj = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        aj = read(joinpath(dir, "rep", "agent", "agent.json"), String)
         @test occursin("\"source\":\"test_x.jl:42\"", aj)
     end
 
@@ -890,13 +890,13 @@ end
         render_test_report(
             TestNode("Test report"; children=[TestNode("big.jl"; checks=checks)]); out=out
         )
-        html = read(joinpath(out * "_html", "big_jl.html"), String)
+        html = read(joinpath(joinpath(out, "html"), "big_jl.html"), String)
         @test occursin("more not shown", html)                     # the loud summary row
         @test occursin("$(500 - length(fails))/500", html)         # verdict over ALL 500
         @test count("pinax-pass\"", html) + count("pinax-fail\"", html) <=
             Pinax._MAX_CHECK_ROWS
         @test occursin("worst of 500", html)                       # the margin figure capped too
-        aj = read(joinpath(out * "_agent", "agent.json"), String)
+        aj = read(joinpath(joinpath(out, "agent"), "agent.json"), String)
         @test count("\"pass\":", aj) >= 500                        # agent.json enumerates every check
     end
 
@@ -935,9 +935,9 @@ end
 
         out = joinpath(dir, "m")
         render_test_report([dA, dB]; out=out, title="Matrix")
-        idx = read(joinpath(out * "_html", "index.html"), String)
-        md = read(joinpath(out * "_agent", "agent.md"), String)
-        files = readdir(out * "_html")
+        idx = read(joinpath(joinpath(out, "html"), "index.html"), String)
+        md = read(joinpath(joinpath(out, "agent"), "agent.md"), String)
+        files = readdir(joinpath(out, "html"))
         @test occursin("julia 1.11 · ubuntu", idx) && occursin("julia 1.10 · ubuntu", idx)  # both parts
         # the SAME file in two cells → two pages, ids qualified per cell (no collision)
         @test count(f -> occursin("test_foo_jl", f) && endswith(f, ".html"), files) == 2
@@ -971,7 +971,8 @@ end
                 filter(
                     p -> occursin("margins", p),
                     readdir(
-                        joinpath(out * "_html", "assets", "figures", "f_jl"); join=true
+                        joinpath(joinpath(out, "html"), "assets", "figures", "f_jl");
+                        join=true,
                     ),
                 ),
             ),
@@ -1039,10 +1040,10 @@ end
         d = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
         @test Pinax.load_test_dump(d).children[1].codes[1].source == "E = f(x)"   # round-trips a shard
         render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
-        @test occursin("E = f(x)", read(joinpath(dir, "rep_html", "f_jl.html"), String))
+        @test occursin("E = f(x)", read(joinpath(dir, "rep", "html", "f_jl.html"), String))
         @test occursin(
             "\"source\":\"E = f(x)\"",
-            read(joinpath(dir, "rep_agent", "agent.json"), String),
+            read(joinpath(dir, "rep", "agent", "agent.json"), String),
         )
     end
 
@@ -1096,11 +1097,11 @@ end
         @test back.checks[1].code_anchor == blk.anchor &&
             back.codes[1].source == "x = compute()"
         render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
-        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+        html = read(joinpath(dir, "rep", "html", "f_jl.html"), String)
         @test occursin("pinax-code-src", html) && occursin("x = compute()", html)
         @test occursin("class=\"pinax-codelink\" href=\"#code_f_jl_1_2\"", html)
         @test !occursin("pinax-code-row", html)               # no second code renderer
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
         @test occursin("\"code_id\":\"code_f_jl_1_2\"", agent)
         @test occursin("{\"id\":\"code_f_jl_1_2\",\"caption\"", agent)  # resolvable against the code object
     end
@@ -1119,9 +1120,9 @@ end
         ]
         node = TestNode("f.jl"; children=samples)
         render_test_report(TestNode("T"; children=[node]); out=joinpath(dir, "rep"))
-        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+        html = read(joinpath(dir, "rep", "html", "f_jl.html"), String)
         @test count("@test n &gt; 0", html) == 1               # ONE block, not one per sample
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
         @test count("{\"id\":\"code_s_jl_2_3\",\"caption\"", agent) == 1   # one code object in `codes`
     end
 end

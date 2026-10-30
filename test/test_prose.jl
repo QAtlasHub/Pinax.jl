@@ -125,7 +125,7 @@ _pos(s, needle) = first(findfirst(needle, s))
             Pinax.TestNode("T"; children=[back]); out=joinpath(tmp, "rep")
         )
         @test occursin(
-            "DUMPED_PROSE", read(joinpath(tmp, "rep_html", "test_x_jl.html"), String)
+            "DUMPED_PROSE", read(joinpath(tmp, "rep", "html", "test_x_jl.html"), String)
         )
     end
 end
