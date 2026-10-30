@@ -48,6 +48,18 @@ export const FigureZ = z
   })
   .passthrough();
 
+// A `@code` block (or the code a `@test` was captured from): what ran, and what it printed.
+export const CodeZ = z
+  .object({
+    id: z.string(),
+    anchor: z.string(), // what a check's `code_anchor` points at
+    caption: z.string().optional(),
+    lang: z.string(),
+    source: z.string(),
+    output: z.string(),
+  })
+  .passthrough();
+
 // A number, or the string a non-finite value is written as ("NaN", "Inf").
 const NumZ = z.union([z.number(), z.string()]);
 
@@ -86,6 +98,7 @@ export interface SectionT {
   desc: string | null;
   figures: z.infer<typeof FigureZ>[];
   tables?: z.infer<typeof TableNodeZ>[];
+  codes?: z.infer<typeof CodeZ>[];
   checks?: z.infer<typeof CheckZ>[];
   content?: z.infer<typeof ContentRefZ>[];
   sections?: SectionT[];
@@ -101,6 +114,7 @@ export const SectionZ: z.ZodType<SectionT> = z.lazy(() =>
       desc: z.string().nullable(),
       figures: z.array(FigureZ),
       tables: z.array(TableNodeZ).optional(),
+      codes: z.array(CodeZ).optional(),
       checks: z.array(CheckZ).optional(),
       content: z.array(ContentRefZ).optional(),
       sections: z.array(SectionZ).optional(),
@@ -118,6 +132,7 @@ export const PageZ = z
     desc: z.string().nullable(),
     figures: z.array(FigureZ),
     tables: z.array(TableNodeZ).optional(),
+    codes: z.array(CodeZ).optional(),
     verdict: VerdictZ.nullable().optional(),
     checks: z.array(CheckZ).optional(),
     content: z.array(ContentRefZ).optional(),
@@ -142,6 +157,7 @@ export const AgentDocZ = z
   .passthrough();
 
 export type Figure = z.infer<typeof FigureZ>;
+export type Code = z.infer<typeof CodeZ>;
 export type Check = z.infer<typeof CheckZ>;
 export type Verdict = z.infer<typeof VerdictZ>;
 export type TableNode = z.infer<typeof TableNodeZ>;

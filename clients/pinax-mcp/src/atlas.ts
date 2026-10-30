@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { AgentDocZ, type AgentDoc, type Part } from "./schema.js";
 
-export type UnitKind = "part" | "page" | "section" | "figure" | "table" | "check";
+export type UnitKind = "part" | "page" | "section" | "figure" | "table" | "code" | "check";
 
 export interface Unit {
   kind: UnitKind;
@@ -66,13 +66,18 @@ export class Atlas {
     }
   }
 
-  // A container's figures, tables and checks, each addressable under the container's id.
+  // A container's figures, tables, code blocks and checks, each addressable under the container's id.
   private addLeaves(node: any, parent: string): void {
     for (const fig of node.figures ?? []) {
       this.add({ kind: "figure", id: fig.id, label: fig.caption, parent, node: fig });
     }
     for (const tbl of node.tables ?? []) {
       this.add({ kind: "table", id: tbl.id, label: tbl.caption || tbl.id, parent, node: tbl });
+    }
+    for (const blk of node.codes ?? []) {
+      // a code block's label is its caption, else its first line (what a reader would recognise)
+      const label = blk.caption || blk.source.split("\n")[0];
+      this.add({ kind: "code", id: blk.id, label, parent, node: blk });
     }
     for (const chk of node.checks ?? []) {
       this.add({ kind: "check", id: chk.id, label: chk.label, parent, node: chk });
@@ -167,6 +172,8 @@ export class Atlas {
         consider(u, "code", n.code);
         if (typeof n.params === "string") consider(u, "params", n.params);
         for (const c of n.comments ?? []) consider(u, "comment", `${c.author}: ${c.text}`);
+      } else if (u.kind === "code") {
+        consider(u, "code", n.source);
       } else if (u.kind === "table") {
         const cellStr = (c: unknown) => (c == null ? "" : String(c)); // avoid [object Object] / nested-array join
         consider(u, "cells", (n.rows ?? []).map((r: unknown[]) => r.map(cellStr).join(" ")).join(" | "));

@@ -195,6 +195,8 @@ function emit_code(::AgentBase, blk, ctx)
         _jsonstr(string(blk.id)),
         ",\"anchor\":",          # what a check's `code_anchor` points at
         _jsonstr(blk.anchor),
+        ",\"caption\":",
+        _jsonstr(blk.caption),
         ",\"lang\":",
         _jsonstr(blk.lang),
         ",\"source\":",
