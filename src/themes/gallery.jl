@@ -1116,7 +1116,8 @@ function emit_document(
         for pg in doc.pages
             pnum = get(nums, pg.anchor, "")
             h1 = isempty(pnum) ? _esc(pg.title) : string(_esc(pnum), ". ", _esc(pg.title))
-            println(io, "<section class=\"page\" id=\"", pg.anchor, "\"><h1>", h1, "</h1>")
+            oh, ch = _gallery_heading(1, pg.anchor, ctx)
+            println(io, "<section class=\"page\" id=\"", pg.anchor, "\">", oh, h1, ch)
             pg.summary === nothing ||
                 println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
             _emit_checks!(theme, pg, ctx)
@@ -1155,7 +1156,8 @@ function emit_document(
         )
         pnum = get(nums, pg.anchor, "")
         h1 = isempty(pnum) ? _esc(pg.title) : string(_esc(pnum), ". ", _esc(pg.title))
-        println(io, "<h1>", h1, "</h1>")
+        oh, ch = _gallery_heading(1, pg.anchor, ctx)
+        println(io, oh, h1, ch)
         n = _page_nfigs(pg)
         println(
             io, "<div class=\"pinax-meta\">", n, n == 1 ? " figure" : " figures", "</div>"
@@ -1239,16 +1241,17 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     return println(io, "</section>")
 end
 
-# The one place a gallery section's depth becomes a heading: `<h2>` for a top-level section down to
-# `<h6>`; deeper sections keep their level as an ARIA heading, with a diagnostic (never flattened).
-function _gallery_heading(sec, ctx)
-    d = sec.depth
+# The one place the gallery turns depth into a heading: `<h1>` for a page, `<h2>` for a top-level
+# section down to `<h6>`; deeper sections keep their level as an ARIA heading, with a diagnostic
+# (never flattened). A part is a `<details>` group on the index, not a heading.
+_gallery_heading(sec, ctx) = _gallery_heading(sec.depth, sec.anchor, ctx)
+function _gallery_heading(d::Int, anchor, ctx)
     d <= 6 && return ("<h$(d)>", "</h$(d)>")
     push!(
         ctx.rdiag,
         DiagEntry(
             WARNING,
-            sec.anchor,
+            string(anchor),
             "section at depth $(d) is deeper than <h6>; rendered as an aria-level heading",
         ),
     )

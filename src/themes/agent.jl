@@ -560,7 +560,7 @@ function _agent_md_code(io, blk)
 end
 
 # A container's figures + tables + checks + codes in declaration order (@raw panels are HTML, skipped in md view).
-function _agent_md_content(io, c, outdir, comments, as_table)
+function _agent_md_content(io, c, outdir, comments, as_table, rdiag)
     for (kind, item) in _content_items(c)
         if kind === :text
             println(io, item.source)
@@ -573,9 +573,12 @@ function _agent_md_content(io, c, outdir, comments, as_table)
         elseif kind === :code
             _agent_md_code(io, item)
         elseif kind === :section   # a nested section, in declaration order
-            _agent_md_section(io, item, outdir, comments, as_table)
-        elseif kind === :panel
-            nothing   # @raw HTML: no form in agent.md (an open question)
+            _agent_md_section(io, item, outdir, comments, as_table, rdiag)
+        elseif kind === :panel   # @raw HTML: no form in agent.md (an open question); say so
+            push!(
+                rdiag,
+                DiagEntry(WARNING, c.anchor, "a @raw block is HTML; left out of agent.md"),
+            )
         else
             _unhandled_node("agent.md", kind)
         end
@@ -583,11 +586,21 @@ function _agent_md_content(io, c, outdir, comments, as_table)
     return nothing
 end
 
-# The one place agent.md turns a section's depth into a heading. A page is `###`, so a top-level
-# section is `####`; past `######` the level is kept as a bold line (Markdown has no deeper heading).
-function _agent_md_heading(sec)
-    n = sec.depth + 2
-    return n <= 6 ? string("#"^n, " ", sec.title) : string("**", sec.title, "**")
+# The one place agent.md turns depth into a heading, for parts (0, `##`), pages (1, `###`) and
+# sections (2, `####` …). Past `######` the level is kept as a bold line (Markdown has no deeper
+# heading), and a diagnostic says so.
+function _agent_md_heading(depth::Int, title, anchor, rdiag)
+    n = depth + 2
+    n <= 6 && return string("#"^n, " ", title)
+    push!(
+        rdiag,
+        DiagEntry(
+            WARNING,
+            string(anchor),
+            "section at depth $(depth) is deeper than ######; rendered as a bold line in agent.md",
+        ),
+    )
+    return string("**", title, "**")
 end
 
 # A container's verdict over its subtree as one bold line ("" when it holds no checks).
@@ -601,14 +614,21 @@ function _agent_md_verdict(io, c)
     return nothing
 end
 
-function _agent_md_section(io, sec, outdir, comments, as_table)
-    println(io, "\n", _agent_md_heading(sec), "  [id: ", sec.id, "]")
+function _agent_md_section(io, sec, outdir, comments, as_table, rdiag)
+    println(
+        io,
+        "\n",
+        _agent_md_heading(sec.depth, sec.title, sec.anchor, rdiag),
+        "  [id: ",
+        sec.id,
+        "]",
+    )
     _agent_md_verdict(io, sec)
-    _agent_md_content(io, sec, outdir, comments, as_table)
+    _agent_md_content(io, sec, outdir, comments, as_table, rdiag)
     return nothing
 end
 
-function _agent_markdown(doc::Document, outdir, comments, as_table)
+function _agent_markdown(doc::Document, outdir, comments, as_table, rdiag)
     io = IOBuffer()
     isempty(doc.meta.title) || println(io, "# ", doc.meta.title)
     curpart = :__start__
@@ -617,16 +637,25 @@ function _agent_markdown(doc::Document, outdir, comments, as_table)
             curpart = pg.part
             if pg.part !== nothing
                 k = findfirst(p -> first(p) === pg.part, doc.parts)
-                println(io, "\n## ", k === nothing ? string(pg.part) : last(doc.parts[k]))
+                ptitle = k === nothing ? string(pg.part) : last(doc.parts[k])
+                println(io, "\n", _agent_md_heading(0, ptitle, _anchor(pg.part), rdiag))
                 d = get(doc.part_descs, pg.part, nothing)
                 d === nothing || println(io, d.source)
             end
         end
         badge = pg.status === :final ? "" : "  [status: $(pg.status)]"
-        println(io, "\n### ", pg.title, "  [id: ", pg.id, "]", badge)
+        println(
+            io,
+            "\n",
+            _agent_md_heading(1, pg.title, pg.anchor, rdiag),
+            "  [id: ",
+            pg.id,
+            "]",
+            badge,
+        )
         _agent_md_verdict(io, pg)
         pg.summary === nothing || println(io, "_", pg.summary, "_")
-        _agent_md_content(io, pg, outdir, comments, as_table)   # sections included, in order
+        _agent_md_content(io, pg, outdir, comments, as_table, rdiag)   # sections included, in order
     end
     return String(take!(io))
 end
@@ -647,7 +676,7 @@ function emit_document(
     write(joinpath(outdir, "agent.json"), _agent_json(theme, doc, ctx))
     write(
         joinpath(outdir, "agent.md"),
-        _agent_markdown(doc, outdir, comments, figure_as_table(theme)),
+        _agent_markdown(doc, outdir, comments, figure_as_table(theme), rdiag),
     )
     # materialize failures leave a figure's `assets` empty in the JSON (the agent sees the gap);
     # no separate diagnostics file is emitted for the machine view.

@@ -134,9 +134,19 @@ function emit_comments(theme::LaTeXBase, anchor, ctx)
     return nothing
 end
 
+# A node LaTeX cannot show is recorded in its diagnostics, never dropped silently (Conventions › Faces).
+function _latex_left_out!(ctx, anchor, why)
+    push!(
+        ctx.rdiag,
+        DiagEntry(WARNING, string(anchor), string(why, "; left out of the LaTeX output")),
+    )
+    return nothing
+end
+
 # One (already-materialized) figure → a \includegraphics figure.
 function emit_figure(theme::LaTeXBase, fig, ctx)
-    isempty(fig.assets) && return nothing
+    isempty(fig.assets) &&
+        return _latex_left_out!(ctx, fig.anchor, "figure has no asset to include")
     io = ctx.io
     rel = replace(relpath(fig.assets[1], ctx.outdir), '\\' => '/')
     println(io, "\\begin{figure}[htbp]\\centering")
@@ -174,8 +184,10 @@ function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx; page=nothing)
             emit_code(theme, item, ctx)
         elseif kind === :section   # a nested section, in declaration order
             emit_section(theme, item, page, ctx)
-        elseif kind === :check || kind === :panel
-            nothing   # checks: the container's check table; @raw: HTML, no LaTeX form (documented)
+        elseif kind === :check
+            nothing   # in the container's check table, under its verdict band
+        elseif kind === :panel
+            _latex_left_out!(ctx, c.anchor, "a @raw block is HTML, which has no LaTeX form")
         else
             _unhandled_node(theme, kind)
         end
@@ -225,7 +237,7 @@ function _latex_checks!(theme::LaTeXBase, c, ctx)
     io = ctx.io
     v = verdict(c)
     v === nothing && return nothing
-    isempty(c.checks) || _latex_check_table!(theme, c.checks, ctx)
+    # the verdict band over the subtree leads, then the container's own checks (Conventions › Faces)
     println(
         io,
         "\\par\\noindent\\textbf{Verdict: ",
@@ -236,6 +248,7 @@ function _latex_checks!(theme::LaTeXBase, c, ctx)
         v.total,
         ")",
     )
+    isempty(c.checks) || _latex_check_table!(theme, c.checks, ctx)
     return nothing
 end
 
@@ -258,7 +271,7 @@ function emit_table(theme::LaTeXBase, tbl, ctx)
     else
         length(tbl.header)
     end
-    ncol == 0 && return nothing
+    ncol == 0 && return _latex_left_out!(ctx, tbl.anchor, "table has no columns")
     rowend = "\\\\"
     println(io, "\\begin{table}[htbp]\\centering")
     isempty(tbl.caption) ||
@@ -277,21 +290,24 @@ end
 # The one place a section's depth becomes a LaTeX heading. A page is `\\section` (depth 1), so a
 # top-level section is `\\subsection`; past `\\subparagraph` the level is kept as a bold run-in
 # heading, with a diagnostic (never flattened).
-const _LATEX_HEADINGS = ("subsection", "subsubsection", "paragraph", "subparagraph")
-function _latex_heading(sec, ctx)
-    i = sec.depth - 1
-    t = _texesc(sec.title)
-    i <= length(_LATEX_HEADINGS) &&
-        return string("\\", _LATEX_HEADINGS[i], "{", t, "}\\label{", sec.anchor, "}")
+# The one place LaTeX turns depth into a heading, for parts (0), pages (1) and sections (2…).
+const _LATEX_HEADINGS = (
+    "part", "section", "subsection", "subsubsection", "paragraph", "subparagraph"
+)
+_latex_heading(sec, ctx) = _latex_heading(sec.depth, sec.title, sec.anchor, ctx)
+function _latex_heading(depth::Int, title, anchor, ctx)
+    t = _texesc(title)
+    depth < length(_LATEX_HEADINGS) &&
+        return string("\\", _LATEX_HEADINGS[depth + 1], "{", t, "}\\label{", anchor, "}")
     push!(
         ctx.rdiag,
         DiagEntry(
             WARNING,
-            sec.anchor,
-            "section at depth $(sec.depth) is deeper than \\subparagraph; rendered as a bold run-in heading",
+            anchor,
+            "section at depth $(depth) is deeper than \\subparagraph; rendered as a bold run-in heading",
         ),
     )
-    return string("\\par\\noindent\\textbf{", t, "}\\label{", sec.anchor, "}")
+    return string("\\par\\noindent\\textbf{", t, "}\\label{", anchor, "}")
 end
 
 function emit_section(theme::LaTeXBase, sec, pg, ctx)
@@ -308,7 +324,7 @@ end
 function emit_page(theme::LaTeXBase, pg, ctx)
     io = ctx.io
     # a page = one \section; then its content in declaration order (its subsections included)
-    println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
+    println(io, _latex_heading(1, pg.title, pg.anchor, ctx))
     # checks lead (tabular of the page's own checks + a verdict line over its subtree)
     _latex_checks!(theme, pg, ctx)
     _latex_emit_content!(
@@ -355,7 +371,7 @@ function emit_document(
     prev_part = :__start__
     for pg in doc.pages
         if pg.part !== prev_part && pg.part !== nothing
-            println(io, "\\part{", _texesc(_part_title(doc, pg.part)), "}")
+            println(io, _latex_heading(0, _part_title(doc, pg.part), _anchor(pg.part), ctx))
         end
         prev_part = pg.part
         emit_page(theme, pg, ctx)

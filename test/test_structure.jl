@@ -97,4 +97,50 @@ using Test
             @caption "never reaches back to the figure"
         end
     end
+
+    @testset "one heading function per backend, for parts, pages and sections" begin
+        Pinax.reset!()
+        @part :g "PartT" begin
+            @page :p "PageT" begin
+                @section :s "SecT" begin end
+            end
+        end
+        lx = read(Pinax.render(; out=joinpath(tmp, "h"), theme=:latex), String)
+        @test occursin("\\part{PartT}\\label{g}", lx)
+        @test occursin("\\section{PageT}\\label{p}", lx)
+        @test occursin("\\subsection{SecT}\\label{s}", lx)
+        Pinax.render(; out=joinpath(tmp, "hm"), theme=:agent)
+        md = read(joinpath(tmp, "hm", "agent.md"), String)
+        @test occursin("\n## PartT", md) &&
+            occursin("\n### PageT", md) &&
+            occursin("\n#### SecT", md)
+        # beyond ###### agent.md falls back to a bold line, and says so
+        rdiag = Pinax.DiagEntry[]
+        @test Pinax._agent_md_heading(5, "Deep", "deep", rdiag) == "**Deep**"
+        @test only(rdiag).item == "deep" && occursin("depth 5", only(rdiag).message)
+        @test Pinax._agent_md_heading(4, "Ok", "ok", rdiag) == "###### Ok"
+    end
+
+    @testset "LaTeX: the verdict band leads its check table" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @test true
+        end
+        lx = read(Pinax.render(; out=joinpath(tmp, "v"), theme=:latex), String)
+        @test first(findfirst("Verdict: PASS", lx)) <
+            first(findfirst("\\begin{tabular}", lx))
+    end
+
+    @testset "LaTeX says what it left out, never silently" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @raw "<b>html</b>"
+            @table NamedTuple[] caption = "no columns" id = :empty_tbl
+        end
+        out = joinpath(tmp, "drop")
+        Pinax.render(; out=out, theme=:latex)
+        diag = read(joinpath(out, "diagnostics.md"), String)
+        @test occursin("@raw", diag)
+        @test occursin("empty_tbl", diag)
+    end
 end

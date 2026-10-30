@@ -19,11 +19,11 @@ or pull request that tracks the gap.
   interleaved.
 - Depth is counted from the part: `@part` 0, `@page` 1, a top-level `@section` 2, and so on.
 - Each backend turns depth into a heading in **one** function, used for pages and sections alike;
-  no emitter hard-codes a heading command. (in progress, #172)
+  no emitter hard-codes a heading command.
 
   | depth | node | LaTeX | Markdown (`agent.md`) | gallery HTML |
   |---|---|---|---|---|
-  | 0 | part | `\part` | `##` | `<h1>` on the index |
+  | 0 | part | `\part` | `##` | a `<details>` group on the index |
   | 1 | page | `\section` | `###` | `<h1>` |
   | 2 | section | `\subsection` | `####` | `<h2>` |
   | 3 | | `\subsubsection` | `#####` | `<h3>` |
@@ -90,7 +90,8 @@ or pull request that tracks the gap.
   caption) or a check (its label). If there is none, or that node carries no caption (prose, `@raw`,
   a section), it is an error. It never reaches back to an earlier node.
 - `@raw` is the HTML escape hatch. It is shown by the gallery only; every other face records in its
-  diagnostics that it was left out.
+  diagnostics that it was left out. Any node a face cannot show (a figure with no asset LaTeX can
+  include, a table with no columns) is likewise recorded, never dropped silently.
 
 ## Checks
 
@@ -121,7 +122,7 @@ or pull request that tracks the gap.
   face and the kind, never a silent omission. (#168)
 - Every container is laid out in the same order in every face: its heading, then its verdict band
   and the table of its own checks (when its subtree holds checks), then its content in declaration
-  order. (in progress, #172)
+  order.
 - The `agent.json` shape is a contract. The pinax-mcp fixture is generated from the emitter
   (`test/test_contract.jl`) and checked against the consumer schema, which must name every key the
   emitter writes. (#169)
