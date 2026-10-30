@@ -1,6 +1,5 @@
 using Pinax
 using Test
-using Random
 
 # A check's margin from `@test isapprox(…)` (#115, #116). The deviation and tolerance reproduce the
 # bound isapprox actually applies, |x-y| <= max(atol, rtol*max(|x|,|y|)), recorded as whichever term
@@ -57,20 +56,26 @@ _chk(s::AbstractString, passed) = Pinax._check_from(Meta.parse(s), s, passed, 1)
         @test occursin("no margin", c.label)
     end
 
-    @testset "delta <= tol agrees with isapprox on random inputs" begin
-        rng = MersenneTwister(173)
-        disagree = 0
-        for _ in 1:2000
-            x = exp10(rand(rng, -12:6)) * (2rand(rng) - 1)
-            y = x * (1 + exp10(rand(rng, -9:0)) * (2rand(rng) - 1))
-            atol = rand(rng) < 0.5 ? 0.0 : exp10(rand(rng, -12:2))
-            rtol = rand(rng) < 0.3 ? 0.0 : exp10(rand(rng, -9:0))
-            atol == 0 && rtol == 0 && continue
-            ex = :(isapprox($x, $y; atol=($atol), rtol=($rtol)))
-            c = _chk(ex)
-            c.indicator && continue
-            disagree += ((c.delta <= c.tol) != c.pass)
+    @testset "delta <= tol agrees with isapprox over a grid of inputs" begin
+        # a deterministic grid (no Random: it is not a test dependency) spanning 18 decades of
+        # magnitude, both signs, near and far deviations, and every atol/rtol combination
+        disagree, n = 0, 0
+        for e in -12:3:6, sgn in (1.0, -0.37)
+            x = sgn * 10.0^e
+            for p in (1e-9, 3e-7, -1e-5, 1e-4, 0.02, 0.3, -0.5, 0.9)
+                y = x * (1 + p)
+                for atol in (0.0, 1e-12, 1e-9, 1e-6, 1e-3, 1.0, 100.0),
+                    rtol in (0.0, 1e-9, 1e-6, 1e-3, 0.1, 0.5)
+
+                    atol == 0 && rtol == 0 && continue
+                    c = _chk(:(isapprox($x, $y; atol=($atol), rtol=($rtol))))
+                    c.indicator && continue
+                    n += 1
+                    disagree += ((c.delta <= c.tol) != c.pass)
+                end
+            end
         end
+        @test n > 4000
         @test disagree == 0
     end
 end
