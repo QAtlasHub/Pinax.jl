@@ -253,3 +253,24 @@ end
         close(a.server)
     end
 end
+
+@testset "serve: the type, a query, a directory and an escaped name" begin
+    root = mktempdir()
+    write(joinpath(root, "a.svg"), "<svg/>")
+    mkpath(joinpath(root, "sub"))
+    write(joinpath(root, "sub", "index.html"), "<p>sub</p>")
+    write(joinpath(root, "a b.txt"), "spaced")
+    write(joinpath(root, "x.pdf"), "%PDF-1.4")
+    ok(ct, body) = string(
+        "HTTP/1.1 200 OK\r\nContent-Type: $(ct)\r\nContent-Length: $(sizeof(body))\r\n",
+        "Accept-Ranges: bytes\r\nConnection: close\r\n\r\n",
+        body,
+    )
+    # a query string is not part of the file name
+    @test _handle(root, "/a.svg?v=1") == ok("image/svg+xml", "<svg/>")
+    # a directory is its index.html
+    @test _handle(root, "/sub/") == ok("text/html; charset=utf-8", "<p>sub</p>")
+    # `%20` is a space; a type the server does not know is sent as bytes
+    @test _handle(root, "/a%20b.txt") == ok("application/octet-stream", "spaced")
+    @test _handle(root, "/x.pdf") == ok("application/pdf", "%PDF-1.4")
+end
