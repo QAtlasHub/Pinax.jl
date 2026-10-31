@@ -1102,7 +1102,7 @@ function _gallery_setup(theme::GalleryBase, doc::Document, outdir, cache, commen
     citenums, citeorder = _gallery_citations(doc, bib)
     comments, bookmarks = _read_comments(doc, comments_file, rdiag)
     features = doc.meta.features
-    interactive = any(in(features), (:comments, :bookmarks, :export))
+    interactive = any(in(features), _FEATURES)
     katex = doc.meta.katex
     katex === :local && _copy_katex(outdir)   # vendor math assets for offline viewing
     ids = merge(base_ids, ids_eq)
