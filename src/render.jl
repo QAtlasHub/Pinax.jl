@@ -13,27 +13,27 @@ function resolve!(doc::Document)
     empty!(doc.refs)
     for pg in doc.pages
         doc.refs[pg.id] = pg
-        for f in pg.figures            # page-level figures (page-as-leaf)
-            doc.refs[f.id] = f
-        end
-        for sec in _all_sections(pg)
-            doc.refs[sec.id] = sec
-            for f in sec.figures
-                doc.refs[f.id] = f
-            end
-        end
+        foreach(sec -> doc.refs[sec.id] = sec, _all_sections(pg))
+        figs = _page_figs(pg)
+        foreach(f -> doc.refs[f.id] = f, figs)
         # `@thumbnail :id` names a figure on its page; one it cannot find is an error, not a blank card
         t = pg.thumbnail
         t === nothing ||
-            any(
-                f -> f.id === t.id,
-                Iterators.flatten((pg.figures, (s.figures for s in _all_sections(pg))...)),
-            ) ||
+            any(f -> f.id === t.id, figs) ||
             error(
                 "Pinax: @thumbnail :$(t.id) on page :$(pg.id) names no figure on that page"
             )
     end
     return doc
+end
+
+# Every figure of a page in display order: page-level (page-as-leaf) first, then each section's.
+function _page_figs(pg::Page)
+    figs = copy(pg.figures)
+    for sec in _all_sections(pg)
+        append!(figs, sec.figures)
+    end
+    return figs
 end
 
 # Materialize one figure into a face's directory. A failure is recorded in `rdiag` (the face then

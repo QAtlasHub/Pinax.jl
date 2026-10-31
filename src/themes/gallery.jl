@@ -642,18 +642,7 @@ function _toc_indent(sec, base)
 end
 
 # Figure count of one page = its page-level figures plus every section's figures.
-function _page_nfigs(pg::Page)
-    return length(pg.figures) + sum(length(s.figures) for s in _all_sections(pg); init=0)
-end
-
-# Every figure of a page in display order: page-level (page-as-leaf) first, then each section's.
-function _page_figs(pg::Page)
-    figs = copy(pg.figures)
-    for sec in _all_sections(pg)
-        append!(figs, sec.figures)
-    end
-    return figs
-end
+_page_nfigs(pg::Page) = length(_page_figs(pg))
 
 # The figure shown on a page's index card. Author intent first (@thumbnail / a thumbnail=true marker),
 # then a bookmarked figure (the reader's "important" signal), then the first figure; `nothing` if the
