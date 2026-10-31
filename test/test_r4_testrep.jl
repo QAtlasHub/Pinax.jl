@@ -53,4 +53,30 @@ end
         ]
     end
 
+    @testset "a generated id that steps aside takes the anchor that follows it" begin
+        # Two sections of one name, each with the same @desc: the captured prose ids coincide, so
+        # the fold places the second under `-2` — and its anchor must be that id's, not the first's.
+        root = R4Ext.PinaxTestSet("Test report")
+        R4Ext._with_testset(root) do
+            @testset "test_dup.jl" begin
+                @testset "same" begin
+                    @desc md"SAME_PROSE"
+                    @test true
+                end
+                @testset "same" begin
+                    @desc md"SAME_PROSE"
+                    @test true
+                end
+            end
+        end
+        render_test_report(root.node; out=joinpath(mktempdir(), "rep"))
+        doc = Pinax.current_document()
+        texts = [n for pg in doc.pages for (k, n) in _r4_nodes(pg) if k === :text]
+        @test length(texts) == 2
+        @test !allunique(n.id for n in only(root.node.children).children for n in n.texts)
+        @test allunique(n.id for n in texts)
+        @test all(n.anchor == Pinax._anchor(n.id) for n in texts)
+        @test allunique(n.anchor for n in texts)
+    end
+
 end
