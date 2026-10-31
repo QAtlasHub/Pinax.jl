@@ -100,6 +100,16 @@ test("resources list and read end-to-end over MCP", { timeout: 20000 }, async ()
   });
 });
 
+test("pinax://document reads as the outline, in markdown", { timeout: 20000 }, async () => {
+  await withClient(async (client) => {
+    const doc = (await client.readResource({ uri: "pinax://document" })).contents[0] as any;
+    assert.equal(doc.uri, "pinax://document");
+    assert.equal(doc.mimeType, "text/markdown");
+    assert.match(doc.text, /^# Demo Atlas\n/);
+    assert.equal(doc.text, text(await client.callTool({ name: "outline", arguments: {} })));
+  });
+});
+
 test("a binary asset reads as base64; a bad resource uri is refused, saying why", { timeout: 20000 }, async () => {
   const dir = writeVariant((doc) => doc.pages[0].figures[0].assets.push("p1_fig1.png"));
   writeFileSync(join(dir, "p1_fig1.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
