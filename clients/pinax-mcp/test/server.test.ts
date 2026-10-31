@@ -127,6 +127,22 @@ test("a binary asset reads as base64; a bad resource uri is refused, saying why"
   }, dir);
 });
 
+test("an asset's mime follows its extension, any case: pdf, json, else octet-stream", { timeout: 20000 }, async () => {
+  const files: Record<string, string> = { "a.PDF": "%PDF-1.7", "a.json": '{"k":1}', "a.dat": "raw" };
+  const dir = writeVariant((doc, d) => {
+    doc.pages[0].figures[0].assets = Object.keys(files);
+    for (const [name, body] of Object.entries(files)) writeFileSync(join(d, name), body);
+  });
+  await withClient(async (client) => {
+    const read = async (i: number) => (await client.readResource({ uri: `pinax://asset/p1_fig1/${i}` })).contents[0] as any;
+    const blob = (s: string) => Buffer.from(s).toString("base64");
+    const [pdf, json, dat] = [await read(0), await read(1), await read(2)];
+    assert.deepEqual([pdf.mimeType, pdf.blob, pdf.text], ["application/pdf", blob("%PDF-1.7"), undefined]);
+    assert.deepEqual([json.mimeType, json.text, json.blob], ["application/json", '{"k":1}', undefined]);
+    assert.deepEqual([dat.mimeType, dat.blob, dat.text], ["application/octet-stream", blob("raw"), undefined]);
+  }, dir);
+});
+
 test("get_figure_data and an asset read refuse a path outside the agent directory", { timeout: 20000 }, async () => {
   const secret = join(mkdtempSync(join(tmpdir(), "pinax-mcp-secret-")), "secret.txt");
   writeFileSync(secret, "zqsecret");
