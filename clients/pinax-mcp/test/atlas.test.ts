@@ -184,6 +184,14 @@ test("outline: status, part headings, unresolvable refs, and the no-content fall
   assert.equal(o.split("[part grp]").length, 2); // one heading per run of pages in a part
 });
 
+test("consecutive pages in one part share one part heading, before the first of them", () => {
+  // the sample's p1 and p2 are both in part grp
+  const o = loadAtlas(fixture).outline();
+  assert.equal(o.split("[part grp]").length, 2);
+  assert.match(o, /^# Demo Atlas\n\n## \[part grp\] Group A\n\n### \[page p1\]/);
+  assert.ok(o.indexOf("[part grp]") < o.indexOf("[page p2]"));
+});
+
 // A file outside any agent directory, and a variant whose first figure's data and asset point at it
 // by the path `point` returns.
 function outsideVariant(point: (secret: string, dir: string) => string): string {
