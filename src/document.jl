@@ -425,12 +425,10 @@ mutable struct Page
     # version). Validated by `_status`; what kind of page it is never lives here.
 end
 
-# Every check in a container's subtree: its own, then each nested section's, in declaration order.
-_subtree_checks(pg::Page) = vcat(pg.checks, (s.checks for s in _all_sections(pg))...)
-function _subtree_checks(sec::Section)
-    out = copy(sec.checks)
-    foreach(child -> append!(out, _subtree_checks(child)), sec.sections)
-    return out
+# Every check in a container's subtree: its own, then each nested section's, depth first in
+# declaration order.
+function _subtree_checks(c::Union{Page,Section})
+    return vcat(c.checks, (s.checks for s in _all_sections(c))...)
 end
 
 """
@@ -1064,12 +1062,13 @@ _depth(s::Section) = s.depth
 # Leaving a section returns to the one that encloses it (or to the page at the top level).
 _exit_section!() = (CTX.section = CTX.section === nothing ? nothing : CTX.section.parent)
 
-# Every section of a page, depth first in declaration order: the one walk for anything that must see
-# the whole tree (id resolution, figure counts, thumbnails), so no caller can stop at the top level.
-function _all_sections(pg)
+# Every section under a page or section, depth first in declaration order: the one walk for anything
+# that must see the whole tree (id resolution, figure counts, thumbnails, checks), so no caller can
+# stop at the top level.
+function _all_sections(c)
     out = Section[]
     walk(s) = (push!(out, s); foreach(walk, s.sections))
-    foreach(walk, pg.sections)
+    foreach(walk, c.sections)
     return out
 end
 
