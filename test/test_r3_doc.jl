@@ -72,3 +72,22 @@ end
     _, _, rdiag = _store_diags("[bookmark]\ns = false\n")
     @test isempty(rdiag)   # nothing set, nothing hidden
 end
+
+@testset "a data= figure's generated id follows its data, not its position" begin
+    a = (; x=[1.0, 2.0], y=[3.0, 4.0])
+    b = (; x=[1.0, 2.0], y=[3.0, 5.0])
+    function ids(first, second)
+        Pinax.reset!()
+        @page :p "P" begin
+            @figure nothing data = first
+            @figure nothing data = second
+            @figure "plain.svg"
+        end
+        return [f.id for f in Pinax.current_document().pages[1].figures]
+    end
+    ab = ids(a, b)
+    ba = ids(b, a)
+    @test ab[1] == ba[2] && ab[2] == ba[1]   # reordering keeps each figure's id
+    @test !any(id -> endswith(string(id), "-2"), ab)
+    @test ab[3] === :p_fig_0zfg0yp   # a figure without data= keeps the id it had
+end

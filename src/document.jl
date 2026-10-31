@@ -263,6 +263,16 @@ function _check_kind(kind, outcome, nums)
     return kind
 end
 
+# A canonical string for a figure's parsed `data=` (`_table_of_data`), hashed into its generated id, so
+# two `data=` figures with the same code are told apart by their data, not their position. Values are
+# printed (shortest round-trip form), never `repr`ed, so the id is the same on every Julia version.
+# Empty without `data=`, so every other figure's id is unchanged.
+_data_key(::Nothing) = ""
+function _data_key(tbl)
+    series = (string(s.label, "=", join(s.x, ","), ";", join(s.y, ",")) for s in tbl.series)
+    return join(("|data", tbl.xlabel, tbl.ylabel, series...), "|")
+end
+
 # How much of its tolerance a check spent (`delta / tol`), or nothing for an indicator, which has no
 # numbers. Every margin view — the page's margin figure, a sweep's figures, the per-file worst
 # margin — reads it through here, so none of them draws an indicator.
@@ -1148,9 +1158,8 @@ function _push_figure!(;
     c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     # parsed and copied once, here: a bad `data=` is an error where written, and the readers use this
     tbl = data === nothing ? nothing : _table_of_data(data)
-    base = something(
-        gen_id, Symbol(c.id, "_fig_", _stable_hash(string(code, "|", _params_key(params))))
-    )
+    key = string(code, "|", _params_key(params), _data_key(tbl))
+    base = something(gen_id, Symbol(c.id, "_fig_", _stable_hash(key)))
     fid = _node_id!(c, id, base, "figure")
     fig = Figure(
         fid,

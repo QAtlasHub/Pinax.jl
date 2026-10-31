@@ -55,7 +55,7 @@ or pull request that tracks the gap.
 
   | node | derived from | example |
   |---|---|---|
-  | figure | a hash of its code and `params` | `energy_fig_k3x9q2a` |
+  | figure | a hash of its code, `params` and `data=` (when given) | `energy_fig_k3x9q2a` |
   | table | a hash of its code | `energy_tbl_0bqw2jb` |
   | code block | a hash of its source | `energy_code_1r2mwly` |
   | code a `@test` captured | its file's name and a hash of the captured source | `code_runtests_jl_13h2abw` |
