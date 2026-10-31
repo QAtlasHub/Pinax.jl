@@ -74,6 +74,7 @@ makedocs(;
     pages=[
         "Home" => "index.md",
         "Conventions" => "conventions.md",
+        "Migrating from 0.1" => "migration.md",
         "Examples" => "examples.md",
         "Test → Pinax" => "test2pinax.md",
         "Comments" => "comments.md",
