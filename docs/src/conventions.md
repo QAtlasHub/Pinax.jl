@@ -55,7 +55,7 @@ or pull request that tracks the gap.
 
   | node | derived from | example |
   |---|---|---|
-  | figure | a hash of its code and `params` | `energy_fig_k3x9q2a` |
+  | figure | a hash of its code, `params` and `data=` (when given) | `energy_fig_k3x9q2a` |
   | table | a hash of its code | `energy_tbl_0bqw2jb` |
   | code block | a hash of its source | `energy_code_1r2mwly` |
   | code a `@test` captured | its file's name and a hash of the captured source | `code_runtests_jl_13h2abw` |
@@ -150,11 +150,15 @@ or pull request that tracks the gap.
   check where it was written, after its code, and its band names the failing checks.
 - A comment is stored under its node's id, and every face shows it on that node — a page, a
   section, a figure or a table. A comment no face can show — its id names no node, or a node of
-  another kind — is a diagnostic in every face, as is a comment store that does not parse; pinax-mcp's
-  `add_comment` refuses the other kinds.
+  another kind — is a diagnostic in every face, as is a comment store that does not parse or holds
+  an entry in the wrong shape; pinax-mcp's `add_comment` refuses the other kinds.
+- A bookmark is stored the same way and shown on a section only. One on another kind, on an id that
+  names no node, or while the `:bookmarks` feature is off is a diagnostic, like such a comment;
+  pinax-mcp's `set_bookmark` refuses the other kinds.
 - The `agent.json` shape is a contract. The pinax-mcp fixture is generated from the emitter
   (`test/test_contract.jl`) and checked against the consumer schema, which must name every key the
-  emitter writes. (#169)
+  emitter writes. The same test requires the fixture to hold every content kind, check kind and
+  outcome Pinax defines, and pinax-mcp's comment and bookmark carrier sets to equal Pinax's. (#169)
 - In `agent.json`, a text field the author did not write is the empty string, and an object or a
   reference that does not exist is `null`. Pages and sections carry the same keys; a page adds only
   `part` and `status`. A reference between nodes is an id (a check's `code_id`).

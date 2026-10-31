@@ -263,6 +263,16 @@ function _check_kind(kind, outcome, nums)
     return kind
 end
 
+# A canonical string for a figure's parsed `data=` (`_table_of_data`), hashed into its generated id, so
+# two `data=` figures with the same code are told apart by their data, not their position. Values are
+# printed (shortest round-trip form), never `repr`ed, so the id is the same on every Julia version.
+# Empty without `data=`, so every other figure's id is unchanged.
+_data_key(::Nothing) = ""
+function _data_key(tbl)
+    series = (string(s.label, "=", join(s.x, ","), ";", join(s.y, ",")) for s in tbl.series)
+    return join(("|data", tbl.xlabel, tbl.ylabel, series...), "|")
+end
+
 # How much of its tolerance a check spent (`delta / tol`), or nothing for an indicator, which has no
 # numbers. Every margin view — the page's margin figure, a sweep's figures, the per-file worst
 # margin — reads it through here, so none of them draws an indicator.
@@ -415,12 +425,10 @@ mutable struct Page
     # version). Validated by `_status`; what kind of page it is never lives here.
 end
 
-# Every check in a container's subtree: its own, then each nested section's, in declaration order.
-_subtree_checks(pg::Page) = vcat(pg.checks, (s.checks for s in _all_sections(pg))...)
-function _subtree_checks(sec::Section)
-    out = copy(sec.checks)
-    foreach(child -> append!(out, _subtree_checks(child)), sec.sections)
-    return out
+# Every check in a container's subtree: its own, then each nested section's, depth first in
+# declaration order.
+function _subtree_checks(c::Union{Page,Section})
+    return vcat(c.checks, (s.checks for s in _all_sections(c))...)
 end
 
 """
@@ -778,6 +786,15 @@ function _call(f, posargs, kwspecs)
     end
 end
 
+# A structure macro's `args` (`:id "title" [key = value …] body`) as the call that opens the block and
+# the escaped body. The id and title are escaped and `written = true`: an id written in the macro is
+# the author's.
+function _enter_call(enter!, what, args)
+    length(args) >= 3 || error("$(what) needs :id, \"title\", and a begin…end body")
+    kws = vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :written, true))
+    return _call(enter!, (esc(args[1]), esc(args[2])), kws), esc(args[end])
+end
+
 # ============================================================ preamble macros
 
 "Document settings + reset of the implicit document. `@pinaxsetup theme=… index=… numbering=… debug=…`"
@@ -837,17 +854,11 @@ it as `"status"` and the gallery badges a `:draft` page. A page inherits its enc
 status default unless it sets its own. A page is written at the top level or directly in a `@part`.
 """
 macro page(args...)
-    length(args) >= 3 || error("@page needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    enter = _call(
-        :_enter_page!,
-        (esc(id), esc(title)),
-        vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :written, true)),
-    )
+    enter, body = _enter_call(:_enter_page!, "@page", args)
     return quote
         local pg = $enter
         try
-            $(_scoped_body(:pg, esc(body)))
+            $(_scoped_body(:pg, body))
         finally
             _exit_page!()
         end
@@ -948,17 +959,11 @@ group of drafts is declared once, the published result living in a separate part
 at the top level.
 """
 macro part(args...)
-    length(args) >= 3 || error("@part needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    enter = _call(
-        :_enter_part!,
-        (esc(id), esc(title)),
-        vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :written, true)),
-    )
+    enter, body = _enter_call(:_enter_part!, "@part", args)
     return quote
         $enter
         try
-            $(esc(body))
+            $body
         finally
             _exit_part!()
         end
@@ -995,17 +1000,11 @@ _exit_part!() = (CTX.part=nothing; CTX.page=nothing; CTX.section=nothing)
 
 "A section. `@section :id \"Title\" [by=…] [summary=…] [layout=…] begin … end`"
 macro section(args...)
-    length(args) >= 3 || error("@section needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    enter = _call(
-        :_enter_section!,
-        (esc(id), esc(title)),
-        vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :written, true)),
-    )
+    enter, body = _enter_call(:_enter_section!, "@section", args)
     return quote
         local sec = $enter
         try
-            $(_scoped_body(:sec, esc(body)))
+            $(_scoped_body(:sec, body))
         finally
             _exit_section!()
         end
@@ -1054,12 +1053,13 @@ _depth(s::Section) = s.depth
 # Leaving a section returns to the one that encloses it (or to the page at the top level).
 _exit_section!() = (CTX.section = CTX.section === nothing ? nothing : CTX.section.parent)
 
-# Every section of a page, depth first in declaration order: the one walk for anything that must see
-# the whole tree (id resolution, figure counts, thumbnails), so no caller can stop at the top level.
-function _all_sections(pg)
+# Every section under a page or section, depth first in declaration order: the one walk for anything
+# that must see the whole tree (id resolution, figure counts, thumbnails, checks), so no caller can
+# stop at the top level.
+function _all_sections(c)
     out = Section[]
     walk(s) = (push!(out, s); foreach(walk, s.sections))
-    foreach(walk, pg.sections)
+    foreach(walk, c.sections)
     return out
 end
 
@@ -1148,9 +1148,8 @@ function _push_figure!(;
     c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     # parsed and copied once, here: a bad `data=` is an error where written, and the readers use this
     tbl = data === nothing ? nothing : _table_of_data(data)
-    base = something(
-        gen_id, Symbol(c.id, "_fig_", _stable_hash(string(code, "|", _params_key(params))))
-    )
+    key = string(code, "|", _params_key(params), _data_key(tbl))
+    base = something(gen_id, Symbol(c.id, "_fig_", _stable_hash(key)))
     fid = _node_id!(c, id, base, "figure")
     fig = Figure(
         fid,
@@ -1378,9 +1377,9 @@ function _add_node!(c, k::Symbol, node)
     return node
 end
 
-function _content_items(c)
-    return [(k, getfield(c, _content_field(c, k))[i]) for (k, i) in c.content]
-end
+# One content entry `kind => index` of `c` as `(kind, node)`.
+_content_item(c, (k, i)) = (k, getfield(c, _content_field(c, k))[i])
+_content_items(c) = [_content_item(c, ki) for ki in c.content]
 
 # A node (or content kind) a face has no form for: every content walk ends in this, so a node type
 # added to `_content_items` fails loudly in each face until that face handles it — never printed
@@ -1485,12 +1484,11 @@ function _set_caption!(s)
         "Pinax: @caption in \"$(c.anchor)\" follows a @test_broken / @test_skip, which records no " *
         "check — @caption names only the node written immediately before it",
     )
-    kind, i = c.content[end]
+    kind, node = _content_item(c, c.content[end])
     kind in (:check, :figure, :table, :code) || error(
         "Pinax: @caption in \"$(c.anchor)\" follows a $(kind), which carries no caption — " *
         "@caption names only the node written immediately before it",
     )
-    node = _content_items(c)[end][2]
     # one caption per node: `caption=` and then `@caption`, or two `@caption`s, is an error
     (node === CTX.captioned || (kind !== :check && !isempty(node.caption))) && error(
         "Pinax: @caption in \"$(c.anchor)\" names a $(kind) that already has a caption — a node " *
@@ -1531,20 +1529,11 @@ generated from the HTML. `@raw raw\"<table class=cov>…</table>\"`. Use `@desc`
 hand-built markup.
 """
 macro raw(args...)
-    html = nothing
-    id = nothing
-    for a in args
-        if a isa Expr && a.head === :(=) && a.args[1] === :id
-            id = a.args[2]
-        elseif html === nothing
-            html = a
-        else
-            error("@raw takes one HTML expression (plus `id=`)")
-        end
-    end
-    html === nothing && error("@raw needs an HTML expression")
-    at = (String(string(__source__.file)), __source__.line)
-    return :(_push_raw!($(esc(html)); id=($(esc(id))), at=($(at))))
+    html, kws = _macro_args(args, (:id,), "@raw", "raw HTML expression")
+    allk = vcat(
+        Expr(:kw, :at, (String(string(__source__.file)), __source__.line)), _kwspecs(kws)
+    )
+    return _call(:_push_raw!, (esc(html),), allk)
 end
 function _push_raw!(s; id=nothing, at=nothing)
     c = _open_container("@raw")
