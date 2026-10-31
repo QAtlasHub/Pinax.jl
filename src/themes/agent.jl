@@ -173,21 +173,24 @@ function emit_code(::AgentBase, blk, ctx)
     return nothing
 end
 
-# One check -> a JSON object with native-typed numerics (a tool reads 4.6e-5, not "4.6e-5").
+# One check -> a JSON object with native-typed numerics (a tool reads 4.6e-5, not "4.6e-5"); an
+# indicator has no numbers, so they are null.
 function emit_check(::AgentBase, chk, ctx)
+    num(x) = chk.kind === :indicator ? "null" : _agent_jsonval(x)
     _json_object(
         ctx.io,
         "id" => _jsonstr(string(chk.id)),
         "label" => _jsonstr(chk.label),
-        "got" => _agent_jsonval(chk.got),
-        "want" => _agent_jsonval(chk.want),
-        "delta" => _agent_jsonval(chk.delta),
-        "tol" => _agent_jsonval(chk.tol),
+        "got" => num(chk.got),
+        "want" => num(chk.want),
+        "delta" => num(chk.delta),
+        "tol" => num(chk.tol),
         "kind" => _jsonstr(string(chk.kind)),
-        "pass" => _agent_jsonval(chk.pass),
+        "outcome" => _jsonstr(string(chk.outcome)),   # pass | fail | error
+        "pass" => _agent_jsonval(passed(chk)),        # derived from the outcome
         "defined_at" => _jsonstr(chk.source),   # where the @test was written, `path:line`
         # the code is ONE object in `codes` (kind "code"); a check REFERENCES it by id, or null
-        "code_id" => isempty(chk.code_anchor) ? "null" : _jsonstr(chk.code_anchor),
+        "code_id" => chk.code_id === nothing ? "null" : _jsonstr(string(chk.code_id)),
     )
     return nothing
 end
@@ -216,7 +219,7 @@ function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
         if fig.data !== nothing
             # Eager `data=`: the data file is written from it and `gen()` — the plotting backend — is
             # never touched, so agent.json stays producible Plots/Makie-free. No image in this face.
-            csv = _write_csv(_table_of_data(fig.data), base)
+            csv = _write_csv(fig.data, base)   # parsed where `data=` was written
             ctx.cache.new[_manifest_key(base, ctx.cache.outdir)] = Dict{String,Any}(
                 "key" => "data", "assets" => [relpath(csv, ctx.cache.outdir)]
             )
@@ -413,9 +416,10 @@ function _agent_md_table(io, tbl)
     return nothing
 end
 
-# A single check as a markdown list line (the LLM read view): a ✓/✗ badge + the numbers.
+# A single check as a markdown list line (the LLM read view): a PASS/FAIL/ERROR badge + the numbers,
+# or none for an indicator, which has none.
 function _agent_md_check(io, chk)
-    badge = chk.pass ? "PASS" : "FAIL"
+    badge = uppercase(string(chk.outcome))
     println(
         io,
         "- [",
@@ -424,6 +428,15 @@ function _agent_md_check(io, chk)
         chk.id,
         " — ",
         chk.label,
+        _agent_md_numbers(chk),
+        isempty(chk.source) ? "" : string(" — defined at ", chk.source),
+    )
+    return nothing
+end
+# A check's numbers in agent.md, or a note that an indicator has none.
+function _agent_md_numbers(chk)
+    chk.kind === :indicator && return " (pass/fail only)"
+    return string(
         ": got ",
         chk.got,
         ", want ",
@@ -435,9 +448,7 @@ function _agent_md_check(io, chk)
         " ",
         chk.kind,
         ")",
-        isempty(chk.source) ? "" : string(" — defined at ", chk.source),
     )
-    return nothing
 end
 
 # A @code block in agent.md: a line naming it (id, caption, where it was written), the fenced source,
@@ -494,7 +505,7 @@ end
 function _agent_md_verdict(io, c)
     v = verdict(c)
     v === nothing && return nothing
-    failing = [chk.id for chk in _subtree_checks(c) if !chk.pass]
+    failing = [chk.id for chk in _subtree_checks(c) if !passed(chk)]
     println(
         io,
         "**",

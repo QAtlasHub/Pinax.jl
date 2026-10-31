@@ -79,15 +79,22 @@ export const RawZ = z
 const NumZ = z.union([z.number(), z.string()]);
 
 // One check — a `Test` `@test` recorded into a container, with what it compared and its margin.
+// `kind` is "abs" or "rel" for a check with numbers, or "indicator" for one with none (`@test x == 1`,
+// a non-finite value, a zero tolerance): its got / want / delta / tol are null and it has no margin.
+export const CheckKindZ = z.enum(["abs", "rel", "indicator"]);
+// What `Test` recorded: it passed, it failed, or it threw (an error, always an indicator). `pass` is
+// derived from it (true exactly when the outcome is "pass").
+export const CheckOutcomeZ = z.enum(["pass", "fail", "error"]);
 export const CheckZ = z
   .object({
     id: z.string(),
     label: z.string(),
-    got: NumZ,
-    want: NumZ,
-    delta: NumZ,
-    tol: NumZ,
-    kind: z.string(),
+    got: NumZ.nullable(),
+    want: NumZ.nullable(),
+    delta: NumZ.nullable(),
+    tol: NumZ.nullable(),
+    kind: CheckKindZ,
+    outcome: CheckOutcomeZ.optional(), // absent from an agent.json written before it: read `pass`
     pass: z.boolean(),
     defined_at: z.string().optional(), // where the @test was written, "path:line"
     code_id: z.string().nullable().optional(), // the code block it was captured from, by id

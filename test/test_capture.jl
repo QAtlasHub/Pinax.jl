@@ -35,7 +35,7 @@ end
         end
         a = _section(:a)
         @test length(a.checks) == 2
-        @test all(c -> c.pass, a.checks)
+        @test all(c -> Pinax.passed(c), a.checks)
         @test first.(a.content) == [:code, :check, :code, :check] ||
             first.(a.content) == [:check, :check]
         # the outer testset saw both results, exactly once each
@@ -53,7 +53,7 @@ end
         end
         a = _section(:a)
         @test length(a.checks) == 1
-        @test !a.checks[1].pass
+        @test !Pinax.passed(a.checks[1])
         @test count(r -> r isa Test.Fail, rec.results) == 1
     end
 
@@ -108,7 +108,7 @@ end
                     end
                 end
             end
-            @test !_section(:a).checks[1].pass
+            @test !Pinax.passed(_section(:a).checks[1])
         end
     end
 end

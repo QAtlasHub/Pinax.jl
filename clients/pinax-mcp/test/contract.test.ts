@@ -81,6 +81,36 @@ test("the schema holds the small sets the emitter writes to them", () => {
   assert.equal(AgentDocZ.safeParse(changed((d) => d.pages[0].content.push({ kind: "picture", id: "x" }))).success, false);
   assert.equal(AgentDocZ.safeParse(changed((d) => d.pages[0].sections[0].content.push({ kind: "picture", id: "x" }))).success, false);
   assert.equal(AgentDocZ.safeParse(changed((d) => (d.pages[0].status = "published"))).success, false);
+  assert.equal(AgentDocZ.safeParse(changed((d) => (firstCheck(d).kind = "auto"))).success, false);
+});
+
+// The first check in the document, depth first.
+const firstCheck = (doc: any): any => {
+  const walk = (c: any): any => c.checks?.[0] ?? (c.sections ?? []).map(walk).find(Boolean);
+  return doc.pages.map(walk).find(Boolean);
+};
+
+test("every emitted check states its outcome, and pass is derived from it", () => {
+  const doc = AgentDocZ.parse(raw);
+  const all = (c: any): any[] => [...(c.checks ?? []), ...(c.sections ?? []).flatMap(all)];
+  const checks = doc.pages.flatMap(all);
+  assert.ok(checks.length > 0);
+  for (const c of checks) assert.equal(c.pass, c.outcome === "pass");
+  assert.equal(AgentDocZ.safeParse(changed((d) => (firstCheck(d).outcome = "maybe"))).success, false);
+});
+
+test("the outline leads each check with its outcome, an error included", () => {
+  const o = loadAtlas(emitted).outline();
+  assert.match(o, /\] ERROR error\("boom"\)/);
+  assert.match(o, /\] FAIL isapprox\(0\.5, 0\.0/);
+});
+
+test("an indicator check carries no numbers", () => {
+  const doc = AgentDocZ.parse(raw);
+  const all = (c: any): any[] => [...(c.checks ?? []), ...(c.sections ?? []).flatMap(all)];
+  const ind = doc.pages.flatMap(all).filter((c) => c.kind === "indicator");
+  assert.ok(ind.length > 0);
+  for (const c of ind) assert.deepEqual([c.got, c.want, c.delta, c.tol], [null, null, null, null]);
 });
 
 test("a 0.1 page status 'trial' reads as 'draft'", () => {

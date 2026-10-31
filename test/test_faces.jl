@@ -3,6 +3,7 @@ using Test
 using JSON
 
 _pos(s, needle) = first(findfirst(needle, s))
+_files_under(d) = [joinpath(r, f) for (r, _, fs) in walkdir(d) for f in fs]
 
 # Every node kind reaches every face (Conventions › Faces, #168). One document holds every kind;
 # it is rendered to the gallery, LaTeX and the agent face, and each node is looked for in each
@@ -217,6 +218,25 @@ _pos(s, needle) = first(findfirst(needle, s))
         @test_throws r"series \"a\" has 3 x values and 2 y values" @page :q "Q" begin
             @figure nothing data = (; series=[(; label="a", x=[1, 2, 3], y=[1.0, 2.0])])
         end
+    end
+
+    # `data=` is read once, where it is written: the figure holds the parsed series, copied, so a
+    # caller that reuses its vectors afterwards does not change what the data file says.
+    @testset "agent face: data= is captured where it is written" begin
+        Pinax.reset!()
+        xs, ys = [1.0, 2.0], [10.0, 20.0]
+        @page :p "P" begin
+            @figure nothing data = (; x=xs, y=ys, xlabel="beta") id = :live
+        end
+        fig = only(only(Pinax.current_document().pages).figures)
+        @test fig.data.xlabel == "beta" && fig.data.ylabel == ""
+        @test only(fig.data.series).label == "y"
+        ys[1] = 99.0
+        push!(xs, 3.0)   # the caller's vectors no longer agree; the figure's copy still does
+        out = joinpath(tmp, "dlive")
+        Pinax.render(; out=out, theme=:agent)
+        csv = read(only(filter(endswith(".csv"), _files_under(out))), String)
+        @test occursin("y,1.0,10.0", csv) && !occursin("99", csv)
     end
 
     # The agent face is the same compiled report: a figure sits in its block, between the prose

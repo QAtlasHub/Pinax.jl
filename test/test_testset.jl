@@ -108,7 +108,7 @@ end
     @testset "check carries the margin, not just a verdict" begin
         pass = Test.Pass(:test, :x, :(isapprox(1.0, 1.0098; rtol=0.01)), nothing)
         c = _check_for(pass, 1)
-        @test c.pass
+        @test Pinax.passed(c)
         @test c.got == 1.0 && c.want == 1.0098 && c.tol == 0.01 && c.kind === :rel
         @test c.delta / c.tol > 0.9   # passed, but spent 97% of its budget
 
@@ -117,11 +117,12 @@ end
         atol_pass = Test.Pass(
             :test, :x, :(isapprox(0.0, 1.0e-9; atol=1.0e-8, rtol=0.01)), nothing
         )
-        @test _check_for(atol_pass, 1).pass
+        @test Pinax.passed(_check_for(atol_pass, 1))
 
-        # A non-numeric assertion still becomes a check — every @test must show up somewhere.
+        # A non-numeric assertion still becomes a check — every @test must show up somewhere — but
+        # an indicator, with no numbers rather than made-up ones.
         b = _check_for(Test.Pass(:test, :x, :(1 + 1 == 2), nothing), 2)
-        @test b.pass && b.got == 1.0
+        @test Pinax.passed(b) && b.kind === :indicator && isnan(b.got)
     end
 
     @testset "atol governs when there is no usable reference" begin
@@ -874,7 +875,7 @@ end
             Test.record(root, fail)
         end
         @test root.node.checks[end].source == "test/test_x.jl:42" &&
-            !root.node.checks[end].pass
+            !Pinax.passed(root.node.checks[end])
 
         # …round-trips through a shard dump…
         dir = mktempdir()
@@ -948,7 +949,7 @@ end
         at = "test/test_x.jl:7"
         blk = CodeBlock(:code_x, "code_x", "y = 1", "", "", "julia", at)
         chk = Check(:t, "y == 1", 1.0, 1.0, 0.0, 0.0, :abs, true, at)
-        chk.code_anchor = "code_x"
+        chk.code_id = :code_x
         n = TestNode(
             "test_x.jl";
             checks=[chk],
@@ -962,7 +963,7 @@ end
             Pinax.dump_test_report(n, joinpath(mktempdir(), "s.toml"))
         )
         @test only(back.checks).source == at
-        @test only(back.checks).code_anchor == "code_x"
+        @test only(back.checks).code_id === :code_x
         @test all(
             x -> x.defined_at == at,
             (back.codes..., back.tables..., back.raws..., back.texts...),
@@ -989,7 +990,7 @@ end
 
         shown, hf, hp = Pinax._cap_gallery_checks(checks, Pinax._MAX_CHECK_ROWS)
         @test length(shown) == Pinax._MAX_CHECK_ROWS
-        @test count(c -> !c.pass, shown) == length(fails)          # every failure survives the cap
+        @test count(c -> !Pinax.passed(c), shown) == length(fails)          # every failure survives the cap
         @test hf == 0 && hp == 500 - Pinax._MAX_CHECK_ROWS
         small = checks[1:10]
         @test Pinax._cap_gallery_checks(small, Pinax._MAX_CHECK_ROWS) == (small, 0, 0)  # small = all
@@ -1232,12 +1233,11 @@ end
         # block and the reference ride a shard dump.
         dir = mktempdir()
         blk = CodeBlock(:code_f_jl_1_2, "code_f_jl_1_2", "x = compute()", "", "", "julia")
-        chk = Check(:t, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true, "", blk.anchor)
+        chk = Check(:t, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true, "", blk.id)
         n = TestNode("f.jl"; checks=[chk], codes=[blk])
         d = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
         back = Pinax.load_test_dump(d).children[1]
-        @test back.checks[1].code_anchor == blk.anchor &&
-            back.codes[1].source == "x = compute()"
+        @test back.checks[1].code_id === blk.id && back.codes[1].source == "x = compute()"
         render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
         html = read(joinpath(dir, "rep", "html", "f_jl.html"), String)
         @test occursin("pinax-code-src", html) && occursin("x = compute()", html)
@@ -1246,6 +1246,37 @@ end
         agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
         @test occursin("\"code_id\":\"code_f_jl_1_2\"", agent)
         @test occursin("{\"id\":\"code_f_jl_1_2\",\"caption\"", agent)  # resolvable against the code object
+    end
+
+    # A check refers to its code block by the block's id, whatever characters the id holds: the
+    # gallery links to the anchor derived from it, and agent.json's `code_id` is the id itself.
+    @testset "a check's code reference is the id, not an anchor read back as one" begin
+        dir = mktempdir()
+        id = Symbol("code.x y")                              # not anchor-safe
+        blk = CodeBlock(id, Pinax._anchor(id), "x = compute()", "", "", "julia")
+        chk = Check(:t, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true, "", id)
+        n = TestNode("f.jl"; checks=[chk], codes=[blk])
+        back = Pinax.load_test_dump(
+            Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
+        )
+        @test only(only(back.children).checks).code_id === id
+        # a dump from before 0.2 wrote the anchor, `code_anchor`
+        old = Dict{String,Any}(
+            "label" => "c",
+            "got" => 1.0,
+            "want" => 1.0,
+            "delta" => 0.0,
+            "tol" => 0.5,
+            "kind" => "abs",
+            "pass" => true,
+            "code_anchor" => "code_x",
+        )
+        @test Pinax._dict_to_check(old).code_id === :code_x
+        render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
+        agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
+        @test occursin("\"code_id\":\"code.x y\"", agent)
+        html = read(joinpath(dir, "rep", "html", "f_jl.html"), String)
+        @test occursin("class=\"pinax-codelink\" href=\"#$(Pinax._anchor(id))\"", html)
     end
 
     @testset "one code artifact per region: a sweep's samples and N shards collapse onto it" begin
@@ -1299,7 +1330,7 @@ end
         )
         prose = Pinax.Prose(:conv_txt_q, "conv_txt_q", "the same words")
         chk() =
-            Check(:c, "f(1) == 2", 1.0, 1.0, 0.0, 0.5, :abs, true, "", "code_test_x_jl_abc")
+            Check(:c, "f(1) == 2", 1.0, 1.0, 0.0, 0.5, :abs, true, "", :code_test_x_jl_abc)
         mk(d) = TestNode(
             d;
             codes=[blk],
@@ -1318,7 +1349,7 @@ end
         @test count(n -> n.kind === :code, ns) == 3 && count(n -> n.kind === :text, ns) == 3
         # each check points at the code block placed in its own section
         for pg in doc.pages, sec in Pinax._all_sections(pg), c in sec.checks
-            @test c.code_anchor in [b.anchor for b in sec.codes]
+            @test c.code_id in [b.id for b in sec.codes]
         end
 
         # the same author-written id in two test files is an error naming it

@@ -58,7 +58,10 @@ when adding any node type: it needs a human render **and** an agent-data form.
   still accepted as a deprecated alias of `:draft`, with a warning.
 - **Every container with checks carries `verdict` + `checks` in `agent.json`** — `verdict` is
   `{verdict:"PASS|FAIL", passed, total, failed}` over the subtree (`null` with no checks, never a
-  vacuous PASS) and `checks` holds the container's own `{id,label,got,want,delta,tol,kind,pass,…}`.
+  vacuous PASS) and `checks` holds the container's own
+  `{id,label,got,want,delta,tol,kind,outcome,pass,defined_at,code_id}` — `kind` is
+  `abs|rel|indicator` (an indicator's four numbers are `null`), `outcome` is `pass|fail|error`, and
+  `pass` is derived from it.
   Pages and sections share one set of keys; nodes reference each other by id (a check's `code_id`),
   and the document ends with its `diagnostics`.
   A failing check is reported once: to the enclosing testset, else `render` raises `ChecksFailed`

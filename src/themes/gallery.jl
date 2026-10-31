@@ -1456,8 +1456,8 @@ end
 # The row is class pinax-pass / pinax-fail so CSS colours it green / red.
 function emit_check(::GalleryBase, chk, ctx)
     io = ctx.io
-    cls = chk.pass ? "pinax-pass" : "pinax-fail"
-    badge = chk.pass ? "✓" : "✗"
+    cls = passed(chk) ? "pinax-pass" : "pinax-fail"
+    badge = passed(chk) ? "✓" : "✗"
     print(io, "<tr class=\"", cls, "\">")
     print(io, "<td class=\"pinax-badge\">", badge, "</td>")
     print(io, "<td>", _esc(string(chk.id)), "</td>")
@@ -1466,13 +1466,23 @@ function emit_check(::GalleryBase, chk, ctx)
         print(io, " <span class=\"pinax-src\">@ ", _esc(chk.source), "</span>")
     # The code that produced this check is ONE artifact in the section below (a `@code` block), so the
     # table — the verdict-and-margin view — links to it instead of carrying a second copy of it.
-    isempty(chk.code_anchor) || print(
+    chk.code_id === nothing || print(
         io,
         " <a class=\"pinax-codelink\" href=\"#",
-        _esc(chk.code_anchor),
+        _esc(_anchor(chk.code_id)),
         "\" title=\"the code that produced this check\">code</a>",
     )
     print(io, "</td>")
+    _emit_check_numbers(io, chk)
+    println(io, "</tr>")
+    return nothing
+end
+
+# A check row's number cells: got | want | Δ vs tol (kind), or a dash in each for an indicator, which
+# has no numbers.
+function _emit_check_numbers(io, chk)
+    chk.kind === :indicator &&
+        return print(io, "<td>—</td><td>—</td><td>— (pass/fail only)</td>")
     print(io, "<td>", _esc(_cellstr(chk.got)), "</td>")
     print(io, "<td>", _esc(_cellstr(chk.want)), "</td>")
     print(
@@ -1485,7 +1495,6 @@ function emit_check(::GalleryBase, chk, ctx)
         _esc(string(chk.kind)),
         ")</td>",
     )
-    println(io, "</tr>")
     return nothing
 end
 
@@ -1548,8 +1557,8 @@ end
 const _MAX_CHECK_ROWS = 200
 function _cap_gallery_checks(checks, cap)
     length(checks) <= cap && return (checks, 0, 0)
-    fails = filter(c -> !c.pass, checks)
-    passes = filter(c -> c.pass, checks)
+    fails = filter(!passed, checks)
+    passes = filter(passed, checks)
     shown_fail = fails[1:min(cap, length(fails))]
     room = cap - length(shown_fail)
     shown_pass = passes[1:min(max(room, 0), length(passes))]

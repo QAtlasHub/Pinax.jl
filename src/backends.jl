@@ -189,30 +189,31 @@ function _data_descriptor(path)
 end
 
 # `@figure … data=` as a data table `(; xlabel, ylabel, series)` — the shape `_figure_table` returns.
-# Axis labels are optional `xlabel=` / `ylabel=` fields beside the series.
+# Axis labels are optional `xlabel=` / `ylabel=` fields beside the series. Each series' points are
+# COPIED: this runs once, where `data=` is written, and the figure keeps the result, so a caller that
+# reuses its vectors afterwards cannot change what the figure's data file says.
 function _table_of_data(data)
     label(k) = hasproperty(data, k) ? string(getproperty(data, k)) : ""
-    return (; xlabel=label(:xlabel), ylabel=label(:ylabel), series=_series_of(data))
+    series = _check_series_lengths(_series_of(data))
+    return (; xlabel=label(:xlabel), ylabel=label(:ylabel), series)
 end
 
-# Normalize a `@figure … data=` NamedTuple into a list of `(; label, x, y)` series. Accepts
-# `(; series=[(; label, x, y)], …)` or a convenience `(; x, y[, label])`.
+# Normalize a `@figure … data=` NamedTuple into a list of `(; label, x, y)` series, the points
+# copied. Accepts `(; series=[(; label, x, y)], …)` or a convenience `(; x, y[, label])`.
 function _series_of(data)
     if hasproperty(data, :series)
-        out = NamedTuple[]
-        for (i, s) in enumerate(data.series)
-            lbl = hasproperty(s, :label) ? string(s.label) : "y$(i)"
-            push!(out, (; label=lbl, x=s.x, y=s.y))
-        end
-        return out
+        return NamedTuple[
+            _data_series(hasproperty(s, :label) ? s.label : "y$(i)", s) for
+            (i, s) in enumerate(data.series)
+        ]
     elseif hasproperty(data, :x) && hasproperty(data, :y)
-        lbl = hasproperty(data, :label) ? string(data.label) : "y"
-        return [(; label=lbl, x=data.x, y=data.y)]
+        return [_data_series(hasproperty(data, :label) ? data.label : "y", data)]
     end
     return error(
         "Pinax: @figure data= needs `series=[(; label, x, y)]` or `(; x, y[, label])`."
     )
 end
+_data_series(label, s) = (; label=string(label), x=collect(s.x), y=collect(s.y))
 
 """
     _materialize(fig, base, fmts) -> Vector{String}

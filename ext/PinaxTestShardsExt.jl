@@ -137,9 +137,10 @@ function _fold_node(n)
     return (;
         name=n.description,
         duration=isnan(n.elapsed) ? 0.0 : n.elapsed,
-        npass=count(c -> c.pass, n.checks) + sum(k -> k.npass, kids; init=0),
-        nfail=count(c -> !c.pass, n.checks) - n.nerror + sum(k -> k.nfail, kids; init=0),
-        nerror=n.nerror + sum(k -> k.nerror, kids; init=0),
+        npass=count(Pinax.passed, n.checks) + sum(k -> k.npass, kids; init=0),
+        nfail=count(c -> c.outcome === :fail, n.checks) + sum(k -> k.nfail, kids; init=0),
+        nerror=count(c -> c.outcome === :error, n.checks) +
+               sum(k -> k.nerror, kids; init=0),
         nbroken=n.nbroken + sum(k -> k.nbroken, kids; init=0),
         sections=kids,
     )

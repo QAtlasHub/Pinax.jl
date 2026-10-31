@@ -113,7 +113,9 @@ Test.finish(r::_StructIso) = r
                 @caption "VAL_IS_THREE"
             end
         end
-        failed = only(c for c in Pinax.current_document().pages[1].checks if !c.pass)
+        failed = only(
+            c for c in Pinax.current_document().pages[1].checks if !Pinax.passed(c)
+        )
         out = joinpath(tmp, "fb")
         try
             Pinax.render(; out=out, theme=:agent)
@@ -127,7 +129,7 @@ Test.finish(r::_StructIso) = r
             md,
         )
         @test occursin(
-            r"- \[FAIL\] \S+ — VAL_IS_THREE: got .* — defined at test/test_structure\.jl:\d+",
+            r"- \[FAIL\] \S+ — VAL_IS_THREE \(pass/fail only\) — defined at test/test_structure\.jl:\d+",
             md,
         )
         @test first(findfirst("VAL_IS_TWO", md)) < first(findfirst("VAL_IS_THREE", md))

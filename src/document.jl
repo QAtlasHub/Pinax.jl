@@ -144,9 +144,10 @@ mutable struct Figure
     code::String          # @figure expression source
     thumbnail::Bool       # thumbnail=true marker
     assets::Vector{String}
-    data::Any             # eager plotted-data (`@figure … data=(; x, y[, series])`) | nothing.
-    # When set, the agent backend writes the figure's data file from THIS — no `gen()`, hence no
-    # plotting backend — so the LLM artifact (agent.json) is producible Plots/Makie-free.
+    data::Any             # eager plotted data, parsed where `@figure … data=` is written: the data
+    # table `(; xlabel, ylabel, series=[(; label, x, y)])` with its points copied, or nothing. When
+    # set, the agent backend writes the figure's data file from THIS — no `gen()`, hence no plotting
+    # backend — so the LLM artifact (agent.json) is producible Plots/Makie-free.
     defined_at::String    # where the `@figure` was written, `path:line` (see `_defined_at`), or ""
 end
 function Figure(id, anchor, caption, params, gen, code, thumbnail, assets, data)
@@ -176,40 +177,96 @@ _cellstr(x) = x === missing ? "" : string(x)
 
 """
 A single PASS/FAIL check (a `Test` `@test` recorded into a container) — one assertion of a computed
-value against a reference. `delta` is the deviation under the term that governs the bound — `:abs`
-is `|got - want|`, `:rel` is `|got - want| / max(|got|, |want|)`, as `isapprox` defines them. `pass`
-is what `Test` recorded for the assertion and is never recomputed from `delta` and `tol` (`isapprox`
-combines `atol` and `rtol` in a way one `kind` cannot reproduce). An `indicator` check (no recoverable numbers) is a 1/0 and carries no
-margin. Renders to a row of the container's check table, a LaTeX tabular row, and a native-typed
-JSON object in `agent.json` (the machine-readable verdict).
+value against a reference. `kind` says what the numbers are:
+
+- `:abs` — `delta` is `|got - want|`;
+- `:rel` — `delta` is `|got - want| / max(|got|, |want|)`, as `isapprox` defines it;
+- `:indicator` — the assertion has no recoverable numbers (`@test x == 1`, a non-finite value, a zero
+  tolerance): `got`, `want`, `delta` and `tol` are `NaN`, it has no margin, and it still counts in
+  every verdict.
+
+`outcome` is what `Test` recorded for the assertion — `:pass`, `:fail`, or `:error` (it threw, so it
+has no numbers and is an indicator) — and is never recomputed from `delta` and `tol` (`isapprox`
+combines `atol` and `rtol` in a way one `kind` cannot reproduce); read it with `Pinax.passed(c)`.
+The constructor refuses any other kind or outcome, an indicator with numbers, an `:abs` / `:rel`
+check without them, and an error with numbers. Renders to a
+row of the container's check table, a LaTeX tabular row, and a native-typed JSON object in
+`agent.json` (the machine-readable verdict).
 """
 mutable struct Check
     id::Symbol
     label::String
-    got::Float64
-    want::Float64
-    delta::Float64     # resolved (rel or abs) deviation
-    tol::Float64
-    kind::Symbol       # :rel or :abs (resolved; never :auto in the struct)
-    pass::Bool
+    const got::Float64
+    const want::Float64
+    const delta::Float64     # resolved (rel or abs) deviation
+    const tol::Float64
+    const kind::Symbol       # :abs, :rel or :indicator (never :auto)
+    const outcome::Symbol    # :pass, :fail or :error, as Test recorded it
     source::String     # "file:line" of the assertion (issue #69 I), for every recorded @test, so the
     # report says WHERE, not just what; "" when Test gives no location.
-    code_anchor::String   # anchor of the `CodeBlock` holding the code that produced this check — the
-    # code itself is ONE artifact in the document (a `@code` block), and this is the reference to it,
-    # never a second copy of the source; "" when there is none.
+    code_id::Union{Symbol,Nothing}   # id of the `CodeBlock` holding the code that produced this
+    # check — the code itself is ONE artifact in the document (a `@code` block), and this is the
+    # reference to it, never a second copy of the source; nothing when there is none.
     reported::Bool        # already handed to an enclosing ordinary testset (#173): a failing check is
     # reported exactly once, by that suite when there is one, else by `render`.
-    indicator::Bool       # a 1/0 pass indicator (a `@test` with no recoverable numbers), not a margin
-end
-# The shorter positional forms: source and code_anchor default to "", reported to false. `indicator`
-# is the full form's alone.
-function Check(
-    id, label, got, want, delta, tol, kind, pass, source="", code_anchor="", reported=false
-)
-    return Check(
-        id, label, got, want, delta, tol, kind, pass, source, code_anchor, reported, false
+    # `outcome` may be given as a Bool (true = :pass, false = :fail), the form a test result has
+    function Check(
+        id, label, got, want, delta, tol, kind, outcome, source, code_id, reported
     )
+        o = _outcome(outcome)
+        _check_kind(kind, o, (got, want, delta, tol))
+        return new(id, label, got, want, delta, tol, kind, o, source, code_id, reported)
+    end
 end
+# The shorter positional forms: source defaults to "", code_id to nothing, reported to false.
+function Check(id, label, got, want, delta, tol, kind, outcome, source="", code_id=nothing)
+    return Check(id, label, got, want, delta, tol, kind, outcome, source, code_id, false)
+end
+
+"""
+    passed(c::Check) -> Bool
+
+Whether the check passed: its `outcome` is `:pass` (not `:fail`, not `:error`).
+"""
+passed(c::Check) = c.outcome === :pass
+
+const _CHECK_OUTCOMES = (:pass, :fail, :error)
+
+_outcome(pass::Bool) = pass ? :pass : :fail
+function _outcome(o::Symbol)
+    o in _CHECK_OUTCOMES || error(
+        "Pinax: check outcome $(repr(o)) is not one of ",
+        join(repr.(_CHECK_OUTCOMES), ", "),
+    )
+    return o
+end
+
+const _CHECK_KINDS = (:abs, :rel, :indicator)
+
+# A check's kind, and whether its numbers fit it and its outcome: an indicator has none (all NaN), a
+# margin check has all four, and an error — the assertion threw — has none.
+function _check_kind(kind, outcome, nums)
+    outcome === :error &&
+        kind !== :indicator &&
+        error("Pinax: an :error check has no numbers — its kind is :indicator")
+    kind in _CHECK_KINDS || error(
+        "Pinax: check kind $(repr(kind)) is not one of ",
+        join(repr.(_CHECK_KINDS), ", "),
+    )
+    if kind === :indicator
+        all(isnan, nums) || error(
+            "Pinax: an :indicator check has no numbers — got, want, delta and tol are NaN",
+        )
+    elseif any(isnan, nums)
+        error("Pinax: a $(repr(kind)) check needs got, want, delta and tol; one is NaN")
+    end
+    return kind
+end
+
+# How much of its tolerance a check spent (`delta / tol`), or nothing for an indicator, which has no
+# numbers. Every margin view — the page's margin figure, a sweep's figures, the per-file worst
+# margin — reads it through here, so none of them draws an indicator.
+_margin(c::Check) = c.kind === :indicator ? nothing : (c.tol > 0 ? c.delta / c.tol : 0.0)
 
 # FNV-1a (32-bit) in base 36: the same on every machine and Julia version (unlike `Base.hash`), so the
 # ids built from it are stable across runs (#123).
@@ -401,13 +458,13 @@ end
 
 # Single source of the verdict invariant — used by every backend so PASS/FAIL can never diverge.
 function _verdict_of(checks)
-    passed = count(c -> c.pass, checks)
+    npass = count(passed, checks)
     total = length(checks)
     return (
-        passed=passed,
+        passed=npass,
         total=total,
-        verdict=(passed == total ? "PASS" : "FAIL"),
-        failed=[string(c.id) for c in checks if !c.pass],
+        verdict=(npass == total ? "PASS" : "FAIL"),
+        failed=[string(c.id) for c in checks if !passed(c)],
     )
 end
 
@@ -1090,7 +1147,8 @@ function _push_figure!(;
 )
     c = _open_container("@figure")
     c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
-    data === nothing || _check_series_lengths(_series_of(data))   # eager: an error where written
+    # parsed and copied once, here: a bad `data=` is an error where written, and the readers use this
+    tbl = data === nothing ? nothing : _table_of_data(data)
     base = something(
         gen_id, Symbol(c.id, "_fig_", _stable_hash(string(code, "|", _params_key(params))))
     )
@@ -1104,7 +1162,7 @@ function _push_figure!(;
         code,
         thumbnail,
         String[],
-        data,
+        tbl,
         _defined_at(at),
     )
     push!(c.figures, fig)
