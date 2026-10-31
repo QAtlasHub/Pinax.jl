@@ -1529,20 +1529,11 @@ generated from the HTML. `@raw raw\"<table class=cov>…</table>\"`. Use `@desc`
 hand-built markup.
 """
 macro raw(args...)
-    html = nothing
-    id = nothing
-    for a in args
-        if a isa Expr && a.head === :(=) && a.args[1] === :id
-            id = a.args[2]
-        elseif html === nothing
-            html = a
-        else
-            error("@raw takes one HTML expression (plus `id=`)")
-        end
-    end
-    html === nothing && error("@raw needs an HTML expression")
-    at = (String(string(__source__.file)), __source__.line)
-    return :(_push_raw!($(esc(html)); id=($(esc(id))), at=($(at))))
+    html, kws = _macro_args(args, (:id,), "@raw", "raw HTML expression")
+    allk = vcat(
+        Expr(:kw, :at, (String(string(__source__.file)), __source__.line)), _kwspecs(kws)
+    )
+    return _call(:_push_raw!, (esc(html),), allk)
 end
 function _push_raw!(s; id=nothing, at=nothing)
     c = _open_container("@raw")
