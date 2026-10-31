@@ -176,8 +176,10 @@ using Test
         end
         html = read(Pinax.render(; out=outdir), String)
         # no path traversal: page dir is the sanitized anchor, assets stay under outdir
-        @test isdir(joinpath(outdir, "assets", "figures", "a_b", "s"))
-        @test occursin("id=\"a_b\"", html)
+        anchor = Pinax._anchor(Symbol("a/b"))   # sanitized, plus a hash so it stays unique
+        @test startswith(anchor, "a_b-") && !occursin('/', anchor)
+        @test isdir(joinpath(outdir, "assets", "figures", anchor, "s"))
+        @test occursin("id=\"$(anchor)\"", html)
         @test !occursin("a/b\"", html)                     # raw slash never in an id attribute
     end
 
