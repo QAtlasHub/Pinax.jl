@@ -34,6 +34,8 @@ const MIME: Record<string, string> = {
 // The unit kinds every Pinax face shows comments on; a comment on any other kind would be stored and
 // shown nowhere (Conventions › Faces), so add_comment refuses it.
 const COMMENT_CARRIERS = new Set(["page", "section", "figure", "table"]);
+// The gallery shows a bookmark on a section only, so set_bookmark refuses every other kind.
+const BOOKMARK_CARRIERS = new Set(["section"]);
 
 const mimeFor = (p: string): string => MIME[extname(p).toLowerCase()] ?? "application/octet-stream";
 const isTextual = (m: string): boolean =>
@@ -135,7 +137,7 @@ export function createServer(atlas: Atlas, opts: ServerOptions = {}): Server {
     },
     {
       name: "set_bookmark",
-      description: "Mark or unmark a unit (by id) as bookmarked in the comment store.",
+      description: "Mark or unmark a section (by id) as bookmarked in the comment store; the gallery shows bookmarks on sections only.",
       inputSchema: {
         type: "object",
         properties: { id: { type: "string" }, on: { type: "boolean", description: "default true" } },
@@ -237,8 +239,13 @@ export function createServer(atlas: Atlas, opts: ServerOptions = {}): Server {
         const a = (args as Record<string, unknown>) ?? {};
         const id = String(a.id ?? "");
         if (!id) return err("set_bookmark requires 'id'");
-        if (!atlas.unit(id)) return err(`no unit with id '${id}' in this document`);
-        const on = a.on === undefined ? true : Boolean(a.on);
+        const unit = atlas.unit(id);
+        if (!unit) return err(`no unit with id '${id}' in this document`);
+        if (!BOOKMARK_CARRIERS.has(unit.kind))
+          return err(`a bookmark on a ${unit.kind} is shown nowhere: the gallery bookmarks sections only`);
+        if (a.on !== undefined && typeof a.on !== "boolean")
+          return err(`set_bookmark: 'on' must be a boolean, not ${JSON.stringify(a.on)}`);
+        const on = a.on ?? true;
         opts.store.setBookmark(id, on);
         return ok(`bookmark for '${id}' set to ${on}.`);
       }

@@ -138,3 +138,42 @@ test("without --comments the write tools are absent (read-only by default)", { t
     await client.close();
   }
 });
+
+test("set_bookmark marks only a section, and 'on' must be a boolean", { timeout: 20000 }, async () => {
+  const cf = tmpToml();
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry, "--agent", fixture, "--comments", cf],
+  });
+  const client = new Client({ name: "pinax-mcp-test", version: "0" }, { capabilities: {} });
+  await client.connect(transport);
+  const call = (args: Record<string, unknown>) => client.callTool({ name: "set_bookmark", arguments: args });
+  const bookmarks = () => ({ ...(parse(readFileSync(cf, "utf8")) as any).bookmark });
+  try {
+    // a section is bookmarked (the default is on), and unbookmarked with on: false
+    const on = await call({ id: "s1" });
+    assert.match((on.content as any)[0].text, /bookmark for 's1' set to true/);
+    assert.deepEqual(bookmarks(), { s1: true });
+    await call({ id: "s1", on: false });
+    assert.deepEqual(bookmarks(), { s1: false });
+
+    // the gallery shows bookmarks on sections only: any other kind is refused, naming the kind
+    for (const [id, kind] of [
+      ["p1", "page"],
+      ["p1_fig1", "figure"],
+      ["p1_tbl1", "table"],
+    ]) {
+      const res = await call({ id });
+      assert.equal(res.isError, true, id);
+      assert.match((res.content as any)[0].text, new RegExp(`on a ${kind}`), id);
+    }
+
+    // a string is not a boolean: "false" must not set the bookmark
+    const str = await call({ id: "s1", on: "false" });
+    assert.equal(str.isError, true);
+    assert.match((str.content as any)[0].text, /'on' must be a boolean/);
+    assert.deepEqual(bookmarks(), { s1: false });
+  } finally {
+    await client.close();
+  }
+});
