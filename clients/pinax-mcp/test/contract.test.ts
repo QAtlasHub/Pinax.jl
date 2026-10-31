@@ -17,21 +17,29 @@ const raw = JSON.parse(readFileSync(resolve(emitted, "agent.json"), "utf8"));
 // Every object key in `value` that `schema` does not name, as dotted paths. The schema is
 // `.passthrough()` so an OLDER consumer survives a newer emitter — which is exactly why a key the
 // emitter writes and the schema forgot would otherwise go unnoticed.
-function unnamedKeys(schema: z.ZodTypeAny, value: unknown, path: string): string[] {
-  if (schema instanceof z.ZodLazy) return unnamedKeys(schema.schema, value, path);
-  if (schema instanceof z.ZodOptional || schema instanceof z.ZodNullable) {
-    return value == null ? [] : unnamedKeys(schema.unwrap(), value, path);
+function unnamedKeys(schema: z.ZodType, value: unknown, path: string): string[] {
+  // walk the schema by its definition (zod 4: `_zod.def`), unwrapping lazy / optional / nullable
+  const def = (schema as any)._zod.def;
+  switch (def.type) {
+    case "lazy":
+      return unnamedKeys(def.getter(), value, path);
+    case "optional":
+    case "nullable":
+      return value == null ? [] : unnamedKeys(def.innerType, value, path);
+    case "array":
+      return Array.isArray(value)
+        ? value.flatMap((v, i) => unnamedKeys(def.element, v, `${path}[${i}]`))
+        : [];
+    case "object": {
+      if (value === null || typeof value !== "object") return [];
+      const shape = def.shape as Record<string, z.ZodType>;
+      return Object.entries(value as Record<string, unknown>).flatMap(([k, v]) =>
+        k in shape ? unnamedKeys(shape[k], v, `${path}.${k}`) : [`${path}.${k}`],
+      );
+    }
+    default:
+      return []; // a scalar, a union of scalars, a record of params, or z.unknown()
   }
-  if (schema instanceof z.ZodArray && Array.isArray(value)) {
-    return value.flatMap((v, i) => unnamedKeys(schema.element, v, `${path}[${i}]`));
-  }
-  if (schema instanceof z.ZodObject && value !== null && typeof value === "object") {
-    const shape = schema.shape as Record<string, z.ZodTypeAny>;
-    return Object.entries(value as Record<string, unknown>).flatMap(([k, v]) =>
-      k in shape ? unnamedKeys(shape[k], v, `${path}.${k}`) : [`${path}.${k}`],
-    );
-  }
-  return []; // a scalar, a union of scalars, a record of params, or z.unknown()
 }
 
 test("the emitted fixture parses against the schema", () => {
