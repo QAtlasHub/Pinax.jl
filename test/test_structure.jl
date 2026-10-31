@@ -188,6 +188,27 @@ Test.finish(r::_StructIso) = r
         @test occursin("empty_tbl", diag)
     end
 
+    @testset "LaTeX's diagnostics.md holds every diagnostic, and only this render's" begin
+        out = joinpath(tmp, "ldiag")
+        # a build-time diagnostic alone is written
+        Pinax.reset!()
+        @page :p "P" begin end
+        Pinax._diag!(Pinax.WARNING, "BUILD_ITEM", "recorded while building")
+        Pinax.render(; out=out, theme=:latex)
+        diag = read(joinpath(out, "diagnostics.md"), String)
+        @test occursin("BUILD_ITEM", diag)
+        # what compiling said is there too
+        if Sys.which("latexmk") === nothing && Sys.which("pdflatex") === nothing
+            @test occursin("no LaTeX compiler", diag)
+        end
+        # a clean render into the same directory leaves nothing of the last one
+        Pinax.reset!()
+        @page :p "P" begin end
+        Pinax.render(; out=out, theme=:latex)
+        f = joinpath(out, "diagnostics.md")
+        @test !isfile(f) || !occursin("BUILD_ITEM", read(f, String))
+    end
+
     @testset "out is a directory: one face per subdirectory, one comment store" begin
         out = joinpath(tmp, "report")
         mkpath(out)

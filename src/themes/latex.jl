@@ -393,14 +393,18 @@ function emit_document(
 
     texpath = joinpath(outdir, "document.tex")
     write(texpath, String(take!(io)))
-    isempty(rdiag) || _write_latex_diagnostics(outdir, doc, rdiag)
-    return _latex_compile(texpath, outdir, rdiag)
+    result = _latex_compile(texpath, outdir, rdiag)
+    _write_latex_diagnostics(outdir, doc, rdiag)   # after compiling, so what it said is included
+    return result
 end
 
-# Diagnostics for non-gallery themes are a markdown sidecar (notes 09).
+# Diagnostics for non-gallery themes are a markdown sidecar (notes 09): the build's and this render's,
+# compiling included. With none, a sidecar left by an earlier render is removed.
 function _write_latex_diagnostics(outdir, doc, rdiag)
     es = vcat(doc.diag.entries, rdiag)
-    open(joinpath(outdir, "diagnostics.md"), "w") do io
+    f = joinpath(outdir, "diagnostics.md")
+    isempty(es) && return rm(f; force=true)
+    open(f, "w") do io
         println(io, "# Diagnostics")
         for e in es
             println(io, "- **", e.severity, "** `", e.item, "` — ", e.message)
