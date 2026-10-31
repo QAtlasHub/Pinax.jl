@@ -97,56 +97,65 @@ end
 # path-traversal protection, and 404 for misses.
 function _serve_handle(conn, root)
     try
-        reqline = readline(conn)
-        isempty(reqline) && return nothing
-        parts = split(reqline)
-        length(parts) >= 2 || return nothing
-        target = parts[2]
-        rangehdr = ""
-        while true
-            h = readline(conn)
-            isempty(h) && break
-            if startswith(lowercase(h), "range:")
-                rangehdr = strip(h[(findfirst(':', h) + 1):end])
-            end
-        end
-        rel = lstrip(_urldecode(split(target, '?')[1]), '/')
-        isempty(rel) && (rel = "index.html")
-        file = normpath(joinpath(root, rel))
-        if !_under_root(file, root)                       # no `..` out of the served root
-            return _respond(conn, 403, "text/plain", Vector{UInt8}("403 Forbidden"))
-        end
-        isdir(file) && (file = joinpath(file, "index.html"))
-        if !isfile(file)
-            return _respond(conn, 404, "text/plain", Vector{UInt8}("404 Not Found: $(rel)"))
-        end
-        if !_resolves_under_root(file, root)              # and no symlink out of it either
-            return _respond(conn, 403, "text/plain", Vector{UInt8}("403 Forbidden"))
-        end
-        data = read(file)
-        ct = _mime(file)
-        m = isempty(rangehdr) ? nothing : match(r"^bytes=(\d*)-(\d*)$", rangehdr)
-        if m !== nothing                                  # single-range request (e.g. PDF viewer)
-            n = length(data)
-            lo = isempty(m.captures[1]) ? 0 : parse(Int, m.captures[1])
-            hi = isempty(m.captures[2]) ? n - 1 : parse(Int, m.captures[2])
-            lo = clamp(lo, 0, max(n - 1, 0))
-            hi = clamp(hi, lo, max(n - 1, 0))
-            return _respond(
-                conn,
-                206,
-                ct,
-                data[(lo + 1):(hi + 1)];
-                extra=["Content-Range: bytes $(lo)-$(hi)/$(n)", "Accept-Ranges: bytes"],
-            )
-        end
-        return _respond(conn, 200, ct, data; extra=["Accept-Ranges: bytes"])
+        req = _read_request(conn)
+        req === nothing && return nothing
+        found = _resolve_file(root, req.target)
+        found isa Tuple && return _respond(conn, found...)   # a refusal
+        return _respond_file(conn, found, req.range)
     catch e
         e isa InterruptException && rethrow()
         return nothing                                    # client closed / malformed: drop it
     finally
         close(conn)
     end
+end
+
+# The request line's target and its `Range:` header ("" when none), or `nothing` for no request.
+function _read_request(conn)
+    parts = split(readline(conn))
+    length(parts) >= 2 || return nothing
+    range = ""
+    while true
+        h = readline(conn)
+        isempty(h) && break
+        startswith(lowercase(h), "range:") &&
+            (range = strip(h[(findfirst(':', h) + 1):end]))
+    end
+    return (; target=parts[2], range)
+end
+
+# The served file's path for `target`, or the `(status, type, body)` of the refusal: nothing
+# outside the served root, by `..` or by a symlink.
+function _resolve_file(root, target)
+    rel = lstrip(_urldecode(split(target, '?')[1]), '/')
+    isempty(rel) && (rel = "index.html")
+    file = normpath(joinpath(root, rel))
+    forbidden = (403, "text/plain", Vector{UInt8}("403 Forbidden"))
+    _under_root(file, root) || return forbidden
+    isdir(file) && (file = joinpath(file, "index.html"))
+    isfile(file) || return (404, "text/plain", Vector{UInt8}("404 Not Found: $(rel)"))
+    _resolves_under_root(file, root) || return forbidden
+    return file
+end
+
+# The file, whole or as the one byte range asked for (a PDF viewer asks for ranges).
+function _respond_file(conn, file, range)
+    data = read(file)
+    ct = _mime(file)
+    m = isempty(range) ? nothing : match(r"^bytes=(\d*)-(\d*)$", range)
+    m === nothing && return _respond(conn, 200, ct, data; extra=["Accept-Ranges: bytes"])
+    n = length(data)
+    lo = clamp(isempty(m.captures[1]) ? 0 : parse(Int, m.captures[1]), 0, max(n - 1, 0))
+    hi = clamp(
+        isempty(m.captures[2]) ? n - 1 : parse(Int, m.captures[2]), lo, max(n - 1, 0)
+    )
+    return _respond(
+        conn,
+        206,
+        ct,
+        data[(lo + 1):(hi + 1)];
+        extra=["Content-Range: bytes $(lo)-$(hi)/$(n)", "Accept-Ranges: bytes"],
+    )
 end
 
 function _listen_any(addr, port)
