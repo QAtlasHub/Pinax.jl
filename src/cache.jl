@@ -55,13 +55,19 @@ end
 # Manifest key: the figure's output base path (unique per page/section/figure), TOML-safe.
 _manifest_key(base, outdir) = replace(relpath(base, outdir), r"[^A-Za-z0-9_-]" => "_")
 
+# The previous render's manifest, or an empty one when there is none. It is a derived cache, so a
+# corrupt one is not fatal — every figure re-materializes and the render writes a new one — but it is
+# said: until then its orphans are not cleaned and `rendered_assets` lists nothing.
 function _read_manifest(outdir)
     f = joinpath(outdir, MANIFEST_FILE)
     isfile(f) || return Dict{String,Any}()
     try
         return TOML.parsefile(f)
-    catch
-        return Dict{String,Any}()   # corrupt manifest -> treat as empty (everything re-materializes)
+    catch e
+        e isa TOML.ParserError || rethrow()
+        @warn "Pinax: render manifest $(f) is not valid TOML; ignoring it. Assets it listed " *
+            "are not cleaned up, and the next render writes a new one." exception = e
+        return Dict{String,Any}()
     end
 end
 
