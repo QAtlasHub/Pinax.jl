@@ -510,14 +510,8 @@ function emit_text(theme::GalleryBase, source, item, ctx; block::Bool=true)
     s = replace(s, _CITE_RE => m -> tok!(_cite_html(m, ctx, item)))
     s = replace(s, r"@label\(:\w+\)\s*" => "")
     # 2. Render the surviving prose as markdown (raw HTML is escaped -> safe). A parse failure is
-    #    non-fatal: fall back to escaped text and record a diagnostic (notes 09).
-    html = try
-        _markdown(s)
-    catch e
-        e isa InterruptException && rethrow()
-        push!(ctx.rdiag, DiagEntry(WARNING, item, "markdown render failed: $(e)"))
-        _esc(s)
-    end
+    #    non-fatal: escaped text, and a diagnostic (notes 09).
+    html = _render_markdown(_markdown, _esc, s, item, ctx.rdiag)
     # 3. Re-inject the protected fragments.
     for (k, frag) in enumerate(subs)
         html = replace(html, _tok(k) => frag)
@@ -525,9 +519,23 @@ function emit_text(theme::GalleryBase, source, item, ctx; block::Bool=true)
     return block ? html : _unwrap_p(html)
 end
 
-# Markdown -> HTML. Lets the (rare) parse error propagate; `emit_text` turns it into a diagnostic.
+# Markdown -> HTML. Lets the (rare) parse error propagate; `_render_markdown` turns it into a
+# diagnostic.
 function _markdown(s::AbstractString)
     return rstrip(Markdown.html(Markdown.parse(s)))
+end
+
+# Markdown in a face's markup: `render(s)`, or `escape(s)` when the markdown will not render — and
+# then a diagnostic under `item` in `rdiag`, never a silent fallback (notes 09). The one place every
+# face decides this, for prose, captions, comments and part descriptions.
+function _render_markdown(render, escape, s, item, rdiag)
+    try
+        return render(s)
+    catch e
+        e isa InterruptException && rethrow()
+        push!(rdiag, DiagEntry(WARNING, string(item), "markdown render failed: $(e)"))
+        return escape(s)
+    end
 end
 
 # Drop the single `<p>…</p>` wrapper markdown adds, for inline contexts (captions).
@@ -925,17 +933,14 @@ end
 _page_count_meta(pg) = _count_meta(length(_all_sections(pg)), _page_nfigs(pg))
 
 # A part's overview description (markdown → HTML), shown beneath its index group heading; "" if none.
-# Math ($…$) renders client-side via KaTeX (the index loads it); a parse failure falls back to text.
-function _part_desc_html(doc::Document, pid)
+# Math ($…$) renders client-side via KaTeX (the index loads it). A parse failure falls back to text;
+# `emit_index` has no diagnostics to write to, so `_emit_index_file` records it (`rdiag` here is
+# where a caller that has them passes them).
+function _part_desc_html(doc::Document, pid, rdiag=DiagEntry[])
     pid === nothing && return ""
     d = get(doc.part_descs, pid, nothing)
     d === nothing && return ""
-    body = try
-        _markdown(d.source)
-    catch e
-        e isa InterruptException && rethrow()
-        _esc(d.source)
-    end
+    body = _render_markdown(_markdown, _esc, d.source, pid, rdiag)
     return string("<div class=\"part-desc\">", body, "</div>")
 end
 
@@ -1244,6 +1249,9 @@ function _emit_index_file(g)
         _nfigs_text(_total_figures(doc)),
         "</div>",
     )
+    # the index is the one place part descriptions are shown: a description whose markdown will not
+    # render is recorded here, where the diagnostics are in reach
+    foreach(((pid, _, _),) -> _part_desc_html(doc, pid, rdiag), _grouped_pages(doc))
     emit_index(theme, doc, io, g.outdir, g.bookmarks)
     _emit_diagnostics(doc, rdiag, io)
     emit_foot(theme, io, doc, katex, false, rdiag)
@@ -1326,12 +1334,7 @@ function emit_comments(theme::GalleryBase, anchor, ctx)
     io = ctx.io
     println(io, "<div class=\"pinax-comments\">")
     for c in turns
-        body = try
-            _markdown(c.text)
-        catch e
-            e isa InterruptException && rethrow()
-            _esc(c.text)
-        end
+        body = _render_markdown(_markdown, _esc, c.text, anchor, ctx.rdiag)
         author = if isempty(c.author)
             ""
         else

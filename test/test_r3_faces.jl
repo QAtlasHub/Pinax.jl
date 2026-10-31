@@ -120,3 +120,27 @@ end
         @test got == [[true, false, false], [false, true, false], [true, true, true]]
     end
 end
+
+@testset "a markdown fallback is recorded, never silent" begin
+    # the one place a face falls back from markdown to escaped text says so in its diagnostics
+    rdiag = Pinax.DiagEntry[]
+    out = Pinax._render_markdown(s -> error("boom"), Pinax._esc, "<b>x", "node", rdiag)
+    @test out == "&lt;b&gt;x"
+    @test only(rdiag).item == "node" &&
+        occursin("markdown render failed", only(rdiag).message)
+    @test occursin("boom", only(rdiag).message)
+    @test Pinax._render_markdown(identity, Pinax._esc, "<b>", "node", rdiag) == "<b>"
+    @test length(rdiag) == 1                                # a render that works records nothing
+
+    # LaTeX, for real: the Markdown stdlib has no LaTeX form for a lone `$x` (it parses as an
+    # interpolation), so the prose falls back to escaped text and the diagnostics name it
+    tmp = mktempdir()
+    Pinax.reset!(; title="T")
+    @page :p "P" begin
+        @desc "costs \$x here"
+    end
+    tex = read(Pinax.render(; out=tmp, theme=:latex), String)
+    @test occursin("costs \\\$x here", tex)                  # escaped text, `$` included
+    diag = read(joinpath(tmp, "diagnostics.md"), String)
+    @test occursin(r"`p_txt_\w+` — markdown render failed", diag)
+end
