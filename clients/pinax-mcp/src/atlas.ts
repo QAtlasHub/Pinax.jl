@@ -7,7 +7,7 @@
 // store), so a single id -> unit map is the index.
 import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { AgentDocZ, type AgentDoc, type Part } from "./schema.js";
+import { AgentDocZ, type AgentDoc, type ContentRef, type Page } from "./schema.js";
 
 export type UnitKind =
   | "part"
@@ -38,6 +38,87 @@ export interface SearchHit {
   field: string;
   snippet: string;
 }
+
+const firstLine = (s: string): string => s.split("\n")[0];
+
+// The leaf nodes a page or section holds, in index order: the array each lives in, its kind, and the
+// label a reader would recognise it by.
+const LEAVES: { key: string; kind: UnitKind; label: (n: any) => string }[] = [
+  { key: "texts", kind: "text", label: (t) => firstLine(t.text) }, // a prose block: its first line
+  { key: "figures", kind: "figure", label: (f) => f.caption },
+  { key: "tables", kind: "table", label: (t) => t.caption || t.id },
+  { key: "codes", kind: "code", label: (b) => b.caption || firstLine(b.source) }, // else its first line
+  { key: "checks", kind: "check", label: (c) => c.label },
+  { key: "raws", kind: "raw", label: (r) => firstLine(r.html) }, // a @raw block: its first line of HTML
+];
+
+// ---- search: the text fields each kind of unit is searched in, beyond its label ----
+
+type Field = [field: string, text: string | null | undefined];
+
+const commentFields = (n: any): Field[] =>
+  (n.comments ?? []).map((c: any): Field => ["comment", `${c.author}: ${c.text}`]);
+// a cell's text: avoid [object Object] / nested-array join
+const cellText = (c: unknown): string => (c == null ? "" : String(c));
+const cellsText = (rows: unknown[][] = []): string => rows.map((r) => r.map(cellText).join(" ")).join(" | ");
+const paramsFields = (params: unknown): Field[] => (typeof params === "string" ? [["params", params]] : []);
+// a part, section or check: its desc and its comments; a page adds its summary
+const containerFields = (n: any): Field[] => [["desc", n.desc], ...commentFields(n)];
+
+const SEARCHED: Record<UnitKind, (n: any) => Field[]> = {
+  figure: (n) => [["code", n.code], ...paramsFields(n.params), ...commentFields(n)],
+  code: (n) => [["code", n.source]],
+  text: (n) => [["text", n.text]],
+  raw: (n) => [["html", n.html]],
+  table: (n) => [["cells", cellsText(n.rows)], ...commentFields(n)],
+  page: (n) => [["desc", n.desc], ["summary", n.summary], ...commentFields(n)],
+  part: containerFields,
+  section: containerFields,
+  check: containerFields,
+};
+
+const SNIPPET_CONTEXT = 30;
+
+// The text around a match at `i` of length `len`, whitespace folded, with "…" where text was cut.
+function snippet(text: string, i: number, len: number): string {
+  const start = Math.max(0, i - SNIPPET_CONTEXT);
+  const end = i + len + SNIPPET_CONTEXT;
+  const slice = text.slice(start, end).replace(/\s+/g, " ").trim();
+  return (start > 0 ? "…" : "") + slice + (end < text.length ? "…" : "");
+}
+
+// A hit when the lower-cased query `q` occurs in `text`, else none.
+function hitIn(u: Unit, [field, text]: Field, q: string): SearchHit[] {
+  const i = text ? text.toLowerCase().indexOf(q) : -1;
+  if (i < 0) return [];
+  return [{ id: u.id, kind: u.kind, label: u.label, field, snippet: snippet(text!, i, q.length) }];
+}
+
+// ---- outline helpers ----
+
+// a container's verdict over its subtree ("" when it holds no checks — never a vacuous PASS)
+const verdictOf = (node: any): string =>
+  node.verdict ? `  [${node.verdict.verdict} ${node.verdict.passed}/${node.verdict.total}]` : "";
+
+function pageHeading(page: Page): string {
+  const summary = page.summary ? ` — ${page.summary}` : "";
+  const status = page.status && page.status !== "final" ? ` [status: ${page.status}]` : "";
+  return `\n### [page ${page.id}] ${page.title}${status}${summary}${verdictOf(page)}`;
+}
+
+// with no content at all (an older agent.json), a container lists its figures, then its tables
+const fallbackLines = (node: any): string[] => [
+  ...(node.figures ?? []).map((f: any) => `- [figure ${f.id}] ${f.caption}`),
+  ...(node.tables ?? []).map((t: any) => `- [table ${t.id}] ${t.caption || t.id}`),
+];
+
+// what the build and the render recorded (a node a face left out, a failed figure), so a reader
+// sees the gaps rather than inferring them
+const diagnosticLines = (doc: AgentDoc): string[] => {
+  const diags = doc.diagnostics ?? [];
+  if (!diags.length) return [];
+  return ["\n## Diagnostics", ...diags.map((d) => `- [${d.severity}] ${d.item}: ${d.message}`)];
+};
 
 export class Atlas {
   readonly doc: AgentDoc;
@@ -78,27 +159,8 @@ export class Atlas {
 
   // A container's prose, figures, tables, code blocks, checks and @raw blocks, each under its id.
   private addLeaves(node: any, parent: string): void {
-    for (const t of node.texts ?? []) {
-      // a prose block's label is its first line (what a reader would recognise)
-      this.add({ kind: "text", id: t.id, label: t.text.split("\n")[0], parent, node: t });
-    }
-    for (const fig of node.figures ?? []) {
-      this.add({ kind: "figure", id: fig.id, label: fig.caption, parent, node: fig });
-    }
-    for (const tbl of node.tables ?? []) {
-      this.add({ kind: "table", id: tbl.id, label: tbl.caption || tbl.id, parent, node: tbl });
-    }
-    for (const blk of node.codes ?? []) {
-      // a code block's label is its caption, else its first line (what a reader would recognise)
-      const label = blk.caption || blk.source.split("\n")[0];
-      this.add({ kind: "code", id: blk.id, label, parent, node: blk });
-    }
-    for (const chk of node.checks ?? []) {
-      this.add({ kind: "check", id: chk.id, label: chk.label, parent, node: chk });
-    }
-    for (const raw of node.raws ?? []) {
-      // a @raw block's label is its first line of HTML
-      this.add({ kind: "raw", id: raw.id, label: raw.html.split("\n")[0], parent, node: raw });
+    for (const { key, kind, label } of LEAVES) {
+      for (const n of node[key] ?? []) this.add({ kind, id: n.id, label: label(n), parent, node: n });
     }
   }
 
@@ -121,108 +183,63 @@ export class Atlas {
   /** A token-lean text outline of the whole document: every node, in reading order, with its id. */
   outline(): string {
     const out: string[] = [`# ${this.doc.title}`];
-    // a container's verdict over its subtree ("" when it holds no checks — never a vacuous PASS)
-    const verdictOf = (node: any): string =>
-      node.verdict ? `  [${node.verdict.verdict} ${node.verdict.passed}/${node.verdict.total}]` : "";
-    const partOf = new Map<string, Part>(this.doc.parts.map((p) => [p.id, p]));
-    // a section's heading one level deeper per depth (a top-level section is ####), then its content
-    const emitSection = (sec: any, level: number): void => {
-      out.push(`${"#".repeat(level)} [section ${sec.id}] ${sec.title}${verdictOf(sec)}`);
-      emitContent(sec, level + 1);
-    };
-    // walk a page/section's `content` in declaration order, a nested section where it stands; a
-    // section the content does not list follows (an older agent.json); with no content at all, fall
-    // back to figures-then-tables.
-    const emitContent = (node: any, level: number): void => {
-      const content = node.content as { kind: string; id: string }[] | undefined;
-      const sections: any[] = node.sections ?? [];
-      const listed = new Set((content ?? []).filter((r) => r.kind === "section").map((r) => r.id));
-      if (content && content.length) {
-        for (const { kind, id } of content) {
-          if (kind === "section") {
-            const sec = sections.find((s) => s.id === id);
-            if (sec) {
-              emitSection(sec, level);
-              continue;
-            }
-          }
-          const u = this.unit(id);
-          // a check leads with its result, so a reader sees PASS/FAIL before the expression
-          const label = !u ? "(missing)" : u.kind === "check" ? `${u.node.pass ? "PASS" : "FAIL"} ${u.label}` : u.label;
-          // emit even an unresolvable id (stale agent.json) so it is visible, not silently dropped
-          out.push(`- [${kind} ${id}] ${label}`);
-        }
-      } else {
-        for (const f of node.figures ?? []) out.push(`- [figure ${f.id}] ${f.caption}`);
-        for (const t of node.tables ?? []) out.push(`- [table ${t.id}] ${t.caption || t.id}`);
-      }
-      for (const sec of sections) if (!listed.has(sec.id)) emitSection(sec, level);
-    };
-    let lastPart: string | null | undefined;
+    this.outlinePages(out);
+    out.push(...diagnosticLines(this.doc));
+    return out.join("\n");
+  }
+
+  // each page under a heading, and a part's heading before the first page of each run in that part
+  private outlinePages(out: string[]): void {
+    const partTitle = new Map(this.doc.parts.map((p) => [p.id, p.title]));
+    let lastPart: string | null = null;
     for (const page of this.doc.pages) {
       const pid = page.part ?? null;
-      if (pid !== (lastPart ?? null)) {
-        lastPart = pid;
-        if (pid) out.push(`\n## [part ${pid}] ${partOf.get(pid)?.title ?? pid}`);
-      }
-      const summary = page.summary ? ` — ${page.summary}` : "";
-      const status = page.status && page.status !== "final" ? ` [status: ${page.status}]` : "";
-      out.push(`\n### [page ${page.id}] ${page.title}${status}${summary}${verdictOf(page)}`);
-      emitContent(page, 4);
+      if (pid !== lastPart && pid) out.push(`\n## [part ${pid}] ${partTitle.get(pid) ?? pid}`);
+      lastPart = pid;
+      out.push(pageHeading(page));
+      this.outlineContent(out, page, 4);
     }
-    // what the build and the render recorded (a node a face left out, a failed figure), so a reader
-    // sees the gaps rather than inferring them
-    const diags = this.doc.diagnostics ?? [];
-    if (diags.length) {
-      out.push("\n## Diagnostics");
-      for (const d of diags) out.push(`- [${d.severity}] ${d.item}: ${d.message}`);
-    }
-    return out.join("\n");
+  }
+
+  // a section's heading one level deeper per depth (a top-level section is ####), then its content
+  private outlineSection(out: string[], sec: any, level: number): void {
+    out.push(`${"#".repeat(level)} [section ${sec.id}] ${sec.title}${verdictOf(sec)}`);
+    this.outlineContent(out, sec, level + 1);
+  }
+
+  // walk a page/section's `content` in declaration order, a nested section where it stands; a
+  // section the content does not list follows (an older agent.json); with no content at all, fall
+  // back to figures-then-tables.
+  private outlineContent(out: string[], node: any, level: number): void {
+    const content: ContentRef[] = node.content ?? [];
+    const sections: any[] = node.sections ?? [];
+    if (content.length) for (const ref of content) this.outlineRef(out, ref, sections, level);
+    else out.push(...fallbackLines(node));
+    const listed = new Set(content.filter((r) => r.kind === "section").map((r) => r.id));
+    for (const sec of sections) if (!listed.has(sec.id)) this.outlineSection(out, sec, level);
+  }
+
+  private outlineRef(out: string[], { kind, id }: ContentRef, sections: any[], level: number): void {
+    const sec = kind === "section" ? sections.find((s) => s.id === id) : undefined;
+    if (sec) return this.outlineSection(out, sec, level);
+    // emit even an unresolvable id (stale agent.json) so it is visible, not silently dropped
+    out.push(`- [${kind} ${id}] ${this.refLabel(id)}`);
+  }
+
+  // a check leads with its result, so a reader sees PASS/FAIL before the expression
+  private refLabel(id: string): string {
+    const u = this.unit(id);
+    if (!u) return "(missing)";
+    return u.kind === "check" ? `${u.node.pass ? "PASS" : "FAIL"} ${u.label}` : u.label;
   }
 
   /** Case-insensitive substring search over labels, descriptions, summaries, code, and comments. */
   search(query: string): SearchHit[] {
     const q = query.toLowerCase();
-    const hits: SearchHit[] = [];
-    const consider = (u: Unit, field: string, text: string | null | undefined): void => {
-      if (!text) return;
-      const i = text.toLowerCase().indexOf(q);
-      if (i < 0) return;
-      const start = Math.max(0, i - 30);
-      const slice = text.slice(start, i + q.length + 30).replace(/\s+/g, " ").trim();
-      hits.push({
-        id: u.id,
-        kind: u.kind,
-        label: u.label,
-        field,
-        snippet: (start > 0 ? "…" : "") + slice + (i + q.length + 30 < text.length ? "…" : ""),
-      });
-    };
-    if (q.length === 0) return hits;
-    for (const u of this.all()) {
-      const n = u.node;
-      consider(u, "label", u.label);
-      if (u.kind === "figure") {
-        consider(u, "code", n.code);
-        if (typeof n.params === "string") consider(u, "params", n.params);
-        for (const c of n.comments ?? []) consider(u, "comment", `${c.author}: ${c.text}`);
-      } else if (u.kind === "code") {
-        consider(u, "code", n.source);
-      } else if (u.kind === "text") {
-        consider(u, "text", n.text);
-      } else if (u.kind === "raw") {
-        consider(u, "html", n.html);
-      } else if (u.kind === "table") {
-        const cellStr = (c: unknown) => (c == null ? "" : String(c)); // avoid [object Object] / nested-array join
-        consider(u, "cells", (n.rows ?? []).map((r: unknown[]) => r.map(cellStr).join(" ")).join(" | "));
-        for (const c of n.comments ?? []) consider(u, "comment", `${c.author}: ${c.text}`);
-      } else {
-        consider(u, "desc", n.desc);
-        if (u.kind === "page") consider(u, "summary", n.summary);
-        for (const c of n.comments ?? []) consider(u, "comment", `${c.author}: ${c.text}`);
-      }
-    }
-    return hits;
+    if (q.length === 0) return [];
+    return this.all().flatMap((u) =>
+      [["label", u.label] as Field, ...SEARCHED[u.kind](u.node)].flatMap((f) => hitIn(u, f, q)),
+    );
   }
 
   /** Absolute paths of a figure's rendered assets, resolved against the agent.json directory. */

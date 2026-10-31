@@ -17,7 +17,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync } from "node:fs";
 import { extname } from "node:path";
-import type { Atlas } from "./atlas.js";
+import type { Atlas, SearchHit, Unit } from "./atlas.js";
 import type { CommentStore } from "./comments.js";
 
 const MIME: Record<string, string> = {
@@ -34,6 +34,8 @@ const MIME: Record<string, string> = {
 // The unit kinds every Pinax face shows comments on; a comment on any other kind would be stored and
 // shown nowhere (Conventions › Faces), so add_comment refuses it.
 const COMMENT_CARRIERS = new Set(["page", "section", "figure", "table"]);
+// The gallery shows a bookmark on a section only, so set_bookmark refuses every other kind.
+const BOOKMARK_CARRIERS = new Set(["section"]);
 
 const mimeFor = (p: string): string => MIME[extname(p).toLowerCase()] ?? "application/octet-stream";
 const isTextual = (m: string): boolean =>
@@ -46,208 +48,225 @@ export interface ServerOptions {
   store?: CommentStore;
 }
 
+// ---- resources ------------------------------------------------------------------------------
+
+const RESOURCE_TEMPLATES = [
+  { uriTemplate: "pinax://figure/{id}", name: "Figure by id", mimeType: "application/json" },
+  { uriTemplate: "pinax://page/{id}", name: "Page by id", mimeType: "application/json" },
+  { uriTemplate: "pinax://section/{id}", name: "Section by id", mimeType: "application/json" },
+  { uriTemplate: "pinax://part/{id}", name: "Part by id", mimeType: "application/json" },
+  { uriTemplate: "pinax://table/{id}", name: "Table (@table node) by id", mimeType: "application/json" },
+  { uriTemplate: "pinax://asset/{figureId}/{index}", name: "A figure's rendered asset" },
+];
+
+const listResources = (atlas: Atlas) => [
+  {
+    uri: "pinax://document",
+    name: atlas.doc.title || "document",
+    description: "The document outline (parts, pages, sections, figures).",
+    mimeType: "text/markdown",
+  },
+  ...atlas.all().map((u) => ({
+    uri: `pinax://${u.kind}/${u.id}`,
+    name: `${u.kind}: ${u.label}`,
+    mimeType: "application/json",
+  })),
+];
+
+function readResource(atlas: Atlas, uri: string) {
+  if (uri === "pinax://document") {
+    return { contents: [{ uri, mimeType: "text/markdown", text: atlas.outline() }] };
+  }
+  const m = uri.match(/^pinax:\/\/([a-z]+)\/(.+)$/);
+  if (!m) throw new Error(`unsupported resource uri: ${uri}`);
+  const [, kind, rest] = m;
+  return kind === "asset" ? readAsset(atlas, uri, rest) : readUnit(atlas, uri, kind, rest);
+}
+
+// pinax://asset/{figureId}/{index}: the bytes of a figure's rendered asset, as text when textual
+function readAsset(atlas: Atlas, uri: string, rest: string) {
+  const am = rest.match(/^(.+)\/(\d+)$/);
+  if (!am) throw new Error(`bad asset uri (want pinax://asset/{figureId}/{index}): ${uri}`);
+  const a = atlas.figureAssets(am[1])[Number(am[2])];
+  if (!a) throw new Error(`no asset ${am[2]} for figure ${am[1]}`);
+  const mimeType = mimeFor(a.abs);
+  const buf = readFileSync(a.abs);
+  const body = isTextual(mimeType) ? { text: buf.toString("utf8") } : { blob: buf.toString("base64") };
+  return { contents: [{ uri, mimeType, ...body }] };
+}
+
+function readUnit(atlas: Atlas, uri: string, kind: string, id: string) {
+  const u = atlas.unit(id);
+  if (!u) throw new Error(`unknown ${kind}: ${id}`);
+  return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(u.node, null, 2) }] };
+}
+
+// ---- tools ----------------------------------------------------------------------------------
+
+type Args = Record<string, unknown>;
+type Reply = { content: { type: "text"; text: string }[]; isError?: boolean };
+interface Context {
+  atlas: Atlas;
+  store?: CommentStore;
+}
+interface Tool {
+  name: string;
+  description: string;
+  inputSchema: { type: "object"; [k: string]: unknown };
+  run: (ctx: Context, args: Args) => Reply;
+}
+
+const ok = (text: string): Reply => ({ content: [{ type: "text", text }] });
+const err = (text: string): Reply => ({ content: [{ type: "text", text }], isError: true });
+const str = (args: Args, key: string): string => String(args[key] ?? "");
+const inputs = (properties: object, required: string[] = []) => ({
+  type: "object" as const,
+  properties,
+  ...(required.length ? { required } : {}),
+  additionalProperties: false,
+});
+const disabled = (tool: string): Reply => err(`${tool} is disabled: start the server with --comments <path>`);
+
+// The error reply when `id` names no unit, or one whose kind is not in `kinds` (`why` says so).
+function refusal(atlas: Atlas, id: string, kinds: Set<string>, why: (u: Unit) => string): Reply | null {
+  const u = atlas.unit(id);
+  if (!u) return err(`no unit with id '${id}' in this document`);
+  return kinds.has(u.kind) ? null : err(why(u));
+}
+
+const formatHit = (h: SearchHit): string => `[${h.kind} ${h.id}] ${h.label}\n  ${h.field}: ${h.snippet}`;
+
+const READ_TOOLS: Tool[] = [
+  {
+    name: "outline",
+    description:
+      "Token-lean text outline of the whole document (parts -> pages -> sections -> every node, in reading order, each with its id).",
+    inputSchema: inputs({}),
+    run: ({ atlas }) => ok(atlas.outline()),
+  },
+  {
+    name: "get_unit",
+    description:
+      "Fetch one unit by its id. A figure returns what it claims and what is behind it: caption, where it was defined, generating code, params, image paths, comments, and its data file described exactly (path, columns, points per series) — read the file with get_figure_data. A table returns its header + native-typed rows.",
+    inputSchema: inputs({ id: { type: "string", description: "the unit id, e.g. a figure or table id" } }, ["id"]),
+    run: ({ atlas }, a) => {
+      const u = atlas.unit(str(a, "id"));
+      return u ? ok(JSON.stringify(u.node, null, 2)) : err(`no unit with id '${str(a, "id")}'`);
+    },
+  },
+  {
+    name: "search",
+    description:
+      "Case-insensitive substring search across titles, captions, descriptions, generating code, comments, and table cells. Returns matching unit ids with a snippet.",
+    inputSchema: inputs({ query: { type: "string" } }, ["query"]),
+    run: ({ atlas }, a) => {
+      const hits = atlas.search(str(a, "query"));
+      return ok(hits.length ? hits.map(formatHit).join("\n") : `no matches for '${str(a, "query")}'`);
+    },
+  },
+  {
+    name: "get_figure_data",
+    description:
+      "Read a figure's data file: every plotted point as CSV, the columns named by the plot's axis labels. Returns the CSV text.",
+    inputSchema: inputs({ id: { type: "string", description: "a figure id" } }, ["id"]),
+    run: ({ atlas }, a) => {
+      const d = atlas.figureData(str(a, "id"));
+      return d ? ok(readFileSync(d.abs, "utf8")) : err(`no data CSV for figure '${str(a, "id")}'`);
+    },
+  },
+];
+
+// The write tools mutate the comment store, so they are exposed only when one is configured.
+const WRITE_TOOLS: Tool[] = [
+  {
+    name: "add_comment",
+    description:
+      "Append a comment to a page, section, figure or table (by id) in the Pinax comment store (comments.toml); every face shows comments on those kinds only. The agent end of the comment loop: the note is written durably; re-render the document to bake it into the gallery / agent.json.",
+    inputSchema: inputs(
+      {
+        id: { type: "string", description: "the unit id to comment on" },
+        text: { type: "string", description: "the comment body (markdown)" },
+        author: { type: "string", description: "who is commenting (default 'llm')" },
+      },
+      ["id", "text"],
+    ),
+    run: addComment,
+  },
+  {
+    name: "set_bookmark",
+    description:
+      "Mark or unmark a section (by id) as bookmarked in the comment store; the gallery shows bookmarks on sections only.",
+    inputSchema: inputs({ id: { type: "string" }, on: { type: "boolean", description: "default true" } }, ["id"]),
+    run: setBookmark,
+  },
+];
+
+function addComment({ atlas, store }: Context, a: Args): Reply {
+  if (!store) return disabled("add_comment");
+  const id = str(a, "id");
+  const text = str(a, "text");
+  if (!id || !text) return err("add_comment requires 'id' and 'text'");
+  const refused = refusal(
+    atlas,
+    id,
+    COMMENT_CARRIERS,
+    (u) =>
+      `a comment on a ${u.kind} is shown nowhere: comment on a page, section, figure or table (the ${u.kind}'s container is '${u.parent ?? ""}')`,
+  );
+  if (refused) return refused;
+  const turns = store.addComment(id, text, String(a.author ?? "llm"));
+  return ok(
+    `comment added to '${id}' (now ${turns.length} turn(s)). Re-render the document to bake it into the gallery / agent.json.`,
+  );
+}
+
+function setBookmark({ atlas, store }: Context, a: Args): Reply {
+  if (!store) return disabled("set_bookmark");
+  const id = str(a, "id");
+  if (!id) return err("set_bookmark requires 'id'");
+  const refused = refusal(
+    atlas,
+    id,
+    BOOKMARK_CARRIERS,
+    (u) => `a bookmark on a ${u.kind} is shown nowhere: the gallery bookmarks sections only`,
+  );
+  if (refused) return refused;
+  if (a.on !== undefined && typeof a.on !== "boolean")
+    return err(`set_bookmark: 'on' must be a boolean, not ${JSON.stringify(a.on)}`);
+  const on = a.on ?? true;
+  store.setBookmark(id, on);
+  return ok(`bookmark for '${id}' set to ${on}.`);
+}
+
+// Every tool runs by name; a write tool called without a store says it is disabled.
+function callTool(ctx: Context, name: string, args: Args | undefined): Reply {
+  const tool = [...READ_TOOLS, ...WRITE_TOOLS].find((t) => t.name === name);
+  if (!tool) return err(`unknown tool: ${name}`);
+  try {
+    return tool.run(ctx, args ?? {});
+  } catch (e) {
+    return err(`error: ${(e as Error).message}`);
+  }
+}
+
+const listTools = (store?: CommentStore) =>
+  [...READ_TOOLS, ...(store ? WRITE_TOOLS : [])].map(({ run, ...def }) => def);
+
 export function createServer(atlas: Atlas, opts: ServerOptions = {}): Server {
   const server = new Server(
     { name: opts.name ?? "pinax-mcp", version: opts.version ?? "0.1.0" },
     { capabilities: { resources: {}, tools: {} } },
   );
-
-  // ---- resources ----------------------------------------------------------------------------
-
-  server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-    resources: [
-      {
-        uri: "pinax://document",
-        name: atlas.doc.title || "document",
-        description: "The document outline (parts, pages, sections, figures).",
-        mimeType: "text/markdown",
-      },
-      ...atlas.all().map((u) => ({
-        uri: `pinax://${u.kind}/${u.id}`,
-        name: `${u.kind}: ${u.label}`,
-        mimeType: "application/json",
-      })),
-    ],
-  }));
-
+  const ctx: Context = { atlas, store: opts.store };
+  server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: listResources(atlas) }));
   server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
-    resourceTemplates: [
-      { uriTemplate: "pinax://figure/{id}", name: "Figure by id", mimeType: "application/json" },
-      { uriTemplate: "pinax://page/{id}", name: "Page by id", mimeType: "application/json" },
-      { uriTemplate: "pinax://section/{id}", name: "Section by id", mimeType: "application/json" },
-      { uriTemplate: "pinax://part/{id}", name: "Part by id", mimeType: "application/json" },
-      { uriTemplate: "pinax://table/{id}", name: "Table (@table node) by id", mimeType: "application/json" },
-      { uriTemplate: "pinax://asset/{figureId}/{index}", name: "A figure's rendered asset" },
-    ],
+    resourceTemplates: RESOURCE_TEMPLATES,
   }));
-
-  server.setRequestHandler(ReadResourceRequestSchema, async (req) => {
-    const uri = req.params.uri;
-    if (uri === "pinax://document") {
-      return { contents: [{ uri, mimeType: "text/markdown", text: atlas.outline() }] };
-    }
-    const m = uri.match(/^pinax:\/\/([a-z]+)\/(.+)$/);
-    if (!m) throw new Error(`unsupported resource uri: ${uri}`);
-    const [, kind, rest] = m;
-
-    if (kind === "asset") {
-      const am = rest.match(/^(.+)\/(\d+)$/);
-      if (!am) throw new Error(`bad asset uri (want pinax://asset/{figureId}/{index}): ${uri}`);
-      const assets = atlas.figureAssets(am[1]);
-      const a = assets[Number(am[2])];
-      if (!a) throw new Error(`no asset ${am[2]} for figure ${am[1]}`);
-      const mimeType = mimeFor(a.abs);
-      const buf = readFileSync(a.abs);
-      return {
-        contents: [
-          isTextual(mimeType)
-            ? { uri, mimeType, text: buf.toString("utf8") }
-            : { uri, mimeType, blob: buf.toString("base64") },
-        ],
-      };
-    }
-
-    const u = atlas.unit(rest);
-    if (!u) throw new Error(`unknown ${kind}: ${rest}`);
-    return {
-      contents: [{ uri, mimeType: "application/json", text: JSON.stringify(u.node, null, 2) }],
-    };
-  });
-
-  // ---- tools --------------------------------------------------------------------------------
-
-  // The write tools mutate the comment store, so they are exposed only when one is configured.
-  const writeTools = [
-    {
-      name: "add_comment",
-      description:
-        "Append a comment to a page, section, figure or table (by id) in the Pinax comment store (comments.toml); every face shows comments on those kinds only. The agent end of the comment loop: the note is written durably; re-render the document to bake it into the gallery / agent.json.",
-      inputSchema: {
-        type: "object",
-        properties: {
-          id: { type: "string", description: "the unit id to comment on" },
-          text: { type: "string", description: "the comment body (markdown)" },
-          author: { type: "string", description: "who is commenting (default 'llm')" },
-        },
-        required: ["id", "text"],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: "set_bookmark",
-      description: "Mark or unmark a unit (by id) as bookmarked in the comment store.",
-      inputSchema: {
-        type: "object",
-        properties: { id: { type: "string" }, on: { type: "boolean", description: "default true" } },
-        required: ["id"],
-        additionalProperties: false,
-      },
-    },
-  ];
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: [
-      {
-        name: "outline",
-        description:
-          "Token-lean text outline of the whole document (parts -> pages -> sections -> every node, in reading order, each with its id).",
-        inputSchema: { type: "object", properties: {}, additionalProperties: false },
-      },
-      {
-        name: "get_unit",
-        description:
-          "Fetch one unit by its id. A figure returns what it claims and what is behind it: caption, where it was defined, generating code, params, image paths, comments, and its data file described exactly (path, columns, points per series) — read the file with get_figure_data. A table returns its header + native-typed rows.",
-        inputSchema: {
-          type: "object",
-          properties: { id: { type: "string", description: "the unit id, e.g. a figure or table id" } },
-          required: ["id"],
-          additionalProperties: false,
-        },
-      },
-      {
-        name: "search",
-        description:
-          "Case-insensitive substring search across titles, captions, descriptions, generating code, comments, and table cells. Returns matching unit ids with a snippet.",
-        inputSchema: {
-          type: "object",
-          properties: { query: { type: "string" } },
-          required: ["query"],
-          additionalProperties: false,
-        },
-      },
-      {
-        name: "get_figure_data",
-        description:
-          "Read a figure's data file: every plotted point as CSV, the columns named by the plot's axis labels. Returns the CSV text.",
-        inputSchema: {
-          type: "object",
-          properties: { id: { type: "string", description: "a figure id" } },
-          required: ["id"],
-          additionalProperties: false,
-        },
-      },
-      ...(opts.store ? writeTools : []),
-    ],
-  }));
-
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const { name, arguments: args } = req.params;
-    const ok = (text: string) => ({ content: [{ type: "text" as const, text }] });
-    const err = (text: string) => ({ content: [{ type: "text" as const, text }], isError: true });
-    try {
-      if (name === "outline") return ok(atlas.outline());
-      if (name === "get_unit") {
-        const id = String((args as Record<string, unknown>)?.id ?? "");
-        const u = atlas.unit(id);
-        return u ? ok(JSON.stringify(u.node, null, 2)) : err(`no unit with id '${id}'`);
-      }
-      if (name === "search") {
-        const query = String((args as Record<string, unknown>)?.query ?? "");
-        const hits = atlas.search(query);
-        if (hits.length === 0) return ok(`no matches for '${query}'`);
-        return ok(
-          hits.map((h) => `[${h.kind} ${h.id}] ${h.label}\n  ${h.field}: ${h.snippet}`).join("\n"),
-        );
-      }
-      if (name === "get_figure_data") {
-        const id = String((args as Record<string, unknown>)?.id ?? "");
-        const d = atlas.figureData(id);
-        if (!d) return err(`no data CSV for figure '${id}'`);
-        return ok(readFileSync(d.abs, "utf8"));
-      }
-      if (name === "add_comment") {
-        if (!opts.store) return err("add_comment is disabled: start the server with --comments <path>");
-        const a = (args as Record<string, unknown>) ?? {};
-        const id = String(a.id ?? "");
-        const text = String(a.text ?? "");
-        if (!id || !text) return err("add_comment requires 'id' and 'text'");
-        const unit = atlas.unit(id);
-        if (!unit) return err(`no unit with id '${id}' in this document`);
-        if (!COMMENT_CARRIERS.has(unit.kind))
-          return err(
-            `a comment on a ${unit.kind} is shown nowhere: comment on a page, section, figure or table (the ${unit.kind}'s container is '${unit.parent ?? ""}')`,
-          );
-        const turns = opts.store.addComment(id, text, String(a.author ?? "llm"));
-        return ok(
-          `comment added to '${id}' (now ${turns.length} turn(s)). Re-render the document to bake it into the gallery / agent.json.`,
-        );
-      }
-      if (name === "set_bookmark") {
-        if (!opts.store) return err("set_bookmark is disabled: start the server with --comments <path>");
-        const a = (args as Record<string, unknown>) ?? {};
-        const id = String(a.id ?? "");
-        if (!id) return err("set_bookmark requires 'id'");
-        if (!atlas.unit(id)) return err(`no unit with id '${id}' in this document`);
-        const on = a.on === undefined ? true : Boolean(a.on);
-        opts.store.setBookmark(id, on);
-        return ok(`bookmark for '${id}' set to ${on}.`);
-      }
-      return err(`unknown tool: ${name}`);
-    } catch (e) {
-      return err(`error: ${(e as Error).message}`);
-    }
-  });
-
+  server.setRequestHandler(ReadResourceRequestSchema, async (req) => readResource(atlas, req.params.uri));
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listTools(opts.store) }));
+  server.setRequestHandler(CallToolRequestSchema, async (req) =>
+    callTool(ctx, req.params.name, req.params.arguments),
+  );
   return server;
 }
 

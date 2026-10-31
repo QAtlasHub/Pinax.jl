@@ -8,6 +8,7 @@ import { parse } from "smol-toml";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CommentStore } from "../src/comments.js";
+import { everyNodeVariant } from "./variant.js";
 
 const tmpToml = (): string => join(mkdtempSync(join(tmpdir(), "pinax-mcp-")), "comments.toml");
 
@@ -108,6 +109,8 @@ test("add_comment is exposed only with --comments and persists over MCP", { time
     // commenting on an id not in the document is rejected
     const bad = await client.callTool({ name: "add_comment", arguments: { id: "ghost", text: "x" } });
     assert.equal(bad.isError, true);
+    const noText = await client.callTool({ name: "add_comment", arguments: { id: "p1_fig1" } });
+    assert.match((noText.content as any)[0].text, /add_comment requires 'id' and 'text'/);
 
     // a table carries comments; a check does not (no face would show it), so it is refused
     const tbl = await client.callTool({ name: "add_comment", arguments: { id: "p1_tbl1", text: "ok" } });
@@ -137,4 +140,79 @@ test("without --comments the write tools are absent (read-only by default)", { t
   } finally {
     await client.close();
   }
+});
+
+test("set_bookmark marks only a section, and 'on' must be a boolean", { timeout: 20000 }, async () => {
+  const cf = tmpToml();
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry, "--agent", fixture, "--comments", cf],
+  });
+  const client = new Client({ name: "pinax-mcp-test", version: "0" }, { capabilities: {} });
+  await client.connect(transport);
+  const call = (args: Record<string, unknown>) => client.callTool({ name: "set_bookmark", arguments: args });
+  const bookmarks = () => ({ ...(parse(readFileSync(cf, "utf8")) as any).bookmark });
+  try {
+    // a section is bookmarked (the default is on), and unbookmarked with on: false
+    const on = await call({ id: "s1" });
+    assert.match((on.content as any)[0].text, /bookmark for 's1' set to true/);
+    assert.deepEqual(bookmarks(), { s1: true });
+    await call({ id: "s1", on: false });
+    assert.deepEqual(bookmarks(), { s1: false });
+
+    // the gallery shows bookmarks on sections only: any other kind is refused, naming the kind
+    for (const [id, kind] of [
+      ["p1", "page"],
+      ["p1_fig1", "figure"],
+      ["p1_tbl1", "table"],
+    ]) {
+      const res = await call({ id });
+      assert.equal(res.isError, true, id);
+      assert.match((res.content as any)[0].text, new RegExp(`on a ${kind}`), id);
+    }
+
+    assert.match(((await call({})).content as any)[0].text, /set_bookmark requires 'id'/);
+    const ghost = await call({ id: "ghost" });
+    assert.match((ghost.content as any)[0].text, /no unit with id 'ghost'/);
+
+    // a string is not a boolean: "false" must not set the bookmark
+    const str = await call({ id: "s1", on: "false" });
+    assert.equal(str.isError, true);
+    assert.match((str.content as any)[0].text, /'on' must be a boolean/);
+    assert.deepEqual(bookmarks(), { s1: false });
+  } finally {
+    await client.close();
+  }
+});
+
+test("add_comment takes a page and a section, and refuses what no face shows a comment on", { timeout: 20000 }, async () => {
+  const cf = tmpToml();
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry, "--agent", everyNodeVariant(), "--comments", cf],
+  });
+  const client = new Client({ name: "pinax-mcp-test", version: "0" }, { capabilities: {} });
+  await client.connect(transport);
+  const comment = (id: string) => client.callTool({ name: "add_comment", arguments: { id, text: "n" } });
+  try {
+    for (const id of ["p1", "s1"]) {
+      const res = await comment(id);
+      assert.equal(res.isError, undefined, id);
+      assert.match((res.content as any)[0].text, new RegExp(`comment added to '${id}'`));
+    }
+    for (const [id, kind] of [
+      ["grp", "part"],
+      ["p1_txt1", "text"],
+      ["p1_code1", "code"],
+      ["p1_raw1", "raw"],
+    ]) {
+      const res = await comment(id);
+      assert.equal(res.isError, true, id);
+      assert.match((res.content as any)[0].text, new RegExp(`a comment on a ${kind} is shown nowhere`), id);
+    }
+  } finally {
+    await client.close();
+  }
+  const data = parse(readFileSync(cf, "utf8")) as any;
+  assert.deepEqual(Object.keys(data.comment).sort(), ["p1", "s1"]);
 });
