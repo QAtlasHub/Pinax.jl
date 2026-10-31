@@ -1,7 +1,6 @@
 using Pinax
 using Test
 using Downloads: Downloads
-using Logging: Logging
 
 @testset "serve: static HTTP preview server" begin
     tmp = mktempdir()
@@ -227,7 +226,7 @@ end
     @test startswith(resp, "HTTP/1.1 500 Internal Server Error\r\n")
     # a client that went away before the response: nothing to answer, nothing to warn about
     gone = _GoneConn(IOBuffer("GET /index.html HTTP/1.1\r\n\r\n"))
-    @test_logs min_level = Logging.Warn Pinax._serve_handle(gone, root)
+    @test_logs min_level = Base.CoreLogging.Warn Pinax._serve_handle(gone, root)
     # a failure on a client that has also gone: still a warning, and the 500 it cannot receive is
     # let go rather than thrown out of the handler
     gone = _GoneConn(IOBuffer("GET /%00 HTTP/1.1\r\n\r\n"))
