@@ -431,13 +431,14 @@ function _verbatim_code(file, line, expr)
     return nothing
 end
 
-# Where each token of `text`'s first line starts: where a peeled-off macro call may end.
+# Where each token of `text`'s first line starts, as byte indices (what `SubString` takes): where a
+# peeled-off macro call may end. A multi-byte character before a token does not shift it.
 function _first_line_starts(text)
-    nl = something(findfirst('\n', text), length(text) + 1)
     starts = Int[1]
-    for (j, ch) in enumerate(text)
-        j >= nl && break
-        isspace(ch) && j < length(text) && push!(starts, j + 1)
+    for (j, ch) in pairs(text)
+        ch == '\n' && break
+        k = nextind(text, j)
+        isspace(ch) && k <= ncodeunits(text) && push!(starts, k)
     end
     return starts
 end
