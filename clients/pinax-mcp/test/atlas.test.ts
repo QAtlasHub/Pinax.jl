@@ -1,14 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
 import { loadAtlas } from "../src/atlas.js";
-
-// compiled to dist/test/, so the source fixture is two levels up at <pkg>/test/fixtures
-const here = dirname(fileURLToPath(import.meta.url));
-const fixture = resolve(here, "../../test/fixtures/sample");
+import { everyNodeVariant, sample as fixture, writeVariant } from "./variant.js";
 
 test("indexes every unit by id and kind, including @table nodes", () => {
   const atlas = loadAtlas(fixture);
@@ -56,11 +49,10 @@ test("outline interleaves figures and tables in declaration order", () => {
 
 test("outline puts a section where it stands in its container's content", () => {
   // a section written between two blocks is outlined between them, as every face reads it
-  const doc = JSON.parse(readFileSync(resolve(fixture, "agent.json"), "utf8"));
-  const p1 = doc.pages.find((p: { id: string }) => p.id === "p1");
-  p1.content = [p1.content[0], { kind: "section", id: "s1" }, ...p1.content.slice(1)];
-  const dir = mkdtempSync(join(tmpdir(), "outline-"));
-  writeFileSync(join(dir, "agent.json"), JSON.stringify(doc));
+  const dir = writeVariant((doc) => {
+    const p1 = doc.pages.find((p: { id: string }) => p.id === "p1");
+    p1.content = [p1.content[0], { kind: "section", id: "s1" }, ...p1.content.slice(1)];
+  });
   const o = loadAtlas(dir).outline();
   const at = (s: string) => o.indexOf(s);
   assert.ok(at("[text p1_txt1]") < at("[section s1]"));
@@ -76,6 +68,27 @@ test("search matches caption, code, comment, and table cells", () => {
   assert.ok(atlas.search("2.27").some((h) => h.id === "p1_tbl1" && h.field === "cells")); // a cell value
   assert.equal(atlas.search("no-such-token-xyz").length, 0);
   assert.equal(atlas.search("").length, 0);
+});
+
+test("search reaches code, prose, raw html, and table, page and section comments", () => {
+  const atlas = loadAtlas(everyNodeVariant());
+  const found = (q: string) => atlas.search(q).map((h) => ({ id: h.id, kind: h.kind, field: h.field }));
+  assert.deepEqual(found("zqcodetoken"), [{ id: "p1_code1", kind: "code", field: "code" }]);
+  assert.deepEqual(found("zqtexttoken"), [{ id: "p1_txt1", kind: "text", field: "text" }]);
+  assert.deepEqual(found("zqrawtoken"), [{ id: "p1_raw1", kind: "raw", field: "html" }]);
+  assert.deepEqual(found("zqtablecomment"), [{ id: "p1_tbl1", kind: "table", field: "comment" }]);
+  assert.deepEqual(found("zqpagecomment"), [{ id: "p1", kind: "page", field: "comment" }]);
+  assert.deepEqual(found("zqsectioncomment"), [{ id: "s1", kind: "section", field: "comment" }]);
+  // a comment hit reads "author: text"
+  assert.equal(atlas.search("zqpagecomment")[0].snippet, "me: zqpagecomment");
+});
+
+test("a code block is labelled by its caption, else its first line; prose by its first line", () => {
+  const atlas = loadAtlas(everyNodeVariant());
+  assert.equal(atlas.unit("p1_code1")!.label, "first_line()");
+  assert.equal(atlas.unit("p1_code2")!.label, "a captioned block");
+  assert.equal(atlas.unit("p1_txt1")!.label, "headline");
+  assert.equal(atlas.unit("p1_raw1")!.label, "<div>");
 });
 
 test("figure assets + full-data csv resolve to absolute paths", () => {

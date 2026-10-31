@@ -8,6 +8,7 @@ import { parse } from "smol-toml";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CommentStore } from "../src/comments.js";
+import { everyNodeVariant } from "./variant.js";
 
 const tmpToml = (): string => join(mkdtempSync(join(tmpdir(), "pinax-mcp-")), "comments.toml");
 
@@ -176,4 +177,36 @@ test("set_bookmark marks only a section, and 'on' must be a boolean", { timeout:
   } finally {
     await client.close();
   }
+});
+
+test("add_comment takes a page and a section, and refuses what no face shows a comment on", { timeout: 20000 }, async () => {
+  const cf = tmpToml();
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry, "--agent", everyNodeVariant(), "--comments", cf],
+  });
+  const client = new Client({ name: "pinax-mcp-test", version: "0" }, { capabilities: {} });
+  await client.connect(transport);
+  const comment = (id: string) => client.callTool({ name: "add_comment", arguments: { id, text: "n" } });
+  try {
+    for (const id of ["p1", "s1"]) {
+      const res = await comment(id);
+      assert.equal(res.isError, undefined, id);
+      assert.match((res.content as any)[0].text, new RegExp(`comment added to '${id}'`));
+    }
+    for (const [id, kind] of [
+      ["grp", "part"],
+      ["p1_txt1", "text"],
+      ["p1_code1", "code"],
+      ["p1_raw1", "raw"],
+    ]) {
+      const res = await comment(id);
+      assert.equal(res.isError, true, id);
+      assert.match((res.content as any)[0].text, new RegExp(`a comment on a ${kind} is shown nowhere`), id);
+    }
+  } finally {
+    await client.close();
+  }
+  const data = parse(readFileSync(cf, "utf8")) as any;
+  assert.deepEqual(Object.keys(data.comment).sort(), ["p1", "s1"]);
 });
