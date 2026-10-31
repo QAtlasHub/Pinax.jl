@@ -1,7 +1,8 @@
 // The MCP frontend over an Atlas. Generic: it exposes whatever units the agent.json contains.
 //
 //   resources  pinax://document                     the outline (text)
-//              pinax://{kind}/{id}                   any part/page/section/figure node (JSON)
+//              pinax://{kind}/{id}                   any unit: a part, page or section, or a text,
+//                                                    figure, table, code, check or raw node (JSON)
 //              pinax://asset/{figureId}/{index}      a figure's rendered asset (image/pdf bytes)
 //   tools      outline()                             the document tree, token-lean
 //              get_unit(id)                           one unit; a figure -> its verification substrate
