@@ -1387,9 +1387,9 @@ function _add_node!(c, k::Symbol, node)
     return node
 end
 
-function _content_items(c)
-    return [(k, getfield(c, _content_field(c, k))[i]) for (k, i) in c.content]
-end
+# One content entry `kind => index` of `c` as `(kind, node)`.
+_content_item(c, (k, i)) = (k, getfield(c, _content_field(c, k))[i])
+_content_items(c) = [_content_item(c, ki) for ki in c.content]
 
 # A node (or content kind) a face has no form for: every content walk ends in this, so a node type
 # added to `_content_items` fails loudly in each face until that face handles it — never printed
@@ -1494,12 +1494,11 @@ function _set_caption!(s)
         "Pinax: @caption in \"$(c.anchor)\" follows a @test_broken / @test_skip, which records no " *
         "check — @caption names only the node written immediately before it",
     )
-    kind, i = c.content[end]
+    kind, node = _content_item(c, c.content[end])
     kind in (:check, :figure, :table, :code) || error(
         "Pinax: @caption in \"$(c.anchor)\" follows a $(kind), which carries no caption — " *
         "@caption names only the node written immediately before it",
     )
-    node = _content_items(c)[end][2]
     # one caption per node: `caption=` and then `@caption`, or two `@caption`s, is an error
     (node === CTX.captioned || (kind !== :check && !isempty(node.caption))) && error(
         "Pinax: @caption in \"$(c.anchor)\" names a $(kind) that already has a caption — a node " *
