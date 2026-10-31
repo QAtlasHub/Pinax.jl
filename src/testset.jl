@@ -1275,17 +1275,9 @@ end
 # flat, so two same-named test files or sections would otherwise clash). `seen` accumulates every
 # page/section id assigned in the document; page ids are global, section ids are page-qualified.
 function _unique_id!(seen::Set{Symbol}, base::Symbol, desc)
-    if !(base in seen)
-        push!(seen, base)
-        return base
-    end
-    k = 2
-    while Symbol(base, "-", k) in seen
-        k += 1
-    end
-    id = Symbol(base, "-", k)
+    id = _free_id(base, in(seen))
     push!(seen, id)
-    _diag!(
+    id === base || _diag!(
         WARNING,
         string(id),
         "duplicate id \"$(base)\" (from \"$(desc)\") → disambiguated to $(id); rename the testset to fix",
@@ -1324,47 +1316,60 @@ function _emit_node!(
     # Nested testsets become pages (a file) or sections (a group). @pinaxignore'd ones are skipped
     # HERE only — never in the counts, so an ignored subtree still fails the suite if it is red.
     for ch in n.children
-        ch.ignore && continue
-        # A file is a page only at the top level: a page is never written inside another page
-        # (Conventions › Structure), so a file-like testset inside one is a section of it.
-        if page_when(ch.description) && _ctx_container() === nothing
-            # Page ids are GLOBAL. Under a CI matrix (issue #69 K) the same file appears in every cell,
-            # so `id_prefix` qualifies the id per cell — distinct pages under distinct `@part`s, no
-            # spurious duplicate-id collisions.
-            _emit_page_node!(ch, ch, page_when, seen, acc; id_prefix)
-        elseif _ctx_container() === nothing
-            # At the root with no page open, a non-file testset is a GROUPING (e.g. the top-level
-            # `@testset "MyPkg"` that most runtests wrap everything in) → flatten it: its children
-            # become top-level pages, exactly as `_collect_rows!` already treats it. A section needs a
-            # page, which a grouping at this level does not provide.
-            _emit_node!(ch, page_when, seen, acc; id_prefix=id_prefix)
-        else
-            # A child that parses as a canonical binding but is being rendered as a SECTION means its
-            # siblings are not a consistent sweep (mixed/partial) — so we did not fold. Say so once
-            # (invariant III: never fall back to silence), then render it as an ordinary section.
-            if _parse_binding(ch.description) !== nothing && !(:_sweep_warned in seen)
-                push!(seen, :_sweep_warned)
-                _diag!(
-                    WARNING,
-                    "sweep",
-                    "a `@testset for` sample could not be folded (its siblings are not a consistent " *
-                    "canonical sweep) — rendered as a section instead",
-                )
-            end
-            # Section ids are PAGE-QUALIFIED (`<pageid>_<slug>`) so a "conv" section in two files does
-            # not clash; a true sibling collision within one page then gets the `-2` suffix.
-            sid = _unique_id!(
-                seen, Symbol(current_page().id, :_, _slug(ch.description)), ch.description
-            )
-            _enter_section!(sid, ch.description; summary=_summary_line(ch))
-            try
-                _emit_node!(ch, page_when, seen, acc; id_prefix=id_prefix)
-            finally
-                _exit_section!()
-            end
-        end
+        ch.ignore || _emit_child!(ch, page_when, seen, acc, id_prefix)
     end
     return acc
+end
+
+function _emit_child!(ch::TestNode, page_when, seen, acc, id_prefix)
+    if _ctx_container() !== nothing
+        # A file is a page only at the top level: a page is never written inside another page
+        # (Conventions › Structure), so a file-like testset inside one is a section of it.
+        _emit_section_node!(ch, page_when, seen, acc, id_prefix)
+    elseif page_when(ch.description)
+        # Page ids are GLOBAL. Under a CI matrix (issue #69 K) the same file appears in every cell,
+        # so `id_prefix` qualifies the id per cell — distinct pages under distinct `@part`s, no
+        # spurious duplicate-id collisions.
+        _emit_page_node!(ch, ch, page_when, seen, acc; id_prefix)
+    else
+        # At the root with no page open, a non-file testset is a GROUPING (e.g. the top-level
+        # `@testset "MyPkg"` that most runtests wrap everything in) → flatten it: its children
+        # become top-level pages, exactly as `_collect_rows!` already treats it. A section needs a
+        # page, which a grouping at this level does not provide.
+        _emit_node!(ch, page_when, seen, acc; id_prefix=id_prefix)
+    end
+    return acc
+end
+
+function _emit_section_node!(ch::TestNode, page_when, seen, acc, id_prefix)
+    _warn_unfolded_sample!(ch, seen)
+    # Section ids are PAGE-QUALIFIED (`<pageid>_<slug>`) so a "conv" section in two files does
+    # not clash; a true sibling collision within one page then gets the `-2` suffix.
+    sid = _unique_id!(
+        seen, Symbol(current_page().id, :_, _slug(ch.description)), ch.description
+    )
+    _enter_section!(sid, ch.description; summary=_summary_line(ch))
+    try
+        _emit_node!(ch, page_when, seen, acc; id_prefix=id_prefix)
+    finally
+        _exit_section!()
+    end
+    return acc
+end
+
+# A child that parses as a canonical binding but is being rendered as a SECTION means its siblings
+# are not a consistent sweep (mixed/partial) — so it was not folded. Say so once (invariant III:
+# never fall back to silence); it is then rendered as an ordinary section.
+function _warn_unfolded_sample!(ch::TestNode, seen)
+    (_parse_binding(ch.description) === nothing || :_sweep_warned in seen) && return nothing
+    push!(seen, :_sweep_warned)
+    _diag!(
+        WARNING,
+        "sweep",
+        "a `@testset for` sample could not be folded (its siblings are not a consistent " *
+        "canonical sweep) — rendered as a section instead",
+    )
+    return nothing
 end
 
 # Move THIS node's own captured content (texts + figures/tables/raws + checks) into the CTX
