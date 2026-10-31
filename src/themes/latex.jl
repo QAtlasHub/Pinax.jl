@@ -324,7 +324,7 @@ end
 
 function emit_section(theme::LaTeXBase, sec, pg, ctx)
     println(ctx.io, _latex_heading(sec.depth, sec.title, sec.anchor, ctx))
-    assetdir = joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor)
+    assetdir = _figure_dir(ctx.outdir, pg, sec; assets=false)
     return _latex_body!(theme, sec, pg, assetdir, ctx)
 end
 
@@ -332,7 +332,7 @@ function emit_page(theme::LaTeXBase, pg, ctx)
     io = ctx.io
     println(io, _latex_heading(1, pg.title, pg.anchor, ctx))   # a page = one \section
     pg.status === :draft && println(io, "\\par\\noindent\\textit{Draft.}")   # its maturity, as every face shows it
-    return _latex_body!(theme, pg, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
+    return _latex_body!(theme, pg, pg, _figure_dir(ctx.outdir, pg; assets=false), ctx)
 end
 
 function emit_document(

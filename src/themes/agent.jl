@@ -306,7 +306,7 @@ function _agent_container_fields(theme::AgentBase, c, pg, assetdir, ctx)
 end
 
 function emit_section(theme::AgentBase, sec, pg, ctx)
-    assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
+    assetdir = _figure_dir(ctx.outdir, pg, sec)
     return _json_object(
         ctx.io,
         "id" => _jsonstr(string(sec.id)),
@@ -317,7 +317,7 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
 end
 
 function emit_page(theme::AgentBase, pg, ctx)
-    assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor)
+    assetdir = _figure_dir(ctx.outdir, pg)
     return _json_object(
         ctx.io,
         "id" => _jsonstr(string(pg.id)),

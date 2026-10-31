@@ -27,6 +27,18 @@ function resolve!(doc::Document)
     return doc
 end
 
+# Where a face writes a container's figures: `<outdir>/assets/figures/<page>[/<section>]`, by the
+# anchors; a nested section's directory sits under its page, by its own anchor. LaTeX keeps them out
+# of `assets` (`assets=false`): `<outdir>/figures/…`.
+function _figure_dir(outdir, pg, sec=nothing; assets::Bool=true)
+    root = assets ? joinpath(outdir, "assets", "figures") : joinpath(outdir, "figures")
+    return if sec === nothing
+        joinpath(root, pg.anchor)
+    else
+        joinpath(root, pg.anchor, sec.anchor)
+    end
+end
+
 # Every figure of a page in display order: page-level (page-as-leaf) first, then each section's.
 function _page_figs(pg::Page)
     figs = copy(pg.figures)

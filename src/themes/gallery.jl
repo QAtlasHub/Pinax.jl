@@ -818,14 +818,7 @@ function emit_page(theme::GalleryBase, pg, ctx)
     pg.summary === nothing ||
         println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
     _emit_checks!(theme, pg, ctx)
-    _emit_content(
-        theme,
-        pg,
-        joinpath(ctx.outdir, "assets", "figures", pg.anchor),
-        pg.layout,
-        ctx;
-        page=pg,
-    )
+    _emit_content(theme, pg, _figure_dir(ctx.outdir, pg), pg.layout, ctx; page=pg)
     emit_comments(theme, pg.anchor, ctx)   # the page (file node) can carry its own comments
     return nothing
 end
@@ -1273,7 +1266,7 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
         close_h,
     )
     _emit_checks!(theme, sec, ctx)
-    assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
+    assetdir = _figure_dir(ctx.outdir, pg, sec)
     if sec.facet isa AbstractString
         # faceting regroups figures by a param axis, so declaration order does not apply to them;
         # everything else follows the facet groups, in declaration order (#168).
