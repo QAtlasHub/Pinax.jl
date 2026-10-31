@@ -227,4 +227,28 @@ Test.finish(r::_StructIso) = r
             @section :s "S" by = ("a", "b") begin end
         end
     end
+
+    @testset "the gallery numbers figures and equations in reading order" begin
+        svg = joinpath(tmp, "n.svg")
+        write(svg, "<svg xmlns='http://www.w3.org/2000/svg'/>")
+        Pinax.reset!()
+        @page :p "P" begin
+            @figure svg id = :figA
+            @section :s "S" begin
+                @desc md"$$ b = 1 $$"
+                @figure svg id = :figB
+                @section :t "T" begin
+                    @figure svg id = :figC
+                end
+                @figure svg id = :figD
+            end
+            @desc md"$$ e = 2 $$"
+            @figure svg id = :figE
+        end
+        nums, _, eqseq = Pinax._gallery_numbers(Pinax.current_document())
+        @test [nums[string("fig", c)] for c in "ABCDE"] == ["Fig. 1", "Fig. 2", "Fig. 3", "Fig. 4", "Fig. 5"]
+        @test nums["s"] == "Sec. 1" && nums["t"] == "Sec. 2"   # sections keep their depth-first numbers
+        eq(anchor) = only(only(v for (k, v) in eqseq if startswith(k, anchor)))[2]
+        @test eq("s_txt_") < eq("p_txt_")   # the section's equation comes first in reading order
+    end
 end

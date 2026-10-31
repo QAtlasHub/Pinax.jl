@@ -384,7 +384,7 @@ end
 
 # Theme-side numbering (notes 03/06). Assigns Page/Sec./Fig./Eq. numbers in document order — continuous,
 # or reset per page (numbering=:page) or per part (numbering=:part) — scanning desc/caption sources for
-# display equations. Page-level figures (page-as-leaf) are numbered before the page's sections.
+# display equations, in reading order: a section's figures come where the section stands.
 # Returns (nums, ids_eq, eqseq).
 function _gallery_numbers(doc::Document)
     nums = Dict{String,String}()
@@ -408,12 +408,22 @@ function _gallery_numbers(doc::Document)
         nums[pg.anchor] = string(
             numberer(:page, _counters(pagen, pid, partn, pg.part, secn, fign, 0, eqn))
         )
-        # A container's prose and figures in declaration order: each figure is numbered, and the
-        # display equations in prose and captions are numbered as a reader meets them.
+        # A container's content in reading order: each figure is numbered, the display equations in
+        # prose and captions are numbered as a reader meets them, and a child section is numbered and
+        # walked where it stands, so whatever follows it comes after its own figures.
         function walk!(c)
             subfig = 0
             for (kind, item) in _content_items(c)
-                if kind === :text
+                if kind === :section
+                    secn += 1
+                    nums[item.anchor] = string(
+                        numberer(
+                            :section,
+                            _counters(pagen, pid, partn, pg.part, secn, fign, 0, eqn),
+                        ),
+                    )
+                    walk!(item)
+                elseif kind === :text
                     eqn = _scan_eqs!(
                         item.source,
                         item.anchor,
@@ -448,15 +458,6 @@ function _gallery_numbers(doc::Document)
             end
         end
         walk!(pg)
-        for sec in _all_sections(pg)
-            secn += 1
-            nums[sec.anchor] = string(
-                numberer(
-                    :section, _counters(pagen, pid, partn, pg.part, secn, fign, 0, eqn)
-                ),
-            )
-            walk!(sec)
-        end
     end
     return nums, ids_eq, eqseq
 end
