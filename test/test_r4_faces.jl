@@ -135,3 +135,86 @@ Test.finish(r::_R4Iso) = r
     # a render that records no diagnostic removes the sidecar an earlier render left
     @test !isfile(joinpath(out, "diagnostics.md"))
 end
+
+# The check table of the section titled `title` in a gallery page: from its verdict band to the end of
+# its table.
+function _r4_checkset(html, title)
+    i = findfirst(">$(title)   ", html)
+    j = findnext("</tbody></table></div>", html, last(i))
+    return html[first(i):last(j)]
+end
+_r4_rows(t, cls) = count("<tr class=\"$(cls)\">", t)
+
+@testset "gallery: the check table's row cap, its summary row, and its cells" begin
+    tmp = mktempdir()
+    Pinax.reset!(; title="T")
+    line = @__LINE__
+    @testset _R4Iso "iso" begin
+        @page :p "P" begin
+            @section :big "Big" begin             # over the cap: failures first, then the count
+                for i in 1:250
+                    @test i < 0
+                end
+                for i in 1:100
+                    @test i > 0
+                end
+            end
+            @section :edge "Edge" begin           # exactly at the cap: every row, as written
+                @test true
+                for i in 1:199
+                    @test i < 0
+                end
+            end
+            @section :room "Room" begin           # few failures: the passes fill the room left
+                for i in 1:10
+                    @test i < 0
+                end
+                for i in 1:240
+                    @test i > 0
+                end
+            end
+            @section :cells "Cells" begin
+                @test isapprox(2.0, 1.5; rtol=0.5)
+                @test 1 + 1 == 2
+            end
+        end
+    end
+    at(n) = "test/test_r4_faces.jl:$(line + n)"
+    html = read(Pinax.render(; out=tmp, theme=:gallery), String)
+
+    big = _r4_checkset(html, "Big")
+    @test _r4_rows(big, "pinax-fail") == 200 && _r4_rows(big, "pinax-pass") == 0
+    @test occursin(
+        "<tr class=\"pinax-more\"><td></td><td></td><td colspan=\"4\">… 50 failing + 100 passing " *
+        "more not shown (all 350 checks are in <code>agent.json</code>)</td></tr>",
+        big,
+    )
+
+    edge = _r4_checkset(html, "Edge")
+    @test _r4_rows(edge, "pinax-fail") == 199 && _r4_rows(edge, "pinax-pass") == 1
+    @test !occursin("pinax-more", edge)
+    # in declaration order: the passing check, written first, is the first row
+    @test occursin("<tbody>\n<tr class=\"pinax-pass\">", edge)
+
+    room = _r4_checkset(html, "Room")
+    @test _r4_rows(room, "pinax-fail") == 10 && _r4_rows(room, "pinax-pass") == 190
+    @test occursin(
+        "<td colspan=\"4\">… 50 passing more not shown (all 250 checks are in", room
+    )
+
+    cells = _r4_checkset(html, "Cells")
+    c_rel, c_ind = Pinax.current_document().pages[1].sections[4].checks
+    # the label cell ends with where the @test was written; a numeric check's last cell names its
+    # kind; an indicator has a dash in each number cell
+    @test occursin(
+        "<td>$(c_rel.id)</td><td>isapprox(2.0, 1.5; rtol = 0.5) " *
+        "<span class=\"pinax-src\">@ $(at(26))</span>",
+        cells,
+    )
+    @test occursin("<td>2.0</td><td>1.5</td><td>0.25 vs 0.5 (rel)</td></tr>", cells)
+    @test occursin(
+        "<td>$(c_ind.id)</td><td>1 + 1 == 2 <span class=\"pinax-src\">@ $(at(27))</span>",
+        cells,
+    )
+    @test occursin("<td>—</td><td>—</td><td>— (pass/fail only)</td></tr>", cells)
+end
