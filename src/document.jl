@@ -821,7 +821,6 @@ function _enter_page!(
     id, title; summary=nothing, layout=nothing, status=nothing, written=false
 )
     id = _symbol_id(id, "page")
-    written && push!(_ensure_document!().written, id)
     CTX.section === nothing || error(
         "@page :$(id) inside @section :$(CTX.section.id) — a page is written at the top level " *
         "or directly inside a @part",
@@ -830,20 +829,17 @@ function _enter_page!(
         "@page :$(id) inside @page :$(CTX.page.id) — a page is written at the top level or " *
         "directly inside a @part",
     )
-    layout === nothing ||
-        layout in (:grid, :single, :wide) ||
-        error(
-            "Pinax: @page layout= must be :grid, :single, or :wide (got $(repr(layout)))."
-        )
+    _layout(layout, "@page")
     doc = _ensure_document!()
-    _claim!(id, "page")
     # status resolution: explicit @page status= wins; else inherit the open @part's
     # default status; else :final (the ordinary shaped/curated page).
     st = status === nothing ? get(doc.part_status, CTX.part, :final) : _status(status)
+    _claim!(id, "page")   # every argument is valid: only now is the id taken
+    written && push!(doc.written, id)
     pg = Page(
         id,
         string(title),
-        summary === nothing ? nothing : string(summary),
+        _optstring(summary),
         _anchor(id),
         nothing,
         false,
@@ -865,6 +861,17 @@ function _enter_page!(
     return pg
 end
 _exit_page!() = (CTX.page=nothing; CTX.section=nothing)
+
+# A page's or section's `layout=` hint: `nothing` or one of the three the themes know.
+function _layout(layout, what)
+    layout === nothing ||
+        layout in (:grid, :single, :wide) ||
+        error(
+            "Pinax: $(what) layout= must be :grid, :single, or :wide (got $(repr(layout)))."
+        )
+    return layout
+end
+_optstring(x) = x === nothing ? nothing : string(x)
 
 """
 `@benchmark` was removed in 0.2 (#173). Checks go in any `@section` (or a `@testset` inside one), and
@@ -908,7 +915,6 @@ end
 
 function _enter_part!(id, title; desc=nothing, status=nothing, written=false)
     id = _symbol_id(id, "part")
-    written && push!(_ensure_document!().written, id)
     open = if CTX.section !== nothing
         "@section :$(CTX.section.id)"
     elseif CTX.page !== nothing
@@ -920,12 +926,13 @@ function _enter_part!(id, title; desc=nothing, status=nothing, written=false)
     end
     open === nothing ||
         error("@part :$(id) inside $(open) — a part is written at the top level")
+    st = status === nothing ? nothing : _status(status)   # the default status its pages inherit
     doc = _ensure_document!()
-    _claim!(id, "part")
-    # register (id => title) once, in declaration order, for the grouped navigation
-    any(p -> first(p) === id, doc.parts) || push!(doc.parts, id => string(title))
+    _claim!(id, "part")   # every argument is valid: only now is the id taken
+    written && push!(doc.written, id)
+    push!(doc.parts, id => string(title))   # declaration order, for the grouped navigation
     desc === nothing || (doc.part_descs[id] = Desc(string(desc)))
-    status === nothing || (doc.part_status[id] = _status(status))  # default status its pages inherit
+    st === nothing || (doc.part_status[id] = st)
     CTX.part = id
     CTX.page = nothing
     CTX.section = nothing
@@ -957,25 +964,22 @@ function _enter_section!(
     id, title; by=nothing, summary=nothing, layout=nothing, written=false
 )
     id = _symbol_id(id, "section")
-    written && push!(_ensure_document!().written, id)
     (by === nothing || by isa AbstractString) ||
         error("Pinax: @section by= names one param axis, a String (got $(repr(by)))")
-    pg = CTX.page
-    pg === nothing && error("@section outside of a @page")
+    _layout(layout, "@section")
+    CTX.page === nothing && error("@section outside of a @page")
     parent = CTX.section
-    _claim!(id, string("section in \"", (parent === nothing ? pg : parent).anchor, "\""))
-    layout === nothing ||
-        layout in (:grid, :single, :wide) ||
-        error(
-            "Pinax: @section layout= must be :grid, :single, or :wide (got $(repr(layout))).",
-        )
+    # a page and a section are the same kind of container: a child sits in its content order
+    owner = something(parent, CTX.page)
+    _claim!(id, string("section in \"", owner.anchor, "\""))   # only now is the id taken
+    written && push!(_ensure_document!().written, id)
     sec = Section(
         id,
         string(title),
         _anchor(id),   # the id is the anchor: ids are unique in the whole document
-        by === nothing ? nothing : String(by),
+        _optstring(by),
         Prose[],
-        summary === nothing ? nothing : string(summary),
+        _optstring(summary),
         nothing,
         layout,
         Figure[],
@@ -984,17 +988,17 @@ function _enter_section!(
         Check[],
         CodeBlock[],
         Pair{Symbol,Int}[],
-        parent === nothing ? 2 : parent.depth + 1,
+        _depth(owner) + 1,
         parent,
         Section[],
     )
-    # a page and a section are the same kind of container: a child sits in its content order
-    owner = parent === nothing ? pg : parent
     push!(owner.sections, sec)
     push!(owner.content, :section => length(owner.sections))
     CTX.section = sec
     return sec
 end
+_depth(::Page) = 1
+_depth(s::Section) = s.depth
 # Leaving a section returns to the one that encloses it (or to the page at the top level).
 _exit_section!() = (CTX.section = CTX.section === nothing ? nothing : CTX.section.parent)
 

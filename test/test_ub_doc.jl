@@ -32,4 +32,29 @@ using Test
         h, r = Pinax._normalize_table([(a=1, b=2), (b=3, a=4)], nothing)
         @test h == ["a", "b"] && r == [[1, 2], [4, 3]]
     end
+    @testset "a refused @part/@page/@section claims nothing: a retry is not a duplicate" begin
+        Pinax.reset!()
+        @test_throws "status must be" @part :g "G" status = :bogus begin end
+        @part :g "G" begin end
+        doc = Pinax.current_document()
+        @test doc.parts == [:g => "G"]
+        @test_throws "status must be" @page :p "P" status = :bogus begin end
+        @page :p "P" begin end
+        @test [pg.id for pg in doc.pages] == [:p]
+        @test_throws "layout= must be" @page :q "Q" layout = :bogus begin end
+        err = nothing
+        @page :q "Q" begin
+            err = try
+                @section :s "S" layout = :bogus begin end
+            catch e
+                e
+            end
+            @section :s "S" begin end
+        end
+        @test occursin("layout= must be", sprint(showerror, err))
+        @test [s.id for s in doc.pages[2].sections] == [:s]
+        @test !(:never in doc.written)
+        @test_throws "outside of a @page" @section :never "S" begin end
+        @test !(:never in doc.written) && !haskey(doc.ids, :never)
+    end
 end
