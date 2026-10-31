@@ -79,4 +79,49 @@ end
         @test allunique(n.anchor for n in texts)
     end
 
+    @testset "a shard root's own prose and table survive the merge, with its drops and ids" begin
+        dir = mktempdir()
+        root = R4Ext.PinaxTestSet("Test report")
+        R4Ext._with_testset(root) do
+            @desc md"ROOT_PROSE"
+            @table (; a=[1, 2]) id = :root_tab
+            @figure "x.svg"          # cannot cross a dump: recorded as dropped in the root
+            @testset "test_f.jl" begin
+                @test true
+            end
+        end
+        other = TestNode(
+            "Test report";
+            children=[
+                TestNode(
+                    "test_g.jl"; checks=[Check(:t, "g", 1.0, 1.0, 0.0, 0.5, :abs, true)]
+                ),
+            ],
+        )
+        dumps = [
+            (@test_logs (:warn, r"cannot cross a shard dump") Pinax.dump_test_report(
+                root.node, joinpath(dir, "s1.toml")
+            )),
+            Pinax.dump_test_report(other, joinpath(dir, "s2.toml")),
+        ]
+        out = joinpath(dir, "rep")
+        render_test_report(dumps; out=out, title="Merged")
+        doc = Pinax.current_document()
+        # the root's prose-and-table, with no check of its own, still gets a page
+        @test [pg.id for pg in doc.pages] == [:overview, :merged, :test_f_jl, :test_g_jl]
+        merged = _r4_page(_r4_agent(out), "merged")
+        @test [t["text"] for t in merged["texts"]] == ["ROOT_PROSE"]
+        @test [t["rows"] for t in merged["tables"]] == [[[1], [2]]]
+        # the figure it dropped is stated in the merged document
+        @test any(
+            e ->
+                occursin("cannot cross a shard dump", e.message) &&
+                occursin("@figure", e.message),
+            doc.diag.entries,
+        )
+        # `root_tab` was written by its author, and stays so in the merged document
+        ids = Pinax.node_ids(doc)
+        @test only(n for n in ids if n.id === :root_tab).generated == false
+    end
+
 end
