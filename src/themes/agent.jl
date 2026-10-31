@@ -407,13 +407,21 @@ function _agent_md_table(io, tbl)
     println(io)
     isempty(tbl.caption) || println(io, "_", tbl.caption, "_  [table: ", tbl.id, "]")
     if !isempty(tbl.header)
-        println(io, "| ", join(tbl.header, " | "), " |")
+        println(io, "| ", join((_md_cell(h) for h in tbl.header), " | "), " |")
         println(io, "|", repeat(" --- |", length(tbl.header)))
     end
     for row in tbl.rows
-        println(io, "| ", join((_cellstr(c) for c in row), " | "), " |")
+        println(io, "| ", join((_md_cell(_cellstr(c)) for c in row), " | "), " |")
     end
     return nothing
+end
+
+# A Markdown table cell: a `|` (a ket `|0⟩`) is escaped and a line break is `<br>`, so a reader
+# never sees an extra column or a row cut in two.
+function _md_cell(s)
+    return replace(
+        string(s), "|" => "\\|", "\r\n" => "<br>", "\n" => "<br>", "\r" => "<br>"
+    )
 end
 
 # A single check as a markdown list line (the LLM read view): a PASS/FAIL/ERROR badge + the numbers,
