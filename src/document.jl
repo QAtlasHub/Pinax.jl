@@ -144,9 +144,10 @@ mutable struct Figure
     code::String          # @figure expression source
     thumbnail::Bool       # thumbnail=true marker
     assets::Vector{String}
-    data::Any             # eager plotted-data (`@figure … data=(; x, y[, series])`) | nothing.
-    # When set, the agent backend writes the figure's data file from THIS — no `gen()`, hence no
-    # plotting backend — so the LLM artifact (agent.json) is producible Plots/Makie-free.
+    data::Any             # eager plotted data, parsed where `@figure … data=` is written: the data
+    # table `(; xlabel, ylabel, series=[(; label, x, y)])` with its points copied, or nothing. When
+    # set, the agent backend writes the figure's data file from THIS — no `gen()`, hence no plotting
+    # backend — so the LLM artifact (agent.json) is producible Plots/Makie-free.
     defined_at::String    # where the `@figure` was written, `path:line` (see `_defined_at`), or ""
 end
 function Figure(id, anchor, caption, params, gen, code, thumbnail, assets, data)
@@ -1090,7 +1091,8 @@ function _push_figure!(;
 )
     c = _open_container("@figure")
     c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
-    data === nothing || _check_series_lengths(_series_of(data))   # eager: an error where written
+    # parsed and copied once, here: a bad `data=` is an error where written, and the readers use this
+    tbl = data === nothing ? nothing : _table_of_data(data)
     base = something(
         gen_id, Symbol(c.id, "_fig_", _stable_hash(string(code, "|", _params_key(params))))
     )
@@ -1104,7 +1106,7 @@ function _push_figure!(;
         code,
         thumbnail,
         String[],
-        data,
+        tbl,
         _defined_at(at),
     )
     push!(c.figures, fig)

@@ -216,7 +216,7 @@ function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
         if fig.data !== nothing
             # Eager `data=`: the data file is written from it and `gen()` — the plotting backend — is
             # never touched, so agent.json stays producible Plots/Makie-free. No image in this face.
-            csv = _write_csv(_table_of_data(fig.data), base)
+            csv = _write_csv(fig.data, base)   # parsed where `data=` was written
             ctx.cache.new[_manifest_key(base, ctx.cache.outdir)] = Dict{String,Any}(
                 "key" => "data", "assets" => [relpath(csv, ctx.cache.outdir)]
             )
