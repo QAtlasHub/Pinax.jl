@@ -976,114 +976,132 @@ end
 # Build the two figures for one quantity. Innermost binding = x (numeric → a real axis, else categorical
 # ticks); outer bindings = the legend. `want`/`tol` recover the reference line and tolerance band.
 function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, pts)
-    xvar = last(_binding_vars(pts[1][1]))
-    xval(p) = last(p[1])[2]
-    numeric = all(p -> tryparse(Float64, xval(p)) !== nothing, pts)
-    ticks =
-        numeric ? sort(unique(xval.(pts)); by=s -> parse(Float64, s)) : unique(xval.(pts))
-    xticklabels = numeric ? [_fmt_num(parse(Float64, t)) for t in ticks] : ticks
-    tickindex = Dict(t => i for (i, t) in enumerate(ticks))
-    # the axis's value at a tick: the number itself, or the category — what a data file must hold (a
-    # tick's position is a drawing detail)
-    axisval(i) = numeric ? parse(Float64, ticks[i]) : ticks[i]
-    K = length(ticks)
-    legkey(p) = _binding_str(p[1][1:(end - 1)])
-    legs = unique(legkey.(pts))
-    # Each series keeps its own reference and tolerance band (#130): two series with different `want`
-    # at one tick must not share whichever band was folded last.
-    conv_series = NamedTuple[]
-    marg_series = NamedTuple[]
-    for lg in legs
-        xs, gy, my, ok = Int[], Float64[], Float64[], Bool[]
-        want, lo, hi = Float64[], Float64[], Float64[]
-        for p in pts
-            legkey(p) == lg || continue
-            c = p[2]
-            push!(xs, tickindex[xval(p)])
-            push!(gy, c.got)
-            push!(my, _margin(c))
-            push!(ok, c.pass)
-            # the pass boundary isapprox applies: rel is relative to max(|got|,|want|) (#115)
-            tolabs = c.kind === :rel ? c.tol * max(abs(c.got), abs(c.want)) : c.tol
-            push!(want, c.want)
-            push!(lo, c.want - tolabs)
-            push!(hi, c.want + tolabs)
-        end
-        perm = sortperm(xs)
-        push!(
-            conv_series,
-            (;
-                label=lg,
-                xs=xs[perm],
-                ys=gy[perm],
-                ok=ok[perm],
-                want=want[perm],
-                lo=lo[perm],
-                hi=hi[perm],
-            ),
-        )
-        push!(marg_series, (; label=lg, xs=xs[perm], ys=my[perm], ok=ok[perm]))
-    end
+    ax = _sweep_axis(pts)
+    conv, marg = _sweep_series(pts, ax)
     qi[] += 1
     q = _trunc(label, 44)
     # both SVGs derive from `pts` (+ the axis) — one data fingerprint keys their cache (issue #69 L).
     fp = string(
         hash((
-            xvar,
-            xticklabels,
+            ax.xvar,
+            ax.labels,
             [
                 (_binding_str(b), c.got, c.want, c.delta, c.tol, c.kind, c.pass) for
                 (b, c) in pts
             ],
         )),
     )
+    _conv_figure!(Symbol(cid, :_conv_, qi[]), q, ax, conv, fp)
+    _margin_figure!(Symbol(cid, :_swpmargin_, qi[]), q, ax, marg, fp)
+    return nothing
+end
+
+# The swept axis: its variable, its ticks in order (numeric ones by value), their labels, and each
+# tick's position.
+function _sweep_axis(pts)
+    vals = _sweep_x.(pts)
+    numeric = all(v -> tryparse(Float64, v) !== nothing, vals)
+    ticks = numeric ? sort(unique(vals); by=s -> parse(Float64, s)) : unique(vals)
+    return (;
+        xvar=last(_binding_vars(pts[1][1])),
+        numeric,
+        ticks,
+        labels=numeric ? [_fmt_num(parse(Float64, t)) for t in ticks] : ticks,
+        index=Dict(t => i for (i, t) in enumerate(ticks)),
+    )
+end
+_sweep_x(p) = last(p[1])[2]
+_legend_key(p) = _binding_str(p[1][1:(end - 1)])
+# The axis's value at a tick: the number itself, or the category — what a data file must hold (a
+# tick's position is a drawing detail).
+_axis_value(ax, i) = ax.numeric ? parse(Float64, ax.ticks[i]) : ax.ticks[i]
+
+# One convergence and one margin series per legend entry. Each series keeps its own reference and
+# tolerance band (#130): two series with different `want` at one tick must not share whichever band
+# was folded last.
+function _sweep_series(pts, ax)
+    both = [
+        _one_series(filter(p -> _legend_key(p) == lg, pts), ax, lg) for
+        lg in unique(_legend_key.(pts))
+    ]
+    return NamedTuple[first(b) for b in both], NamedTuple[last(b) for b in both]
+end
+
+function _one_series(pts, ax, lg)
+    xs = [ax.index[_sweep_x(p)] for p in pts]
+    perm = sortperm(xs)
+    cs = [p[2] for p in pts][perm]
+    # the pass boundary isapprox applies: rel is relative to max(|got|,|want|) (#115)
+    tolabs = [c.kind === :rel ? c.tol * max(abs(c.got), abs(c.want)) : c.tol for c in cs]
+    want = [c.want for c in cs]
+    ok = [c.pass for c in cs]
+    conv = (;
+        label=lg,
+        xs=xs[perm],
+        ys=[c.got for c in cs],
+        ok,
+        want,
+        lo=want .- tolabs,
+        hi=want .+ tolabs,
+    )
+    return conv, (; label=lg, xs=xs[perm], ys=_margin.(cs), ok)
+end
+
+function _conv_figure!(id, q, ax, series, fp)
     _push_figure!(;
         gen=() -> _sweep_plot_svg(
             tempname() * ".svg";
             title="convergence — $(q)",
-            xlabel=string(xvar),
+            xlabel=string(ax.xvar),
             ylabel="got",
-            xticklabels=xticklabels,
-            series=conv_series,
+            xticklabels=ax.labels,
+            series=series,
         ),
         code=fp,
-        caption="Convergence of `$(q)` over the swept axis `$(xvar)`. Dashed line = `want`; the shaded " *
+        caption="Convergence of `$(q)` over the swept axis `$(ax.xvar)`. Dashed line = `want`; the shaded " *
                 "band is the tolerance; a red marker is a failed check.",
-        gen_id=Symbol(cid, :_conv_, qi[]),
+        gen_id=id,
         data=(;
-            xlabel=string(xvar),
+            xlabel=string(ax.xvar),
             ylabel="got",
             # what the plot draws, per series: the values, the reference and the tolerance band
             series=[
                 (;
                     label=isempty(s.label) ? name : string(s.label, " ", name),
-                    x=axisval.(s.xs),
+                    x=[_axis_value(ax, i) for i in s.xs],
                     y=getfield(s, field),
-                ) for s in conv_series for
+                ) for s in series for
                 (name, field) in (("got", :ys), ("want", :want), ("lo", :lo), ("hi", :hi))
             ],
         ),
     )
+    return nothing
+end
+
+function _margin_figure!(id, q, ax, series, fp)
     _push_figure!(;
         gen=() -> _sweep_plot_svg(
             tempname() * ".svg";
             title="margin — $(q)",
-            xlabel=string(xvar),
+            xlabel=string(ax.xvar),
             ylabel="delta / tol",
-            xticklabels=xticklabels,
-            series=marg_series,
+            xticklabels=ax.labels,
+            series=series,
             hline=1.0,
         ),
         code=fp,
-        caption="Tolerance budget `delta/tol` of `$(q)` over `$(xvar)`; the dashed line at 1.0 is the " *
+        caption="Tolerance budget `delta/tol` of `$(q)` over `$(ax.xvar)`; the dashed line at 1.0 is the " *
                 "pass/fail boundary.",
-        gen_id=Symbol(cid, :_swpmargin_, qi[]),
+        gen_id=id,
         data=(;
-            xlabel=string(xvar),
+            xlabel=string(ax.xvar),
             ylabel="delta / tol",
             series=[
-                (; label=isempty(s.label) ? "margin" : s.label, x=axisval.(s.xs), y=s.ys)
-                for s in marg_series
+                (;
+                    label=isempty(s.label) ? "margin" : s.label,
+                    x=[_axis_value(ax, i) for i in s.xs],
+                    y=s.ys,
+                ) for s in series
             ],
         ),
     )
