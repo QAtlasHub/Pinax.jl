@@ -1398,11 +1398,17 @@ function _emit_page_node!(
     return acc
 end
 
-# Assign the render-time id (t1, t2, … so a merge renumbers cleanly rather than N shards colliding at
-# t1) and place the check into the current container + content order + margin accumulator.
+# A check's id in a page or section — stable: container + source text (#123) — claimed in the whole
+# document, so no node written later takes it (Conventions › Identity).
+function _claim_check_id!(c, label)
+    return _claim!(_check_id(c, label), string("check in \"", c.anchor, "\""))
+end
+
+# Assign the check its id in the document (a dump carries none, so N merged shards never collide)
+# and place it into the current container + content order + margin accumulator.
 function _place_check!(c, chk::Check, acc::Vector{Check})
     # a copy: the fold must not renumber (or later tag) the tree's own Check (#130)
-    chk = _copy_check(chk; id=_check_id(c, chk.label))   # stable: container + source text (#123)
+    chk = _copy_check(chk; id=_claim_check_id!(c, chk.label))
     _repoint_code!(c, chk)
     push!(c.checks, chk)
     push!(c.content, :check => length(c.checks))

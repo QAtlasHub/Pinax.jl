@@ -184,17 +184,13 @@ function _stable_hash(s::AbstractString)
 end
 
 # A check's id: its container's anchor plus the stable hash of its source text, so adding or
-# reordering other checks never renumbers it (#123). The same text twice in one container is
-# disambiguated in order: `…-2`, `…-3`.
+# reordering other checks never renumbers it (#123). An id another node holds is stepped past in
+# order: `…-2`, `…-3`. In a page or section that is any id in the document (the caller claims the
+# result); in a test node, which the fold places later, only its own checks.
 function _check_id(c, key::AbstractString)
     base = Symbol(_anchor(Symbol(c.anchor)), "_t", _stable_hash(key))
-    taken = Set(ch.id for ch in c.checks)
-    base in taken || return base
-    k = 2
-    while Symbol(base, "-", k) in taken
-        k += 1
-    end
-    return Symbol(base, "-", k)
+    c isa Union{Page,Section} && return _free_id(base)
+    return _free_id(base, id -> any(ch -> ch.id === id, c.checks))
 end
 
 # A copy of `c` with some fields replaced — so a fold can renumber or tag a check it does not own

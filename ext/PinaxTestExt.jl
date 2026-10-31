@@ -146,7 +146,12 @@ end
 # test node alike (#173).
 function _push_container_check!(c, res)
     chk = _check_from(_result_data_expr(res), _label(res), res isa Test.Pass, 0)
-    chk.id = Pinax._check_id(c, chk.label)   # stable: container + source text (#123)
+    # a test node's ids are its own until the fold places them; a page's or section's are the document's
+    chk.id = if c isa TestNode
+        Pinax._check_id(c, chk.label)
+    else
+        Pinax._claim_check_id!(c, chk.label)
+    end
     chk.source = _source_str(res)            # WHERE it was asserted (issue #69 I)
     # By DEFAULT, the code that produced this check — captured as the same `@code` artifact a
     # manuscript would build, pushed BEFORE the check so it reads code-then-result. One block per
