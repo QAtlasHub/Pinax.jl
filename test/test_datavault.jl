@@ -150,6 +150,17 @@ end
     @test occursin("SHARED_NOTE", read(res.gallery, String))
     @test occursin("SHARED_NOTE", read(joinpath(dirname(res.agent), "agent.md"), String))
 
+    # `comments_file=` overrides the store under `out`, for both faces
+    custom = joinpath(tmp, "elsewhere", "notes.toml")
+    Pinax.add_comment(custom, :sweep, "CUSTOM_NOTE"; author="me")
+    res = Pinax.report(
+        vault, recipe; title="Sweep report", out=joinpath(tmp, "rep"), comments_file=custom
+    )
+    for face in (res.gallery, joinpath(dirname(res.agent), "agent.md"), res.agent)
+        @test occursin("CUSTOM_NOTE", read(face, String))
+        @test !occursin("SHARED_NOTE", read(face, String))
+    end
+
     # a failing check nobody counted: both faces are written, then `report` throws (render's rule)
     failing = function (pairs)
         @page :f "F" begin
