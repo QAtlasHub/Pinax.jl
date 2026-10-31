@@ -70,6 +70,16 @@ function _agent_params_json(io, params)
     return print(io, "}")
 end
 
+# A JSON array on `io`: `[`, then each element as `f(x)` prints it, comma-separated, then `]`.
+function _json_array(f, io, xs)
+    print(io, "[")
+    for (i, x) in enumerate(xs)
+        i == 1 || print(io, ",")
+        f(x)
+    end
+    return print(io, "]")
+end
+
 # One figure → its JSON object: what it claims (caption), where and how it was made (`defined_at`,
 # code, params) and pointers to what is behind it — its images and its data file, described exactly
 # (columns, points per series) and never inlined (Conventions › The agent face).
@@ -89,12 +99,9 @@ function emit_figure(theme::AgentBase, fig, ctx)
         ",\"params\":",
     )
     _agent_params_json(io, fig.params)
-    print(io, ",\"assets\":[")
-    for (i, a) in enumerate(imgs)
-        i == 1 || print(io, ",")
-        print(io, _jsonstr(_agent_rel(a, ctx)))
-    end
-    print(io, "],\"data\":")
+    print(io, ",\"assets\":")
+    _json_array(a -> print(io, _jsonstr(_agent_rel(a, ctx))), io, imgs)
+    print(io, ",\"data\":")
     _agent_data_json(io, csv, ctx)
     print(io, ",\"comments\":")
     _agent_comments!(fig.anchor, ctx)
@@ -111,25 +118,21 @@ _agent_rel(path, ctx) = replace(relpath(path, ctx.outdir), '\\' => '/')
 function _agent_data_json(io, csv, ctx)
     d = csv === nothing ? nothing : _data_descriptor(csv)
     d === nothing && return print(io, "null")
-    print(io, "{\"path\":", _jsonstr(_agent_rel(csv, ctx)), ",\"columns\":[")
-    join(io, (_jsonstr(c) for c in d.columns), ",")
-    print(io, "],\"series\":[")
-    for (i, (label, n)) in enumerate(d.series)
-        i == 1 || print(io, ",")
-        print(io, "{\"label\":", _jsonstr(label), ",\"points\":", n, "}")
+    print(io, "{\"path\":", _jsonstr(_agent_rel(csv, ctx)), ",\"columns\":")
+    _json_array(c -> print(io, _jsonstr(c)), io, d.columns)
+    print(io, ",\"series\":")
+    _json_array(io, d.series) do (label, n)
+        return print(io, "{\"label\":", _jsonstr(label), ",\"points\":", n, "}")
     end
-    return print(io, "]}")
+    return print(io, "}")
 end
 
 function _agent_comments!(anchor, ctx)
-    print(ctx.io, "[")
-    for (i, c) in enumerate(get(ctx.comments, Symbol(anchor), Comment[]))
-        i == 1 || print(ctx.io, ",")
-        print(
+    return _json_array(ctx.io, get(ctx.comments, Symbol(anchor), Comment[])) do c
+        return print(
             ctx.io, "{\"author\":", _jsonstr(c.author), ",\"text\":", _jsonstr(c.text), "}"
         )
     end
-    return print(ctx.io, "]")
 end
 
 # One @table -> a JSON object (header + native-typed rows, then its comments). A table is already the
@@ -146,36 +149,21 @@ function emit_table(::AgentBase, tbl, ctx)
         _jsonstr(tbl.defined_at),
         ",\"code\":",
         _jsonstr(tbl.code),
-        ",\"header\":[",
+        ",\"header\":",
     )
-    for (i, h) in enumerate(tbl.header)
-        i == 1 || print(io, ",")
-        print(io, _jsonstr(h))
+    _json_array(h -> print(io, _jsonstr(h)), io, tbl.header)
+    print(io, ",\"rows\":")
+    _json_array(io, tbl.rows) do row
+        return _json_array(cell -> print(io, _agent_jsonval(cell)), io, row)
     end
-    print(io, "],\"rows\":[")
-    for (i, row) in enumerate(tbl.rows)
-        i == 1 || print(io, ",")
-        print(io, "[")
-        for (j, cell) in enumerate(row)
-            j == 1 || print(io, ",")
-            print(io, _agent_jsonval(cell))
-        end
-        print(io, "]")
-    end
-    print(io, "],\"comments\":")
+    print(io, ",\"comments\":")
     _agent_comments!(tbl.anchor, ctx)
     print(io, "}")
     return nothing
 end
 
 function _agent_tables!(theme::AgentBase, tables, ctx)
-    io = ctx.io
-    print(io, "[")
-    for (i, tbl) in enumerate(tables)
-        i == 1 || print(io, ",")
-        emit_table(theme, tbl, ctx)
-    end
-    print(io, "]")
+    _json_array(tbl -> emit_table(theme, tbl, ctx), ctx.io, tables)
     return nothing
 end
 
@@ -202,23 +190,15 @@ function emit_code(::AgentBase, blk, ctx)
 end
 
 function _agent_codes!(theme::AgentBase, codes, ctx)
-    io = ctx.io
-    print(io, "[")
-    for (i, blk) in enumerate(codes)
-        i == 1 || print(io, ",")
-        emit_code(theme, blk, ctx)
-    end
-    print(io, "]")
+    _json_array(blk -> emit_code(theme, blk, ctx), ctx.io, codes)
     return nothing
 end
 
 # A container's @raw blocks: each one's HTML, as written (an agent reads what the gallery shows).
 function _agent_raws!(raws, ctx)
     io = ctx.io
-    print(io, "[")
-    for (i, r) in enumerate(raws)
-        i == 1 || print(io, ",")
-        print(
+    _json_array(io, raws) do r
+        return print(
             io,
             "{\"id\":",
             _jsonstr(string(r.id)),
@@ -229,7 +209,6 @@ function _agent_raws!(raws, ctx)
             "}",
         )
     end
-    print(io, "]")
     return nothing
 end
 
@@ -267,13 +246,7 @@ end
 # A container's own checks as a JSON array (each through the `emit_check` dispatch point), so the
 # `{kind:"check", id}` entries in its `content` resolve within the same object (#173).
 function _agent_checks!(theme::AgentBase, checks, ctx)
-    io = ctx.io
-    print(io, "[")
-    for (i, c) in enumerate(checks)
-        i == 1 || print(io, ",")
-        emit_check(theme, c, ctx)
-    end
-    print(io, "]")
+    _json_array(c -> emit_check(theme, c, ctx), ctx.io, checks)
     return nothing
 end
 
@@ -281,12 +254,10 @@ end
 # interleave of figures and tables (the typed `figures`/`tables` arrays preserve within-type order).
 function _agent_content!(c, ctx)
     io = ctx.io
-    print(io, "[")
-    for (i, (kind, item)) in enumerate(_content_items(c))
+    _json_array(io, _content_items(c)) do (kind, item)
         item isa Union{Prose,Figure,Table,Check,CodeBlock,RawBlock,Section} ||
             _unhandled_node("agent.json", item)
-        i == 1 || print(io, ",")
-        print(
+        return print(
             io,
             "{\"kind\":",
             _jsonstr(string(kind)),
@@ -295,7 +266,6 @@ function _agent_content!(c, ctx)
             "}",
         )
     end
-    print(io, "]")
     return nothing
 end
 
@@ -339,13 +309,7 @@ function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
             ),
         )
     end
-    io = ctx.io
-    print(io, "[")
-    for (i, fig) in enumerate(figs)
-        i == 1 || print(io, ",")
-        emit_figure(theme, fig, ctx)
-    end
-    print(io, "]")
+    _json_array(fig -> emit_figure(theme, fig, ctx), ctx.io, figs)
     return nothing
 end
 
@@ -368,10 +332,8 @@ end
 # A container's prose blocks: `[{id, text}]`, in the order written (their place among the other
 # nodes is in `content`).
 function _agent_texts!(texts, ctx)
-    print(ctx.io, "[")
-    for (i, t) in enumerate(texts)
-        i == 1 || print(ctx.io, ",")
-        print(
+    return _json_array(ctx.io, texts) do t
+        return print(
             ctx.io,
             "{\"id\":",
             _jsonstr(string(t.id)),
@@ -382,7 +344,6 @@ function _agent_texts!(texts, ctx)
             "}",
         )
     end
-    return print(ctx.io, "]")
 end
 
 # Pages and sections are one kind of container, so they share one body and one set of keys: a page
@@ -456,11 +417,10 @@ end
 # diagnostics close it once agent.md has run.
 function _agent_json(theme::AgentBase, doc::Document, ctx)
     io = ctx.io
-    print(io, "{\"title\":", _jsonstr(doc.meta.title), ",\"parts\":[")
-    for (i, (pid, ptitle)) in enumerate(doc.parts)
-        i == 1 || print(io, ",")
+    print(io, "{\"title\":", _jsonstr(doc.meta.title), ",\"parts\":")
+    _json_array(io, doc.parts) do (pid, ptitle)
         d = get(doc.part_descs, pid, nothing)
-        print(
+        return print(
             io,
             "{\"id\":",
             _jsonstr(string(pid)),
@@ -473,12 +433,8 @@ function _agent_json(theme::AgentBase, doc::Document, ctx)
             "}",
         )
     end
-    print(io, "],\"pages\":[")
-    for (i, pg) in enumerate(doc.pages)
-        i == 1 || print(io, ",")
-        emit_page(theme, pg, ctx)
-    end
-    print(io, "]")
+    print(io, ",\"pages\":")
+    _json_array(pg -> emit_page(theme, pg, ctx), io, doc.pages)
     return String(take!(io))
 end
 
@@ -487,10 +443,9 @@ end
 # inferring them (Conventions › Faces). Written last, once agent.md has added its own.
 function _agent_json_diagnostics(entries)
     io = IOBuffer()
-    print(io, ",\"diagnostics\":[")
-    for (i, e) in enumerate(entries)
-        i == 1 || print(io, ",")
-        print(
+    print(io, ",\"diagnostics\":")
+    _json_array(io, entries) do e
+        return print(
             io,
             "{\"severity\":",
             _jsonstr(string(e.severity)),
@@ -501,7 +456,7 @@ function _agent_json_diagnostics(entries)
             "}",
         )
     end
-    print(io, "]}")
+    print(io, "}")
     return String(take!(io))
 end
 
