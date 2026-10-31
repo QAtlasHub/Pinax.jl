@@ -34,7 +34,9 @@ function shard_suite()
     )
     write(
         joinpath(d, "unit_b.jl"),
-        "using Test\n@testset \"plain\" begin\n    @test true\nend\n",
+        # evidence recorded at the unit's top level, outside any `@testset`: the unit's own node
+        "using Test\nusing TestShards: evidence!\nevidence!(; oracle = \"unit level\")\n" *
+        "@testset \"plain\" begin\n    @test true\nend\n",
     )
     write(
         joinpath(d, "runtests.jl"),
@@ -154,6 +156,9 @@ end
         # it landed on the section that recorded it, not on the page — and the table id is
         # UNIT-qualified, so two files each with a `@testset "tight"` cannot share one anchor
         @test occursin("\"id\":\"unit_a_jl_tight_evidence\"", agent)
+        # evidence of the unit itself is the unit's, under `<unit>_evidence`
+        @test occursin("\"id\":\"unit_b_jl_evidence\"", agent)
+        @test occursin("[\"oracle\",\"unit level\"]", agent)
     end
 
     @testset "TestShards' own records are unchanged" begin
