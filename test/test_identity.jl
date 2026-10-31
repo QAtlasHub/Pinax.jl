@@ -164,7 +164,7 @@ _sec(id) = only(s for s in Pinax._all_sections(_pg()) if s.id === id)
         ids = [r.id for r in Pinax.node_ids(Pinax.current_document())]
         @test allunique(ids)
         for sec in Pinax._all_sections(_pg())
-            @test [chk.code_anchor for chk in sec.checks] == [b.anchor for b in sec.codes]
+            @test [chk.code_id for chk in sec.checks] == [b.id for b in sec.codes]
         end
     end
 

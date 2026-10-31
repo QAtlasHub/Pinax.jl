@@ -568,7 +568,18 @@ end
 function _indicator_check(id, label, passed)
     got = passed ? 1.0 : 0.0
     return Check(
-        id, String(label), got, 1.0, abs(got - 1.0), 0.5, :abs, passed, "", "", false, true
+        id,
+        String(label),
+        got,
+        1.0,
+        abs(got - 1.0),
+        0.5,
+        :abs,
+        passed,
+        "",
+        nothing,
+        false,
+        true,
     )
 end
 
@@ -1450,9 +1461,9 @@ end
 
 # Point a placed check at its code block's id in the document.
 function _repoint_code!(c, chk)
-    isempty(chk.code_anchor) && return chk
-    id = get(_ensure_document!().fold_codes, (c.id, Symbol(chk.code_anchor)), nothing)
-    id === nothing || (chk.code_anchor = _anchor(id))
+    chk.code_id === nothing && return chk
+    id = get(_ensure_document!().fold_codes, (c.id, chk.code_id), nothing)
+    id === nothing || (chk.code_id = id)
     return chk
 end
 
@@ -2007,7 +2018,7 @@ function _check_to_dict(c::Check)
     )
     isempty(c.source) || (d["source"] = c.source)   # carry WHERE it failed across a shard dump
     # …and the REFERENCE to the code block that produced it (the block itself rides `n.codes`).
-    isempty(c.code_anchor) || (d["code_anchor"] = c.code_anchor)
+    c.code_id === nothing || (d["code_id"] = String(c.code_id))
     c.indicator && (d["indicator"] = true)
     return d
 end
@@ -2068,10 +2079,18 @@ function _dict_to_check(d::AbstractDict, at::AbstractString="a test dump")
         Symbol(kind),
         d["pass"],
         get(d, "source", ""),
-        get(d, "code_anchor", ""),
+        _dumped_code_id(d),
         false,
         get(d, "indicator", false),
     )
+end
+
+# A dumped check's code reference: `code_id`, or the anchor an older dump wrote (`code_anchor`,
+# which equals the id for every id it could hold), or nothing.
+function _dumped_code_id(d::AbstractDict)
+    haskey(d, "code_id") && return Symbol(d["code_id"])
+    a = get(d, "code_anchor", "")
+    return isempty(a) ? nothing : Symbol(a)
 end
 
 "Where a shard writes its tree instead of rendering (`PINAX_TEST_DUMP`); empty = render directly."

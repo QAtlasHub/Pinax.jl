@@ -157,7 +157,7 @@ function _push_container_check!(c, res)
     # manuscript would build, pushed BEFORE the check so it reads code-then-result. One block per
     # source region: a `@testset for`'s N samples all point at the one snippet they share.
     blk = _code_block_for(res)
-    blk === nothing || (chk.code_anchor = Pinax._anchor(Pinax._push_auto_code!(c, blk)))
+    blk === nothing || (chk.code_id = Pinax._push_auto_code!(c, blk))
     push!(c.checks, chk)
     push!(c.content, :check => length(c.checks))
     return chk

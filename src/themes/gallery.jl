@@ -1466,10 +1466,10 @@ function emit_check(::GalleryBase, chk, ctx)
         print(io, " <span class=\"pinax-src\">@ ", _esc(chk.source), "</span>")
     # The code that produced this check is ONE artifact in the section below (a `@code` block), so the
     # table — the verdict-and-margin view — links to it instead of carrying a second copy of it.
-    isempty(chk.code_anchor) || print(
+    chk.code_id === nothing || print(
         io,
         " <a class=\"pinax-codelink\" href=\"#",
-        _esc(chk.code_anchor),
+        _esc(_anchor(chk.code_id)),
         "\" title=\"the code that produced this check\">code</a>",
     )
     print(io, "</td>")

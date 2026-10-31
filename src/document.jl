@@ -195,20 +195,20 @@ mutable struct Check
     pass::Bool
     source::String     # "file:line" of the assertion (issue #69 I), for every recorded @test, so the
     # report says WHERE, not just what; "" when Test gives no location.
-    code_anchor::String   # anchor of the `CodeBlock` holding the code that produced this check — the
-    # code itself is ONE artifact in the document (a `@code` block), and this is the reference to it,
-    # never a second copy of the source; "" when there is none.
+    code_id::Union{Symbol,Nothing}   # id of the `CodeBlock` holding the code that produced this
+    # check — the code itself is ONE artifact in the document (a `@code` block), and this is the
+    # reference to it, never a second copy of the source; nothing when there is none.
     reported::Bool        # already handed to an enclosing ordinary testset (#173): a failing check is
     # reported exactly once, by that suite when there is one, else by `render`.
     indicator::Bool       # a 1/0 pass indicator (a `@test` with no recoverable numbers), not a margin
 end
-# The shorter positional forms: source and code_anchor default to "", reported to false. `indicator`
-# is the full form's alone.
+# The shorter positional forms: source defaults to "", code_id to nothing, reported to false.
+# `indicator` is the full form's alone.
 function Check(
-    id, label, got, want, delta, tol, kind, pass, source="", code_anchor="", reported=false
+    id, label, got, want, delta, tol, kind, pass, source="", code_id=nothing, reported=false
 )
     return Check(
-        id, label, got, want, delta, tol, kind, pass, source, code_anchor, reported, false
+        id, label, got, want, delta, tol, kind, pass, source, code_id, reported, false
     )
 end
 

@@ -187,7 +187,7 @@ function emit_check(::AgentBase, chk, ctx)
         "pass" => _agent_jsonval(chk.pass),
         "defined_at" => _jsonstr(chk.source),   # where the @test was written, `path:line`
         # the code is ONE object in `codes` (kind "code"); a check REFERENCES it by id, or null
-        "code_id" => isempty(chk.code_anchor) ? "null" : _jsonstr(chk.code_anchor),
+        "code_id" => chk.code_id === nothing ? "null" : _jsonstr(string(chk.code_id)),
     )
     return nothing
 end
