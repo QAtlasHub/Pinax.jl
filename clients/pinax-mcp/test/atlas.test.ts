@@ -192,6 +192,13 @@ test("consecutive pages in one part share one part heading, before the first of 
   assert.ok(o.indexOf("[part grp]") < o.indexOf("[page p2]"));
 });
 
+test("a table with no caption is labelled by its id, in the index and the outline", () => {
+  const atlas = loadAtlas(writeVariant((doc) => (doc.pages[1].tables[0].caption = "")));
+  assert.equal(atlas.unit("p2_tbl1")!.label, "p2_tbl1");
+  assert.match(atlas.outline(), /\n- \[table p2_tbl1\] p2_tbl1$/m);
+  assert.equal(atlas.search("p2_tbl1")[0].field, "label");
+});
+
 // A file outside any agent directory, and a variant whose first figure's data and asset point at it
 // by the path `point` returns.
 function outsideVariant(point: (secret: string, dir: string) => string): string {
