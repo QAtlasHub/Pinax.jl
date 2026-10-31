@@ -153,4 +153,15 @@ _ub_diags() = [(d.item, d.message) for d in Pinax.current_document().diag.entrie
         render_test_report(cells; out=joinpath(dir, "mrep"))
         @test count(((item, _),) -> startswith(item, "FIG_M"), _ub_diags()) == 2
     end
+
+    @testset "the fold places a node of an unknown kind nowhere: it is an error" begin
+        bad = TestNode(
+            "test_k.jl";
+            checks=[Check(:t, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+            content=[:check => 1, :bogus => 1],
+        )
+        @test_throws "unknown content kind :bogus" render_test_report(
+            TestNode("T"; children=[bad]); out=mktempdir()
+        )
+    end
 end

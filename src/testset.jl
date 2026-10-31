@@ -1308,27 +1308,23 @@ function _emit_own_content!(n::TestNode, acc::Vector{Check})
         foreach(chk -> _repoint_code!(c, chk), placed)   # its code block was placed after it
         return acc
     end
-    for (kind, i) in n.content
+    # the one registry of content kinds: a kind it does not know is an error, never dropped
+    for (kind, node) in _content_items(n)
         if kind === :check
-            _place_check!(c, n.checks[i], acc)
-        elseif kind === :figure
-            push!(c.figures, _place_captured(c, n.figures[i], n.written, "figure"))
-            push!(c.content, :figure => length(c.figures))
-        elseif kind === :table
-            push!(c.tables, _place_captured(c, n.tables[i], n.written, "table"))
-            push!(c.content, :table => length(c.tables))
-        elseif kind === :raw
-            push!(c.raws, _place_captured(c, n.raws[i], n.written, "raw block"))
-            push!(c.content, :raw => length(c.raws))
-        elseif kind === :text
-            push!(c.texts, _place_captured(c, n.texts[i], n.written, "prose block"))
-            push!(c.content, :text => length(c.texts))
+            _place_check!(c, node, acc)
         elseif kind === :code
-            _place_code!(c, n.codes[i], n.written)
+            _place_code!(c, node, n.written)
+        else
+            nodes = getfield(c, _content_field(c, kind))
+            push!(nodes, _place_captured(c, node, n.written, _KIND_NAME[kind]))
+            push!(c.content, kind => length(nodes))
         end
     end
     return acc
 end
+
+# What a placed node is called in an id collision's error.
+const _KIND_NAME = (; figure="figure", table="table", raw="raw block", text="prose block")
 
 # A node captured in a test, placed in the document: its id is claimed in the whole document
 # (Conventions › Identity), since it was named inside its test node only. An id the author wrote is
