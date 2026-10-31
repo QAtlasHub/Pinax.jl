@@ -1538,9 +1538,8 @@ function _cap_gallery_checks(checks, cap)
     length(checks) <= cap && return (checks, 0, 0)
     fails = filter(!passed, checks)
     passes = filter(passed, checks)
-    shown_fail = fails[1:min(cap, length(fails))]
-    room = cap - length(shown_fail)
-    shown_pass = passes[1:min(max(room, 0), length(passes))]
+    shown_fail = first(fails, cap)
+    shown_pass = first(passes, cap - length(shown_fail))
     return (
         vcat(shown_fail, shown_pass),
         length(fails) - length(shown_fail),
