@@ -150,8 +150,8 @@ or pull request that tracks the gap.
   check where it was written, after its code, and its band names the failing checks.
 - A comment is stored under its node's id, and every face shows it on that node — a page, a
   section, a figure or a table. A comment no face can show — its id names no node, or a node of
-  another kind — is a diagnostic in every face, as is a comment store that does not parse; pinax-mcp's
-  `add_comment` refuses the other kinds.
+  another kind — is a diagnostic in every face, as is a comment store that does not parse or holds
+  an entry in the wrong shape; pinax-mcp's `add_comment` refuses the other kinds.
 - The `agent.json` shape is a contract. The pinax-mcp fixture is generated from the emitter
   (`test/test_contract.jl`) and checked against the consumer schema, which must name every key the
   emitter writes. (#169)

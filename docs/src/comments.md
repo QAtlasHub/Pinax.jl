@@ -12,7 +12,9 @@ Enable it in the preamble:
 
 All three are on by default. A name outside these three is an error, so a typo cannot switch a
 layer off silently; and when `:comments` is off while the store holds comments, the diagnostics say
-the gallery hides them. A bookmark is `id = true` (or `false`); any other value is reported, not set.
+the gallery hides them. A bookmark is `id = true` (or `false`) in one `[bookmark]` table; any other
+value is reported, not set. Comments are `[[comment.<id>]]` turns; a `comment` or `bookmark` key of
+any other shape is reported and read as empty.
 
 Every **figure** and every **section** then gets a small `✎` control: click it to comment on that
 node. Sections are commented at their heading; figures at their caption.

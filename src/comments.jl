@@ -53,11 +53,13 @@ function _parse_comments(path::AbstractString)
         return comments, bookmarks, problems
     end
     bad(id, msg) = push!(problems, DiagEntry(WARNING, string(id), msg))
-    for (id, entries) in get(data, "comment", Dict{String,Any}())
+    store(key, how) = _store_table(data, key, how, msg -> bad(basename(path), msg))
+    for (id, entries) in store("comment", "write each turn as `[[comment.<id>]]`")
         turns = _parse_turns(id, entries, bad)
         isempty(turns) || (comments[Symbol(id)] = turns)
     end
-    for (id, on) in get(data, "bookmark", Dict{String,Any}())
+    for (id, on) in
+        store("bookmark", "write them in one `[bookmark]` table, as `<id> = true`")
         on === true && push!(bookmarks, Symbol(id))
         on isa Bool || bad(
             id,
@@ -66,6 +68,18 @@ function _parse_comments(path::AbstractString)
         )
     end
     return comments, bookmarks, problems
+end
+
+# The store's top-level `key` table (`comment` or `bookmark`), keyed by node id; empty when absent. Any
+# other shape (`comment = "x"`, a `[[comment]]` list, `bookmark = true`) holds no id, so it is reported
+# through `bad` with `how` to write it, and read as empty.
+function _store_table(data, key, how, bad)
+    t = get(data, key, Dict{String,Any}())
+    t isa AbstractDict && return t
+    bad(
+        "`$(key)` is $(repr(t)), not a table keyed by node id, so nothing in it is read: $(how)",
+    )
+    return Dict{String,Any}()
 end
 
 # The turns of one `[[comment.<id>]]` list; an entry in the wrong shape is reported through `bad`.
