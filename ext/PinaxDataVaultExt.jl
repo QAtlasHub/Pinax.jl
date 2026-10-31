@@ -95,12 +95,27 @@ function Pinax.report(
         # `out` is a directory (Conventions › Output): one face per subdirectory, one comment store
         cf = get(kwargs, :comments_file, joinpath(out, "comments.toml"))
         kw = (; (k => v for (k, v) in kwargs if k !== :comments_file)...)
-        gallery = Pinax.render(;
-            out=joinpath(out, "html"), theme=:gallery, vault, study, comments_file=cf, kw...
-        )
-        agent = Pinax.render(;
-            out=joinpath(out, "agent"), theme=:agent, vault, study, comments_file=cf, kw...
-        )
+        # a failing check makes `render` throw after it has written its face: write the other face
+        # too, then throw once (render's rule: every output, then the failure)
+        failed = nothing
+        face(dir, theme) =
+            try
+                Pinax.render(;
+                    out=joinpath(out, dir),
+                    theme=theme,
+                    vault,
+                    study,
+                    comments_file=cf,
+                    kw...,
+                )
+            catch e
+                e isa Pinax.ChecksFailed || rethrow()
+                failed = something(failed, e)
+                e.path
+            end
+        gallery = face("html", :gallery)
+        agent = face("agent", :agent)
+        failed === nothing || throw(failed)
         return (; gallery, agent, n=length(pairs), reads, render_observation)
     finally
         _READS[] = nothing

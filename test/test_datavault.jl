@@ -125,6 +125,37 @@ end
     md = read(joinpath(dirname(res.agent), "agent.md"), String)
     @test occursin("| N | val |", md)                          # LLM-readable table inline
 
+    # `out` is a directory: one face per subdirectory, and both read one comment store
+    @test res.gallery == joinpath(tmp, "rep", "html", "index.html")
+    @test res.agent == joinpath(tmp, "rep", "agent", "agent.json")
+    Pinax.add_comment(
+        joinpath(tmp, "rep", "comments.toml"), :sweep, "SHARED_NOTE"; author="me"
+    )
+    res = Pinax.report(vault, recipe; title="Sweep report", out=joinpath(tmp, "rep"))
+    @test occursin("SHARED_NOTE", read(res.gallery, String))
+    @test occursin("SHARED_NOTE", read(joinpath(dirname(res.agent), "agent.md"), String))
+
+    # a failing check nobody counted: both faces are written, then `report` throws (render's rule)
+    failing = function (pairs)
+        @page :f "F" begin
+            @desc md"one failing check"
+        end
+        push!(
+            Pinax.current_document().pages[1].checks,
+            Pinax.Check(:bad, "bad", 2.0, 1.0, 1.0, 0.5, :abs, false),
+        )
+    end
+    out = joinpath(tmp, "repfail")
+    err = try
+        Pinax.report(vault, failing; title="F", out=out)
+        nothing
+    catch e
+        e
+    end
+    @test err isa Pinax.ChecksFailed && err.failed == ["bad"]
+    @test isfile(joinpath(out, "html", "index.html"))
+    @test isfile(joinpath(out, "agent", "agent.json"))
+
     # core method without DataVault loaded would error; here the ext is loaded, so the typed
     # method wins. A non-vault first arg still hits the core fallback error:
     @test_throws ErrorException Pinax.report(42, recipe; title="x", out=joinpath(tmp, "z"))
