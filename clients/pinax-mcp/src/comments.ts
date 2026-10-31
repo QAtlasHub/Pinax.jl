@@ -59,7 +59,7 @@ export class CommentStore {
   }
 
   /** Mark/unmark `id` as bookmarked (Pinax.set_bookmark!). */
-  setBookmark(id: string, on = true): void {
+  setBookmark(id: string, on: boolean): void {
     const data = this.read(true);
     (data.bookmark ??= {})[id] = on;
     this.write(data);

@@ -71,7 +71,7 @@ test("a store that does not parse is never overwritten: a write refuses, naming 
   const store = new CommentStore(path);
   assert.deepEqual(store.comments("fig"), []); // a read sees nothing it can trust
   assert.throws(() => store.addComment("fig", "new"), /comments\.toml.*does not parse/);
-  assert.throws(() => store.setBookmark("fig"), /does not parse/);
+  assert.throws(() => store.setBookmark("fig", true), /does not parse/);
   assert.equal(readFileSync(path, "utf8"), bad); // what a person wrote is still there
 });
 
