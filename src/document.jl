@@ -1142,7 +1142,8 @@ function _push_table!(;
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@table outside of a @section or @page")
-    hdr, rows = _normalize_table(data, header)
+    name = string("@table ", id === nothing ? code : ":$(id)", " in \"", c.anchor, "\"")
+    hdr, rows = _normalize_table(data, header, name)
     if !isempty(hdr)   # every row must be header-wide (catches a wrong-length header= or ragged rows)
         bad = findfirst(r -> length(r) != length(hdr), rows)
         bad === nothing || error(
@@ -1369,36 +1370,53 @@ function _unhandled_node(face, node)
 end
 
 # Normalize the accepted @table inputs into (header::Vector{String}, rows::Vector{Vector{Any}}).
-function _normalize_table(data, header)
-    if data isa NamedTuple                          # columnar: (a=[…], b=[…])
-        cols = collect(values(data))
-        hdr = header === nothing ? collect(string.(keys(data))) : collect(string.(header))
-        n = isempty(cols) ? 0 : maximum(length, cols)
-        rows = [Any[i <= length(c) ? c[i] : missing for c in cols] for i in 1:n]
-        return hdr, rows
-    elseif data isa AbstractMatrix
-        nc = size(data, 2)
-        hdr = header === nothing ? [string(j) for j in 1:nc] : collect(string.(header))
-        rows = [Any[data[i, j] for j in 1:nc] for i in 1:size(data, 1)]
-        return hdr, rows
-    elseif data isa AbstractVector
-        if !isempty(data) && first(data) isa NamedTuple   # row records: [(a=…,b=…), …]
-            ks = keys(first(data))
-            hdr = header === nothing ? collect(string.(ks)) : collect(string.(header))
-            rows = [Any[getfield(r, k) for k in ks] for r in data]
-            return hdr, rows
-        else                                              # vector of row-vectors/tuples
-            rows = [Any[x for x in r] for r in data]
-            width = isempty(rows) ? 0 : length(rows[1])
-            hdr =
-                header === nothing ? [string(j) for j in 1:width] : collect(string.(header))
-            return hdr, rows
-        end
-    end
+# `name` says which table in an error. A ragged input — columns of different lengths, records with
+# different keys — is an error, never padded with `missing` or cut to the first record's keys.
+function _normalize_table(data, header, name="the table")
     return error(
         "Pinax: @table data must be a NamedTuple of columns, a Matrix, or a Vector of " *
         "NamedTuple/Vector rows (got $(typeof(data)))",
     )
+end
+_table_header(header, default) = collect(string.(header === nothing ? default : header))
+
+function _normalize_table(data::NamedTuple, header, name="the table")   # columns: (a=[…], b=[…])
+    ks = keys(data)
+    for k in ks
+        length(data[k]) == length(data[1]) || error(
+            "Pinax: $(name) is ragged — column $(k) has $(length(data[k])) rows but column " *
+            "$(ks[1]) has $(length(data[1])). Every column has the same length.",
+        )
+    end
+    n = isempty(data) ? 0 : length(data[1])
+    return _table_header(header, ks), [Any[c[i] for c in data] for i in 1:n]
+end
+
+function _normalize_table(data::AbstractMatrix, header, name="the table")
+    rows = [Any[data[i, j] for j in axes(data, 2)] for i in axes(data, 1)]
+    return _table_header(header, 1:size(data, 2)), rows
+end
+
+function _normalize_table(data::AbstractVector, header, name="the table")
+    isempty(data) ||
+        !(first(data) isa NamedTuple) ||
+        return _record_rows(data, header, name)
+    rows = [Any[x for x in r] for r in data]   # row-vectors/tuples; widths are checked against the header
+    return _table_header(header, 1:(isempty(rows) ? 0 : length(rows[1]))), rows
+end
+
+# Row records `[(a=…, b=…), …]`: every record holds the first one's keys, in any order.
+function _record_rows(data, header, name)
+    ks = keys(first(data))
+    keystr(r) = r isa NamedTuple ? string("(", join(keys(r), ", "), ")") : repr(typeof(r))
+    for (i, r) in enumerate(data)
+        r isa NamedTuple && issetequal(keys(r), ks) && continue
+        error(
+            "Pinax: $(name) is ragged — row $(i) has keys $(keystr(r)) but row 1 has " *
+            "$(keystr(first(data))). Every record has the same keys.",
+        )
+    end
+    return _table_header(header, ks), [Any[getfield(r, k) for k in ks] for r in data]
 end
 
 """
