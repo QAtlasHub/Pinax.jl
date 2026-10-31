@@ -1104,17 +1104,26 @@ end
 function _sweep_plot_svg(
     path; title, xlabel, ylabel, xticklabels::Vector{String}, series, hline=nothing
 )
-    K = length(xticklabels)
-    W, H, L, R, T, Bm = 640, 300, 66, 150, 30, 46
-    plotw, ploth = W - L - R, H - T - Bm
-    xat(i) = K <= 1 ? L + plotw / 2 : L + plotw * (i - 1) / (K - 1)
+    g = _plot_frame(length(xticklabels), _y_extent(series, hline)...)
+    io = IOBuffer()
+    _svg_axes(io, g, title, xlabel, ylabel, xticklabels)
+    _svg_bands(io, g, series)
+    hline === nothing || _svg_hline(io, g, hline)
+    _svg_series(io, g, series)
+    print(io, "</svg>\n")
+    write(path, take!(io))
+    return path
+end
+
+_series_color(si) = _SERIES_COLORS[(si - 1) % length(_SERIES_COLORS) + 1]
+
+# The y range drawn — every finite value, reference and band edge, and `hline` — padded by 8%, with
+# the pad itself (the outer ticks sit one pad inside the range).
+function _y_extent(series, hline)
     ys = Float64[]
-    for s in series, y in s.ys
-        isfinite(y) && push!(ys, y)
-    end
     for s in series
-        hasproperty(s, :want) || continue
-        append!(
+        append!(ys, filter(isfinite, s.ys))
+        hasproperty(s, :want) && append!(
             ys, filter(isfinite, s.lo), filter(isfinite, s.hi), filter(isfinite, s.want)
         )
     end
@@ -1123,10 +1132,21 @@ function _sweep_plot_svg(
     ylo, yhi = extrema(ys)
     ylo == yhi && (ylo -= 0.5; yhi += 0.5)
     pad = 0.08 * (yhi - ylo)
-    ylo -= pad
-    yhi += pad
+    return ylo - pad, yhi + pad, pad
+end
+
+# The plot's geometry: the canvas, its margins, and where tick `i` and value `v` land.
+function _plot_frame(K, ylo, yhi, pad)
+    W, H, L, R, T, Bm = 640, 300, 66, 150, 30, 46
+    plotw, ploth = W - L - R, H - T - Bm
+    xat(i) = K <= 1 ? L + plotw / 2 : L + plotw * (i - 1) / (K - 1)
     yat(v) = T + ploth * (1 - (v - ylo) / (yhi - ylo))
-    io = IOBuffer()
+    return (; W, H, L, T, plotw, ploth, ylo, yhi, pad, xat, yat)
+end
+
+# The canvas, the title, both axes with their labels and ticks.
+function _svg_axes(io, g, title, xlabel, ylabel, xticklabels)
+    (; W, H, L, T, plotw, ploth, ylo, yhi, pad, xat, yat) = g
     print(
         io,
         """<svg xmlns="http://www.w3.org/2000/svg" width="$(W)" height="$(H)" font-family="ui-monospace,Menlo,monospace" font-size="11">
@@ -1144,58 +1164,75 @@ function _sweep_plot_svg(
             """<line x1="$(L - 4)" y1="$(y)" x2="$(L)" y2="$(y)" stroke="#bbb"/><text x="$(L - 7)" y="$(y + 3)" text-anchor="end" fill="#888">$(_fmt_num(v))</text>\n""",
         )
     end
-    for i in 1:K
+    for (i, lab) in enumerate(xticklabels)
         x = xat(i)
         print(
             io,
-            """<line x1="$(x)" y1="$(T + ploth)" x2="$(x)" y2="$(T + ploth + 4)" stroke="#bbb"/><text x="$(x)" y="$(T + ploth + 16)" text-anchor="middle" fill="#888">$(_xml(xticklabels[i]))</text>\n""",
+            """<line x1="$(x)" y1="$(T + ploth)" x2="$(x)" y2="$(T + ploth + 4)" stroke="#bbb"/><text x="$(x)" y="$(T + ploth + 16)" text-anchor="middle" fill="#888">$(_xml(lab))</text>\n""",
         )
     end
-    # Each series' own tolerance band and dashed reference, in its colour (#130); a band identical to
-    # one already drawn (series sharing a reference) is drawn once.
+    return nothing
+end
+
+# Each series' own tolerance band and dashed reference, in its colour (#130); a band identical to
+# one already drawn (series sharing a reference) is drawn once.
+function _svg_bands(io, g, series)
     drawn = Set{Any}()
     for (si, s) in enumerate(series)
         hasproperty(s, :want) || continue
         key = (s.xs, s.lo, s.hi, s.want)
         key in drawn && continue
         push!(drawn, key)
-        col = _SERIES_COLORS[(si - 1) % length(_SERIES_COLORS) + 1]
-        hi_pts, lo_pts = String[], String[]
-        for j in eachindex(s.xs)
-            (isfinite(s.lo[j]) && isfinite(s.hi[j])) || continue
-            push!(hi_pts, "$(xat(s.xs[j])),$(yat(s.hi[j]))")
-            pushfirst!(lo_pts, "$(xat(s.xs[j])),$(yat(s.lo[j]))")
-        end
-        isempty(hi_pts) || print(
-            io,
-            """<polygon points="$(join(vcat(hi_pts, lo_pts), " "))" fill="$(col)" fill-opacity="0.12"/>\n""",
-        )
-        d = [
-            "$(xat(s.xs[j])),$(yat(s.want[j]))" for
-            j in eachindex(s.xs) if isfinite(s.want[j])
-        ]
-        length(d) >= 2 && print(
-            io,
-            """<polyline points="$(join(d, " "))" fill="none" stroke="$(col)" stroke-width="1.3" stroke-dasharray="4,3"/>\n""",
-        )
+        _svg_band(io, g, s, _series_color(si))
     end
-    if hline !== nothing
-        y = yat(hline)
-        print(
-            io,
-            """<line x1="$(L)" y1="$(y)" x2="$(L + plotw)" y2="$(y)" stroke="#d9534f" stroke-width="1" stroke-dasharray="3,2"/><text x="$(L + plotw)" y="$(y - 3)" text-anchor="end" fill="#d9534f">tol</text>\n""",
-        )
-    end
+    return nothing
+end
+
+function _svg_band(io, g, s, col)
+    (; xat, yat) = g
+    keep = [j for j in eachindex(s.xs) if isfinite(s.lo[j]) && isfinite(s.hi[j])]
+    hi_pts = ["$(xat(s.xs[j])),$(yat(s.hi[j]))" for j in keep]
+    lo_pts = reverse!(["$(xat(s.xs[j])),$(yat(s.lo[j]))" for j in keep])
+    isempty(hi_pts) || print(
+        io,
+        """<polygon points="$(join(vcat(hi_pts, lo_pts), " "))" fill="$(col)" fill-opacity="0.12"/>\n""",
+    )
+    _svg_polyline(
+        io,
+        g,
+        s.xs,
+        s.want,
+        "stroke=\"$(col)\" stroke-width=\"1.3\" stroke-dasharray=\"4,3\"",
+    )
+    return nothing
+end
+
+# A line through the finite points of `ys` at ticks `xs`, when there are two to join.
+function _svg_polyline(io, g, xs, ys, style)
+    (; xat, yat) = g
+    d = ["$(xat(xs[j])),$(yat(ys[j]))" for j in eachindex(xs) if isfinite(ys[j])]
+    length(d) >= 2 &&
+        print(io, """<polyline points="$(join(d, " "))" fill="none" $(style)/>\n""")
+    return nothing
+end
+
+function _svg_hline(io, g, hline)
+    (; L, plotw, yat) = g
+    y = yat(hline)
+    print(
+        io,
+        """<line x1="$(L)" y1="$(y)" x2="$(L + plotw)" y2="$(y)" stroke="#d9534f" stroke-width="1" stroke-dasharray="3,2"/><text x="$(L + plotw)" y="$(y - 3)" text-anchor="end" fill="#d9534f">tol</text>\n""",
+    )
+    return nothing
+end
+
+# Each series' line and markers (a failed check's in red), and its legend entry when it has a label.
+function _svg_series(io, g, series)
+    (; L, T, plotw, xat, yat) = g
     ly = T + 4
     for (si, s) in enumerate(series)
-        col = _SERIES_COLORS[(si - 1) % length(_SERIES_COLORS) + 1]
-        d = [
-            "$(xat(s.xs[j])),$(yat(s.ys[j]))" for j in eachindex(s.xs) if isfinite(s.ys[j])
-        ]
-        length(d) >= 2 && print(
-            io,
-            """<polyline points="$(join(d, " "))" fill="none" stroke="$(col)" stroke-width="1.6"/>\n""",
-        )
+        col = _series_color(si)
+        _svg_polyline(io, g, s.xs, s.ys, "stroke=\"$(col)\" stroke-width=\"1.6\"")
         for j in eachindex(s.xs)
             isfinite(s.ys[j]) || continue
             print(
@@ -1203,17 +1240,14 @@ function _sweep_plot_svg(
                 """<circle cx="$(xat(s.xs[j]))" cy="$(yat(s.ys[j]))" r="3" fill="$(s.ok[j] ? col : "#d9534f")" stroke="#fff" stroke-width="0.6"/>\n""",
             )
         end
-        if !isempty(s.label)
-            print(
-                io,
-                """<line x1="$(L + plotw + 10)" y1="$(ly)" x2="$(L + plotw + 26)" y2="$(ly)" stroke="$(col)" stroke-width="2"/><text x="$(L + plotw + 30)" y="$(ly + 3)" fill="#555">$(_xml(_trunc(s.label, 18)))</text>\n""",
-            )
-            ly += 15
-        end
+        isempty(s.label) && continue
+        print(
+            io,
+            """<line x1="$(L + plotw + 10)" y1="$(ly)" x2="$(L + plotw + 26)" y2="$(ly)" stroke="$(col)" stroke-width="2"/><text x="$(L + plotw + 30)" y="$(ly + 3)" fill="#555">$(_xml(_trunc(s.label, 18)))</text>\n""",
+        )
+        ly += 15
     end
-    print(io, "</svg>\n")
-    write(path, take!(io))
-    return path
+    return nothing
 end
 
 # ── the document ─────────────────────────────────────────────────────
