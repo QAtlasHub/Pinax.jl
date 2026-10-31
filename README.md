@@ -17,11 +17,12 @@
 **Pinax** turns the figures and tables your analysis scripts produce into a **structured,
 self-contained catalogue** of a computational study — described once and rendered three ways:
 
-- **HTML gallery** — sections as cards, a responsive figure grid, markdown + KaTeX math,
+- **HTML gallery** — an index of page cards, a responsive figure grid, markdown + KaTeX math,
   cross-references, citations, and an interactive comment layer;
 - **LaTeX → PDF** — the same manuscript as a typeset document;
-- **`agent.json`** — a machine-readable view (figures *as data tables*, sections, captions) that an
-  LLM or downstream tool can read.
+- **`agent.md` / `agent.json`** — the same report for an agent to read: in reading order, each figure
+  pointing at its data file (every plotted point) and at where it was written, every check with its
+  numbers and verdict.
 
 It generalizes the hand-written `build_report` page an analysis pipeline grows over time: you
 describe the manuscript once with a small DSL, point each figure at the value (or data key) it
@@ -50,7 +51,7 @@ plot_energy() = plot(0.1:0.05:2, β -> 1 / β; xlabel = "β", ylabel = "E/N", le
     end
 end
 
-render(out = "site")               # -> site/index.html + assets/figures/…/energy_fig1.svg
+render(out = "site")               # -> site/index.html + assets/figures/…/energy_fig_<hash>.svg
 ```
 
 Then preview it, or render the same document another way:
@@ -62,8 +63,8 @@ render(theme = :agent, out = "agent")     # -> agent/agent.json  (machine-readab
 ```
 
 `@figure` captures its expression lazily, so figures are computed (and cached) only when you
-`render`. Sections become cards; figures lay out in a responsive grid; `$…$` math is rendered by
-KaTeX.
+`render`. Each page is a card on the index (a `:rich` index also lists the page's sections in its
+card); figures lay out in a responsive grid; `$…$` math is rendered by KaTeX.
 
 ## Three faces of one report
 
@@ -73,8 +74,8 @@ KaTeX.
 | `:latex` | LaTeX → PDF | manuscripts / sharing |
 | `:agent` | `agent.json` | LLMs / downstream tooling |
 
-The same source — sections, `@desc`/`@caption`, `@table`, citations, a `@benchmark`'s PASS/FAIL
-verdict — flows to every face. Themes are pluggable: `render(; theme = MyTheme())`,
+The same source — sections, `@desc`/`@caption`, `@table`, citations, and the PASS/FAIL verdict of
+the `@test` checks a section holds — flows to every face. Themes are pluggable: `render(; theme = MyTheme())`,
 `register_theme!(:mine, MyTheme())`, or `theme = "path/to/mytheme.jl"`.
 
 ## Bridging a parameter sweep
@@ -96,8 +97,9 @@ A test suite reports one bit: green or red. A `@test isapprox(E, oracle; rtol=1e
 the reference and the tolerance, then threw all three away. `Pinax.test` renders the suite instead —
 one page per test file, each check carrying the margin it passed by.
 
-**The suite is not touched.** There is no Pinax macro to add to it; the suite stays plain
-`@testset` / `@test`, and the one Pinax touch is the call:
+**The suite is not touched.** Nothing Pinax has to be added to it — the suite stays plain
+`@testset` / `@test` (the optional `@pinaxignore`, below, only leaves a testset out of the
+report), and the one Pinax touch is the call:
 
 ```julia
 using Pinax, Test
@@ -124,5 +126,5 @@ alongside the Documenter docs is [#68](https://github.com/QAtlasHub/Pinax.jl/iss
 
 `render(theme = :agent)` emits an `agent.json` an LLM can read. **[`clients/pinax-mcp`](clients/pinax-mcp)**
 is a Node MCP server over that artifact: it serves every unit (figure / table / section) by id and
-presents a figure as its underlying data table — `npx pinax-mcp --agent <render-out>`. See its
+reads a figure's data file for an agent — `npx pinax-mcp --agent <render-out>`. See its
 [README](clients/pinax-mcp/README.md).

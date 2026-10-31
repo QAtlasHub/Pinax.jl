@@ -50,6 +50,10 @@ end
 
 _ext(p) = (e=splitext(p)[2]; isempty(e) ? "" : lowercase(e[2:end]))
 
+# A written file as a face names it: relative to the face's directory, with forward slashes (a URL,
+# and the same on Windows).
+_rel_url(path, outdir) = replace(relpath(path, outdir), '\\' => '/')
+
 # Pre-made file (first-class): same-format copy (v1 has no conversion, notes 04).
 function _copyfile(src::AbstractString, base)
     isfile(src) || error("Pinax: @figure file not found: $(src)")
@@ -60,7 +64,11 @@ function _copyfile(src::AbstractString, base)
     return dest
 end
 
-# ---- data-table emit: the agent backend's text view of a figure's plotted data ----
+# ---- a figure's data file: what an agent reads behind the plot ----
+#
+# The agent face points at a figure's data and never inlines a cut copy of it (Conventions › Faces):
+# the file holds every plotted point, and `agent.json` / `agent.md` describe it exactly (its columns,
+# and how many points each series has) so an agent knows what is behind the pointer before opening it.
 
 function _csv_field(v)
     # flatten newlines so a value never spans CSV lines (the reader splits on raw newlines)
@@ -69,69 +77,62 @@ function _csv_field(v)
     return needs ? string('"', replace(s, '"' => "\"\""), '"') : s
 end
 _csv_num(v::Real) = isfinite(v) ? string(v) : ""   # NaN/Inf -> blank cell
+_csv_num(::Union{Missing,Nothing}) = ""             # a missing value is a gap too, like NaN
 _csv_num(v) = _csv_field(v)                         # categorical x (strings/dates)
 
-# Choose <= `budget` indices of `ys` that PRESERVE SHAPE: per contiguous bucket keep the min-y and
-# max-y points (plus the two endpoints), so peaks/troughs survive — unlike a uniform stride, which can
-# step straight over a sharp feature. The LLM reads this data, so a dropped peak is a wrong read.
-# Non-finite / non-numeric y degrades to the bucket's first point (≈ uniform).
-function _pick_indices(ys, budget::Int)
-    n = length(ys)
-    n <= budget && return collect(1:n)
-    nb = max(1, budget ÷ 2)                        # 2 points/bucket (its min and its max)
-    keep = Set{Int}((1, n))                        # always keep the endpoints
-    asnum(v) = (v isa Real && isfinite(v)) ? Float64(v) : nothing
-    for k in 1:nb
-        lo = 1 + ((k - 1) * n) ÷ nb
-        hi = (k * n) ÷ nb
-        lo > hi && continue
-        imin = imax = lo
-        vmin = vmax = nothing
-        for i in lo:hi
-            v = asnum(ys[i])
-            v === nothing && continue
-            (vmin === nothing || v < vmin) && (vmin=v; imin=i)
-            (vmax === nothing || v > vmax) && (vmax=v; imax=i)
-        end
-        push!(keep, imin, imax)
-    end
-    return sort!(collect(keep))
+# The columns of a data file: the series label, then the x and y axes, named by the plot's axis labels
+# when it has them (`series,beta,E/N`), else `series,x,y`.
+function _data_columns(tbl)
+    name(label, fallback) = isempty(strip(string(label))) ? fallback : string(label)
+    return ["series", name(get(tbl, :xlabel, ""), "x"), name(get(tbl, :ylabel, ""), "y")]
 end
 
-# Long-format CSV (series,x,y). Each series is **shape-preservingly** downsampled to <= `maxrows`
-# points (min/max per bucket — peaks survive) so a dense plot stays cheap AND faithful to read.
-function _print_csv_table(io, tbl, maxrows::Int)
-    xl = get(tbl, :xlabel, "")
-    yl = get(tbl, :ylabel, "")
-    reduced = any(s -> min(length(s.x), length(s.y)) > maxrows, tbl.series)
-    note =
-        reduced ? " (downsampled: shape-preserving min/max, <= $(maxrows) pts/series)" : ""
-    println(
-        io,
-        "# pinax figure data — xlabel=",
-        _csv_field(xl),
-        " ylabel=",
-        _csv_field(yl),
-        note,
-    )
-    println(io, "series,x,y")
-    for s in tbl.series
-        n = min(length(s.x), length(s.y))
-        for i in _pick_indices(view(s.y, 1:n), maxrows)
-            println(io, _csv_field(s.label), ",", _csv_num(s.x[i]), ",", _csv_num(s.y[i]))
+# A series whose x and y differ in length has no one set of points: an error naming it, never a cut.
+function _check_series_lengths(series)
+    for s in series
+        length(s.x) == length(s.y) || error(
+            "Pinax: figure data series \"$(s.label)\" has $(length(s.x)) x values and " *
+            "$(length(s.y)) y values: each point needs both.",
+        )
+    end
+    return series
+end
+
+# Series labels as the data file's `series` column names them: a label shared by two series gets
+# " (2)", " (3)" after its first, so the two never read as one.
+function _unique_labels(series)
+    seen = Dict{String,Int}()
+    return map(series) do s
+        n = seen[s.label] = get(seen, s.label, 0) + 1
+        return n == 1 ? s.label : string(s.label, " (", n, ")")
+    end
+end
+
+# A data table `(; xlabel, ylabel, series)` as a long-format CSV: the column header, then every point
+# (a NaN — a gap in the plot — is a row with a blank cell, and not counted as a point).
+function _print_csv_table(io, tbl)
+    _check_series_lengths(tbl.series)
+    println(io, join((_csv_field(c) for c in _data_columns(tbl)), ","))
+    for (s, label) in zip(tbl.series, _unique_labels(tbl.series))
+        for i in eachindex(s.x, s.y)
+            println(io, _csv_field(label), ",", _csv_num(s.x[i]), ",", _csv_num(s.y[i]))
         end
     end
     return nothing
 end
 
-# Write a figure's plotted data as `<base>.csv`, or return `nothing` if it exposes none.
-function _write_table(x, base; maxrows::Int=2000)
-    tbl = _figure_table(x)
-    tbl === nothing && return nothing
+# Write a data table as `<base>.csv` and return its path.
+function _write_csv(tbl, base)
     dest = string(base, ".csv")
     mkpath(dirname(dest))
-    open(io -> _print_csv_table(io, tbl, maxrows), dest, "w")
+    open(io -> _print_csv_table(io, tbl), dest, "w")
     return dest
+end
+
+# A figure object's plotted data as `<base>.csv`, or `nothing` if it exposes none.
+function _write_table(x, base)
+    tbl = _figure_table(x)
+    return tbl === nothing ? nothing : _write_csv(tbl, base)
 end
 
 # Split one CSV line into fields, honoring "quoted" fields and "" escapes (inverse of `_csv_field`).
@@ -167,86 +168,52 @@ function _split_csv_line(line)
     return fields
 end
 
-# Read a Pinax figure-data CSV back into (header, rows, total) for the agent backend's "figure as a
-# table" view — the plot object is gone after materialize, but this CSV asset persists across the
-# cache. Numeric cells are re-typed; `rows` is downsampled to <= `maxrows` (a cheap inline preview).
-function _read_csv_table(path; maxrows::Int=20)
+# What an agent is told about a data file without reading it: its columns and, per series in order,
+# how many points it holds — a row with a blank x or y (a gap) is not one. Exact — read from the
+# file itself.
+function _data_descriptor(path)
     isfile(path) || return nothing
-    lines = [l for l in readlines(path) if !isempty(l) && !startswith(l, "#")]
+    lines = [l for l in eachline(path) if !isempty(l)]
     isempty(lines) && return nothing
-    # col 1 is the (categorical) series label — keep it a String; numeric columns are re-typed, and a
-    # blank cell (a NaN/Inf the writer dropped) becomes `missing` (-> JSON null), not the string "".
-    cell(j, s) = j == 1 ? s : (isempty(s) ? missing : something(tryparse(Float64, s), s))
-    header = _split_csv_line(lines[1])
-    allrows = Vector{Any}[
-        (f=_split_csv_line(l); Any[cell(j, f[j]) for j in eachindex(f)]) for
-        l in @view lines[2:end]
-    ]
-    return (header=header, rows=_downsample_rows(allrows, maxrows), total=length(allrows))
-end
-
-# Downsample long-format (label,x,y) rows to <= `budget`, shape-preservingly PER SERIES (so a peak in
-# any one series survives). Groups by the series label (col 1) and keeps min/max-per-bucket on y (col 3).
-function _downsample_rows(rows, budget::Int)
-    length(rows) <= budget && return rows
-    groups = Dict{Any,Vector{Int}}()
-    order = Any[]
-    for (i, r) in enumerate(rows)
-        haskey(groups, r[1]) || push!(order, r[1])
-        push!(get!(groups, r[1], Int[]), i)
-    end
-    nseries = length(order)
-    # more series than the budget can afford min+max for → per-series shape preservation is moot;
-    # fall back to a uniform stride over all rows so the <= budget bound still holds.
-    2 * nseries > budget && return rows[1:cld(length(rows), budget):length(rows)]
-    per = max(2, budget ÷ nseries)
-    keep = Int[]
-    for lbl in order
-        gidx = groups[lbl]
-        for p in _pick_indices(Any[rows[i][3] for i in gidx], per)
-            push!(keep, gidx[p])
+    series = Pair{String,Int}[]
+    at = Dict{String,Int}()
+    for l in @view lines[2:end]
+        lbl, x, y = _split_csv_line(l)
+        k = get!(at, lbl) do
+            push!(series, lbl => 0)
+            return length(series)
         end
+        isempty(x) || isempty(y) || (series[k] = lbl => last(series[k]) + 1)
     end
-    sort!(unique!(keep))
-    return rows[keep]
+    return (columns=_split_csv_line(lines[1]), series=series)
 end
 
-# Normalize a `@figure … data=` NamedTuple into a list of `(; label, x, y)` series. Accepts the
-# `_figure_table` shape `(; series=[(; label, x, y)], …)` or a convenience `(; x, y[, label])`.
+# `@figure … data=` as a data table `(; xlabel, ylabel, series)` — the shape `_figure_table` returns.
+# Axis labels are optional `xlabel=` / `ylabel=` fields beside the series. Each series' points are
+# COPIED: this runs once, where `data=` is written, and the figure keeps the result, so a caller that
+# reuses its vectors afterwards cannot change what the figure's data file says.
+function _table_of_data(data)
+    label(k) = hasproperty(data, k) ? string(getproperty(data, k)) : ""
+    series = _check_series_lengths(_series_of(data))
+    return (; xlabel=label(:xlabel), ylabel=label(:ylabel), series)
+end
+
+# Normalize a `@figure … data=` NamedTuple into a list of `(; label, x, y)` series, the points
+# copied. Accepts `(; series=[(; label, x, y)], …)` or a convenience `(; x, y[, label])`.
 function _series_of(data)
     if hasproperty(data, :series)
-        out = NamedTuple[]
-        for (i, s) in enumerate(data.series)
-            lbl = hasproperty(s, :label) ? string(s.label) : "y$(i)"
-            push!(out, (; label=lbl, x=s.x, y=s.y))
-        end
-        return out
+        return NamedTuple[
+            _data_series(hasproperty(s, :label) ? s.label : "y$(i)", s) for
+            (i, s) in enumerate(data.series)
+        ]
     elseif hasproperty(data, :x) && hasproperty(data, :y)
-        lbl = hasproperty(data, :label) ? string(data.label) : "y"
-        return [(; label=lbl, x=data.x, y=data.y)]
+        return [_data_series(hasproperty(data, :label) ? data.label : "y", data)]
     end
     return error(
         "Pinax: @figure data= needs `series=[(; label, x, y)]` or `(; x, y[, label])`."
     )
 end
-
-# Eager `data=` → the same `(header, rows, total)` long-format the agent backend gets from a
-# materialized CSV — but WITHOUT building the plot (no plotting backend needed). Numeric `x`/`y`
-# stay native (the agent JSON emits typed rows); `rows` is shape-preservingly downsampled to <= `maxrows`.
-function _table_from_data(data; maxrows::Int=20)
-    rows = Vector{Any}[]
-    for s in _series_of(data)
-        n = min(length(s.x), length(s.y))
-        for i in 1:n
-            push!(rows, Any[s.label, s.x[i], s.y[i]])
-        end
-    end
-    return (
-        header=["series", "x", "y"],
-        rows=_downsample_rows(rows, maxrows),
-        total=length(rows),
-    )
-end
+_data_series(label, s) = (; label=string(label), x=collect(s.x), y=collect(s.y))
 
 """
     _materialize(fig, base, fmts) -> Vector{String}

@@ -65,6 +65,17 @@ using Test
         @test occursin("class=\"section bookmarked\"", html)
     end
 
+    @testset "a bookmark reaches its section by id, whatever characters the id has" begin
+        f = joinpath(tmp, "cm4u.toml")
+        Pinax.set_bookmark!(f, :α_sec, true)   # stored under the id; its anchor is hashed
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :α_sec "Alpha" begin end
+        end
+        html = read(Pinax.render(; out=site("s4u"), comments_file=f), String)
+        @test occursin("class=\"section bookmarked\"", html)
+    end
+
     @testset "no comments file -> no comment markup" begin
         Pinax.reset!()
         @page :p "P" begin
@@ -119,5 +130,41 @@ using Test
         @test occursin("<div class=\"pinax-comments\">", card)
         @test occursin("look at this peak", card)
         @test occursin("<span class=\"author\">me</span>", card)
+    end
+
+    @testset "an unparseable store is a diagnostic, not silence" begin
+        f = joinpath(tmp, "broken.toml")
+        write(f, "[comment\nthis is not toml")
+        @test Pinax.read_comments(f) ==
+            (Dict{Symbol,Vector{Pinax.Comment}}(), Set{Symbol}())
+        Pinax.reset!()
+        @page :p "P" begin end
+        html = read(Pinax.render(; out=site("sbroken"), comments_file=f), String)
+        diag = html[first(findfirst("id=\"diagnostics\"", html)):end]
+        @test occursin("broken.toml", diag) && occursin("does not parse", diag)
+    end
+
+    @testset "a store entry in the wrong shape is a diagnostic, not silence" begin
+        # `[comment.p]` is one table, not a turn list; a turn that is not a table, or has no text,
+        # is not a turn either — each is said, and the well-formed turns are still shown
+        f = joinpath(tmp, "shapes.toml")
+        write(
+            f,
+            """
+            comment.p = [{ author = "me", text = "KEPT_TURN" }, "not a table", { author = "me" }]
+            [comment.q]
+            author = "me"
+            text = "one table"
+            """,
+        )
+        Pinax.reset!()
+        @page :p "P" begin end
+        @page :q "Q" begin end
+        Pinax.render(; out=site("sshapes"), theme=:agent, comments_file=f)
+        md = read(joinpath(site("sshapes"), "agent.md"), String)
+        @test occursin("KEPT_TURN", md)
+        diag = md[first(findfirst("## Diagnostics", md)):end]
+        @test occursin("q:", diag) && occursin("[[comment.q]]", diag)
+        @test occursin("p:", diag) && occursin("turn 2", diag) && occursin("turn 3", diag)
     end
 end

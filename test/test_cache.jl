@@ -78,8 +78,8 @@ using Test
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" begin
-                @figure svg1
-                @figure svg2
+                @figure svg1 id = :s_fig1
+                @figure svg2 id = :s_fig2
             end
         end
         Pinax.render(; out=outdir)
@@ -91,11 +91,28 @@ using Test
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" begin
-                @figure svg1
+                @figure svg1 id = :s_fig1
             end
         end
         Pinax.render(; out=outdir)
         @test isfile(a1)                      # still referenced
         @test !isfile(a2)                     # orphan cleaned up
     end
+end
+
+@testset "a corrupt render manifest is a warning, and the render rebuilds it" begin
+    tmp = mktempdir()
+    svg = joinpath(tmp, "a.svg")
+    write(svg, "<svg xmlns='http://www.w3.org/2000/svg'/>")
+    out = joinpath(tmp, "site")
+    mkpath(out)
+    write(joinpath(out, Pinax.MANIFEST_FILE), "this is = = not toml [")
+    @test_logs (:warn, r"manifest.*not valid TOML") Pinax.rendered_assets(out)
+    Pinax.reset!()
+    @page :p "P" begin
+        @figure svg id = :f
+    end
+    @test_logs (:warn, r"manifest") match_mode = :any Pinax.render(; out=out)
+    # the derived cache is rebuilt: the next read sees this render's assets, without a warning
+    @test (@test_logs Pinax.rendered_assets(out)) == ["assets/figures/p/f.svg"]
 end

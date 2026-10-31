@@ -59,6 +59,21 @@ using ParamIO: ParamIO
         @test calls[] == 2                   # data changed -> cache MISS -> re-materialized
     end
 
+    @testset "data that cannot be fingerprinted is said, and never served from the cache" begin
+        # a vault that holds no `.done` for the key: nothing says when its data changes, so a cache
+        # hit could show a stale figure — the figure re-renders every time, and a warning says why
+        empty = DataVault.Vault(cfg; run="never_done")
+        calls[] = 0
+        out3 = joinpath(tmp, "site3")
+        for n in 1:2
+            build()
+            @test_logs (:warn, r"cannot fingerprint the data") match_mode = :any Pinax.render(;
+                out=out3, vault=empty
+            )
+            @test calls[] == n
+        end
+    end
+
     @testset "without a vault, data changes are not detected (prior behavior)" begin
         calls[] = 0
         out2 = joinpath(tmp, "site2")
@@ -125,7 +140,108 @@ end
     md = read(joinpath(dirname(res.agent), "agent.md"), String)
     @test occursin("| N | val |", md)                          # LLM-readable table inline
 
+    # `out` is a directory: one face per subdirectory, and both read one comment store
+    @test res.gallery == joinpath(tmp, "rep", "html", "index.html")
+    @test res.agent == joinpath(tmp, "rep", "agent", "agent.json")
+    Pinax.add_comment(
+        joinpath(tmp, "rep", "comments.toml"), :sweep, "SHARED_NOTE"; author="me"
+    )
+    res = Pinax.report(vault, recipe; title="Sweep report", out=joinpath(tmp, "rep"))
+    @test occursin("SHARED_NOTE", read(res.gallery, String))
+    @test occursin("SHARED_NOTE", read(joinpath(dirname(res.agent), "agent.md"), String))
+
+    # `comments_file=` overrides the store under `out`, for both faces
+    custom = joinpath(tmp, "elsewhere", "notes.toml")
+    Pinax.add_comment(custom, :sweep, "CUSTOM_NOTE"; author="me")
+    res = Pinax.report(
+        vault, recipe; title="Sweep report", out=joinpath(tmp, "rep"), comments_file=custom
+    )
+    for face in (res.gallery, joinpath(dirname(res.agent), "agent.md"), res.agent)
+        @test occursin("CUSTOM_NOTE", read(face, String))
+        @test !occursin("SHARED_NOTE", read(face, String))
+    end
+
+    # a failing check nobody counted: both faces are written, then `report` throws (render's rule)
+    failing = function (pairs)
+        @page :f "F" begin
+            @desc md"one failing check"
+        end
+        push!(
+            Pinax.current_document().pages[1].checks,
+            Pinax.Check(:bad, "bad", 2.0, 1.0, 1.0, 0.5, :abs, false),
+        )
+    end
+    out = joinpath(tmp, "repfail")
+    err = try
+        Pinax.report(vault, failing; title="F", out=out)
+        nothing
+    catch e
+        e
+    end
+    @test err isa Pinax.ChecksFailed && err.failed == ["bad"]
+    @test isfile(joinpath(out, "html", "index.html"))
+    @test isfile(joinpath(out, "agent", "agent.json"))
+
     # core method without DataVault loaded would error; here the ext is loaded, so the typed
     # method wins. A non-vault first arg still hits the core fallback error:
     @test_throws ErrorException Pinax.report(42, recipe; title="x", out=joinpath(tmp, "z"))
+end
+
+@testset "report: an empty vault is an error; the cache keys on the bytes the recipe read" begin
+    tmp = mktempdir()
+    cfg = joinpath(tmp, "config.toml")
+    write(
+        cfg,
+        """
+        [study]
+        project_name = "bytes"
+        total_samples = 1
+        outdir = "$(joinpath(tmp, "vault"))"
+        [datavault]
+        path_keys = ["system.N"]
+        [[paramsets]]
+        [paramsets.system]
+        N = [8]
+        """,
+    )
+    key = only(ParamIO.expand(ParamIO.load(cfg)))
+    calls = Ref(0)
+    svg = joinpath(tmp, "fig.svg")
+    figure_page(pairs) = @page :p "P" begin
+        @figure params = first(pairs)[1] begin
+            calls[] += 1
+            write(svg, "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>")
+            svg
+        end
+    end
+
+    # a vault with no :done key has nothing to report
+    @test_throws "no :done keys in vault (run=empty)" Pinax.report(
+        DataVault.Vault(cfg; run="empty"), figure_page; title="E", out=joinpath(tmp, "e")
+    )
+
+    vault = DataVault.Vault(cfg; run="phase1")
+    save_done!(v) = DataVault.mark_done!(
+        vault, key; result=DataVault.save!(vault, key, Dict("val" => v))
+    )
+    save_done!(1.0)
+    out = joinpath(tmp, "rep")
+    Pinax.report(vault, figure_page; title="B", out=out)
+    @test calls[] == 2                                   # gallery + agent
+
+    # the bytes change and the marker does not: the recipe reads the new bytes, so it is a miss
+    DataVault.save!(vault, key, Dict("val" => 3.0))
+    res = Pinax.report(vault, figure_page; title="B", out=out)
+    @test only(res.reads).read_sha256 != only(res.reads).result_sha256
+    @test calls[] == 2 + 2                               # re-materialized, in both faces
+
+    # the bytes change after the recipe read them, marker and all: the figure shows what was read,
+    # so it stays a cache hit
+    rewrite_after_read = function (pairs)
+        figure_page(pairs)
+        save_done!(2.0)
+    end
+    before = calls[]
+    Pinax.report(vault, rewrite_after_read; title="B", out=out)
+    @test calls[] == before
 end

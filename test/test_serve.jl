@@ -9,7 +9,7 @@ using Downloads: Downloads
     Pinax.reset!()
     @page :p "P" begin
         @section :s "S" begin
-            @figure svg
+            @figure svg id = :s_fig1
         end
     end
     out = joinpath(tmp, "site")
@@ -129,4 +129,148 @@ end
     finally
         close(h.server)
     end
+end
+
+@testset "serve: a missing file is 404; a request with no request line gets no reply" begin
+    root = mktempdir()
+    write(joinpath(root, "index.html"), "<html>ok</html>")
+    h = Pinax.serve(root; host="127.0.0.1", blocking=false, port=8158)
+    try
+        @test occursin("404 Not Found: nope.html", _raw_get(h.port, "/nope.html"))
+        # a client that opens and sends only a blank line: the server closes it without a response
+        sock = Pinax.Sockets.connect("127.0.0.1", h.port)
+        write(sock, "\r\n")
+        t = Timer(_ -> close(sock), 10)
+        try
+            @test isempty(read(sock, String))
+        finally
+            close(t)
+        end
+    finally
+        close(h.server)
+    end
+end
+
+# A connection that a test drives directly: the request is read from `req`, the response is written
+# to `resp`. `_serve_handle` is called in the test's own task, so its log records can be checked.
+struct _MockConn <: IO
+    req::IOBuffer
+    resp::IOBuffer
+end
+_MockConn(request::AbstractString) = _MockConn(IOBuffer(request), IOBuffer())
+Base.eof(c::_MockConn) = eof(c.req)
+Base.read(c::_MockConn, ::Type{UInt8}) = read(c.req, UInt8)
+Base.unsafe_write(c::_MockConn, p::Ptr{UInt8}, n::UInt) = unsafe_write(c.resp, p, n)
+Base.close(::_MockConn) = nothing
+
+# A client that has gone away: writing to it fails as a closed socket does.
+struct _GoneConn <: IO
+    req::IOBuffer
+end
+Base.eof(c::_GoneConn) = eof(c.req)
+Base.read(c::_GoneConn, ::Type{UInt8}) = read(c.req, UInt8)
+function Base.unsafe_write(::_GoneConn, ::Ptr{UInt8}, ::UInt)
+    return throw(Base.IOError("broken pipe", -32))
+end
+Base.close(::_GoneConn) = nothing
+
+# The response `_serve_handle` writes for a GET of `target` with the given extra header lines.
+function _handle(root, target, headers...)
+    conn = _MockConn(join(["GET $(target) HTTP/1.1", headers..., "", ""], "\r\n"))
+    Pinax._serve_handle(conn, root)
+    return String(take!(conn.resp))
+end
+
+@testset "serve: byte ranges" begin
+    root = mktempdir()
+    write(joinpath(root, "f.bin"), "0123456789")
+    write(joinpath(root, "empty.bin"), "")
+    range(r) = _handle(root, "/f.bin", "Range: bytes=$(r)")
+
+    r = range("2-4")
+    @test startswith(r, "HTTP/1.1 206 Partial Content\r\n")
+    @test occursin("Content-Range: bytes 2-4/10\r\n", r) && endswith(r, "\r\n\r\n234")
+    @test endswith(range("7-"), "\r\n\r\n789")
+    @test endswith(range("8-99"), "\r\n\r\n89")                 # an end past the file is cut to it
+
+    # a suffix range is the LAST n bytes
+    r = range("-3")
+    @test occursin("Content-Range: bytes 7-9/10\r\n", r) && endswith(r, "\r\n\r\n789")
+    @test endswith(range("-99"), "\r\n\r\n0123456789")          # longer than the file: all of it
+
+    # a range the file cannot satisfy is 416, naming the file's length
+    for r in ("10-", "99999999999999999999-", "-0")
+        resp = range(r)
+        @test startswith(resp, "HTTP/1.1 416 Range Not Satisfiable\r\n")
+        @test occursin("Content-Range: bytes */10\r\n", resp)
+    end
+    @test startswith(
+        _handle(root, "/empty.bin", "Range: bytes=0-"), "HTTP/1.1 416 Range Not Satisfiable"
+    )
+
+    # a range this server does not read is ignored: the whole file, as without one
+    for r in ("5-2", "-", "0-1,4-5")
+        resp = range(r)
+        @test startswith(resp, "HTTP/1.1 200 OK\r\n") &&
+            endswith(resp, "\r\n\r\n0123456789")
+    end
+end
+
+@testset "serve: a failure is a 500 and a warning; a client gone is neither" begin
+    root = mktempdir()
+    write(joinpath(root, "index.html"), "<html>ok</html>")
+    # a NUL in the path is no file name the system accepts: the lookup throws an ArgumentError
+    resp = @test_logs (:warn, r"Pinax.serve: .*/%00") match_mode = :any _handle(
+        root, "/%00"
+    )
+    @test startswith(resp, "HTTP/1.1 500 Internal Server Error\r\n")
+    # a client that went away before the response: nothing to answer, nothing to warn about
+    gone = _GoneConn(IOBuffer("GET /index.html HTTP/1.1\r\n\r\n"))
+    @test_logs min_level = Base.CoreLogging.Warn Pinax._serve_handle(gone, root)
+    # a failure on a client that has also gone: still a warning, and the 500 it cannot receive is
+    # let go rather than thrown out of the handler
+    gone = _GoneConn(IOBuffer("GET /%00 HTTP/1.1\r\n\r\n"))
+    @test_logs (:warn, r"Pinax.serve: .*/%00") match_mode = :any Pinax._serve_handle(
+        gone, root
+    )
+    # every status the server sends has its own reason phrase; one it does not know is an error
+    @test_throws KeyError Pinax._respond(IOBuffer(), 418, "text/plain", UInt8[])
+end
+
+@testset "serve: a busy port moves the server to the next one" begin
+    root = mktempdir()
+    write(joinpath(root, "index.html"), "<html>ok</html>")
+    a = Pinax.serve(root; host="127.0.0.1", blocking=false, port=8160)
+    try
+        b = Pinax.serve(root; host="127.0.0.1", blocking=false, port=a.port)
+        try
+            @test b.port == a.port + 1
+            @test occursin("200 OK", _raw_get(b.port, "/index.html"))
+        finally
+            close(b.server)
+        end
+    finally
+        close(a.server)
+    end
+end
+
+@testset "serve: the type, a query, a directory and an escaped name" begin
+    root = mktempdir()
+    write(joinpath(root, "a.svg"), "<svg/>")
+    mkpath(joinpath(root, "sub"))
+    write(joinpath(root, "sub", "index.html"), "<p>sub</p>")
+    write(joinpath(root, "a b.txt"), "spaced")
+    write(joinpath(root, "x.pdf"), "%PDF-1.4")
+    ok(ct, body) = string(
+        "HTTP/1.1 200 OK\r\nContent-Type: $(ct)\r\nContent-Length: $(sizeof(body))\r\n",
+        "Accept-Ranges: bytes\r\nConnection: close\r\n\r\n",
+        body,
+    )
+    # a query string is not part of the file name
+    @test _handle(root, "/a.svg?v=1") == ok("image/svg+xml", "<svg/>")
+    # a directory is its index.html
+    @test _handle(root, "/sub/") == ok("text/html; charset=utf-8", "<p>sub</p>")
+    # `%20` is a space; a type the server does not know is sent as bytes
+    @test _handle(root, "/a%20b.txt") == ok("application/octet-stream", "spaced")
+    @test _handle(root, "/x.pdf") == ok("application/pdf", "%PDF-1.4")
 end

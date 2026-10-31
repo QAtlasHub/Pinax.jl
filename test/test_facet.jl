@@ -15,7 +15,7 @@ using ParamIO
             @section :s "S" by = "system.g" begin
                 @figure svg params = k(1.0)
                 @figure svg params = k(0.5)
-                @figure svg params = k(1.0)
+                @figure svg params = k(1.0) id = :residual_g1
             end
         end
         html = read(Pinax.render(; out=site("f1")), String)
@@ -24,6 +24,38 @@ using ParamIO
         @test first(findfirst("system.g = 0.5", html)) <
             first(findfirst("system.g = 1.0", html))   # 0.5 group before 1.0
         @test count("class=\"facet\"", html) == 2       # two groups
+    end
+
+    @testset "a faceted section still shows its code, tables and raw blocks, in order (#168)" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :s "S" by = "system.g" begin
+                @figure svg params = k(1.0)
+                @code E = 1.0 + 1.0 id = :energy_code
+                @raw "<p>RAWPANEL</p>"
+                @table (a=[1],) caption = "TBLCAP"
+            end
+        end
+        html = read(Pinax.render(; out=site("fc")), String)
+        @test occursin("id=\"energy_code\"", html)   # the anchor a check's code link points at
+        i_code = first(findfirst("id=\"energy_code\"", html))
+        i_raw = first(findfirst("RAWPANEL", html))
+        i_tbl = first(findfirst("TBLCAP", html))
+        @test i_code < i_raw < i_tbl                    # declaration order, after the facet groups
+    end
+
+    @testset "a figure's generated id hashes its key; one key twice gets -2, never an error" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :s "S" by = "system.g" begin
+                @figure svg params = k(1.0)
+                @figure svg params = k(0.5)
+                @figure svg params = k(1.0)
+            end
+        end
+        a, b, c = (f.id for f in Pinax.current_document().pages[1].sections[1].figures)
+        @test a != b                              # another key, another id
+        @test string(c) == string(a, "-2")        # the same key and code again
     end
 
     @testset "figure missing the facet param -> (unset) group" begin

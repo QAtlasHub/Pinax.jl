@@ -11,9 +11,9 @@
 #
 # Any environment with Pinax + DataVault + ParamIO + Plots works (examples/Project.toml is one).
 # Outputs land under examples/out/ by default (override with DATAVAULT_OUTDIR / PINAX_OUT):
-# the gallery (human face), agent.json (LLM face), and a @benchmark verdict (the trust gate).
+# the gallery (human face), agent.json (LLM face), and the verdict of the `@test` checks (the trust gate).
 
-using Pinax, DataVault, ParamIO, Plots, Random, Statistics, Printf
+using Pinax, DataVault, ParamIO, Plots, Random, Statistics, Printf, Test
 
 ENV["GKSwstype"] = get(ENV, "GKSwstype", "100")   # headless GR (renders without a display)
 gr()
@@ -133,14 +133,17 @@ Pinax.reset!()
     end
 end
 
-# A second page — the TEST SET (the trust gate). The same MC numbers, checked against the textbook
-# Ising limits: this renders as a green/red test-report for a human AND a machine-checkable verdict in
+# A second page — the CHECKS (the trust gate). The same MC numbers, checked against the textbook
+# Ising limits with `Test`'s own `@test`: each check is recorded with what it compared and its margin,
+# and the section renders as a green/red check table for a human AND a machine-checkable verdict in
 # agent.json for an LLM, so "the MC looks right" becomes a checked PASS/FAIL instead of a guess.
-@benchmark :validation "Ising sanity — M(T) vs known limits" begin
-    @desc md"The Monte Carlo must reproduce the textbook limits: ordered (\$|m|\to 1\$) well below \$T_c\$, disordered (finite-size residual) well above."
-    @expect "M_ordered" "low-T |m| (ordered phase)" got = Ms[1] want = 1.0 tol = 0.2
-    @expect "M_disordered" "high-T |m| (residual)" got = Ms[end] want = 0.0 tol = 0.3
-    @expect "transition" "drops through Tc" got = Ms[1] - Ms[end] want = 0.8 tol = 0.45
+@page :validation "Ising sanity — M(T) vs known limits" begin
+    @section :limits "Textbook limits" begin
+        @desc md"The Monte Carlo must reproduce the textbook limits: ordered (\$|m|\to 1\$) well below \$T_c\$, disordered (finite-size residual) well above."
+        @test isapprox(Ms[1], 1.0; rtol=0.2)             # low-T |m| (ordered phase)
+        @test isapprox(Ms[end], 0.0; atol=0.3)           # high-T |m| (residual)
+        @test isapprox(Ms[1] - Ms[end], 0.8; rtol=0.45)  # drops through Tc
+    end
 end
 
 # Render the TWO faces of the SAME doc — pixels for a human, data (+ the verdict) for an LLM.
@@ -155,6 +158,6 @@ ajfile = endswith(agentp, ".json") ? agentp : joinpath(agentp, "agent.json")
 if isfile(ajfile)
     v = match(r"\"verdict\":\"([A-Z]+)\"", read(ajfile, String))
     v === nothing ||
-        println("  benchmark verdict (what the LLM reads, not a println): ", v.captures[1])
+        println("  verdict (what the LLM reads, not a println): ", v.captures[1])
 end
 println("  vault:           ", vault.outdir)

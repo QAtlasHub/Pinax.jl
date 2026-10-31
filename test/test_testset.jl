@@ -89,7 +89,8 @@ end
         pass = Test.Pass(
             :test, :(isapprox(a, b)), :(isapprox(1.0, 1.0098; rtol=0.01)), nothing
         )
-        @test _approx_numbers(_result_data_expr(pass)) == (1.0, 1.0098, 0.01, :rel)
+        @test _approx_numbers(_result_data_expr(pass)) ==
+            (; got=1.0, want=1.0098, atol=0.0, rtol=0.01)
 
         fail = Test.Fail(
             :test,
@@ -100,32 +101,36 @@ end
             LineNumberNode(1),
             false,
         )
-        @test _approx_numbers(_result_data_expr(fail)) == (0.5, 0.9, 0.01, :rel)
+        @test _approx_numbers(_result_data_expr(fail)) ==
+            (; got=0.5, want=0.9, atol=0.0, rtol=0.01)
     end
 
     @testset "check carries the margin, not just a verdict" begin
         pass = Test.Pass(:test, :x, :(isapprox(1.0, 1.0098; rtol=0.01)), nothing)
         c = _check_for(pass, 1)
-        @test c.pass
+        @test Pinax.passed(c)
         @test c.got == 1.0 && c.want == 1.0098 && c.tol == 0.01 && c.kind === :rel
         @test c.delta / c.tol > 0.9   # passed, but spent 97% of its budget
 
-        # `pass` comes from Julia's own verdict, never from delta <= tol: isapprox mixes atol and
-        # rtol in a way a single-kind Check cannot reproduce, and a report that disagrees with the
-        # test runner is worse than no report.
+        # `pass` comes from Julia's own verdict, never from delta <= tol (which reproduces the same
+        # isapprox bound, #115): a report that disagrees with the test runner is worse than none.
         atol_pass = Test.Pass(
             :test, :x, :(isapprox(0.0, 1.0e-9; atol=1.0e-8, rtol=0.01)), nothing
         )
-        @test _check_for(atol_pass, 1).pass
+        @test Pinax.passed(_check_for(atol_pass, 1))
 
-        # A non-numeric assertion still becomes a check — every @test must show up somewhere.
+        # A non-numeric assertion still becomes a check — every @test must show up somewhere — but
+        # an indicator, with no numbers rather than made-up ones.
         b = _check_for(Test.Pass(:test, :x, :(1 + 1 == 2), nothing), 2)
-        @test b.pass && b.got == 1.0
+        @test Pinax.passed(b) && b.kind === :indicator && isnan(b.got)
     end
 
     @testset "atol governs when there is no usable reference" begin
         p = Test.Pass(:test, :x, :(isapprox(0.001, 0.0; atol=0.01)), nothing)
-        @test _approx_numbers(_result_data_expr(p)) == (0.001, 0.0, 0.01, :abs)
+        @test _approx_numbers(_result_data_expr(p)) ==
+            (; got=0.001, want=0.0, atol=0.01, rtol=0.0)
+        c = _check_for(p, 1)
+        @test (c.kind, c.tol) == (:abs, 0.01)
     end
 
     @testset "margin figure needs no plotting backend" begin
@@ -172,12 +177,15 @@ end
         @test back.children[1].checks[1].want === 1.0098
 
         Pinax.render_test_report([d1, d2]; out=joinpath(dir, "m"), title="Merged")
-        md = read(joinpath(dir, "m_agent", "agent.md"), String)
+        md = read(joinpath(dir, "m", "agent", "agent.md"), String)
         # ONE gallery, one page per test FILE — the shard boundary is invisible in the output…
         @test occursin("test_a.jl", md) && occursin("test_b.jl", md)
         @test !occursin("shard", lowercase(md))
-        # …and the check ids are renumbered across the merge rather than colliding at t1
-        @test occursin("t1 —", md) && occursin("t2 —", md)
+        # …and the check ids never collide across the merge: each is its page's anchor plus the hash
+        # of its source text (#123), not a counter that every shard restarts at t1
+        ids = [string(c.id) for p in Pinax.current_document().pages for c in p.checks]
+        @test allunique(ids)
+        @test any(startswith("test_a_jl_t"), ids) && any(startswith("test_b_jl_t"), ids)
     end
 
     @testset "a dump carries everything but the figure closure (issue #67)" begin
@@ -200,20 +208,22 @@ end
             checks=[Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
             codes=[CodeBlock(:c1, "c1", "E = f(x)", "", "", "julia")],
             tables=[tbl],
-            panels=["<p>raw panel</p>"],
-            desc=Pinax.Desc("a description"),
-            content=Pair{Symbol,Int}[:code => 1, :check => 1, :table => 1, :panel => 1],
+            raws=[Pinax.RawBlock(:r1, "r1", "<p>raw panel</p>")],
+            texts=[Pinax.Prose(:d1, "d1", "a description")],
+            content=Pair{Symbol,Int}[
+                :text => 1, :code => 1, :check => 1, :table => 1, :raw => 1
+            ],
         )
         p = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
         back = Pinax.load_test_dump(p).children[1]
-        @test back.desc.source == "a description"
+        @test only(back.texts).source == "a description"
         @test back.tables[1].caption == "a caption"
-        @test back.tables[1].rows == Vector{Any}[Any[10, -0.1], Any[20, ""]]  # missing → its cell text
-        @test back.panels == ["<p>raw panel</p>"]
+        @test isequal(back.tables[1].rows, Vector{Any}[Any[10, -0.1], Any[20, missing]])
+        @test only(back.raws).id === :r1 && only(back.raws).html == "<p>raw panel</p>"
         @test back.content ==
-            Pair{Symbol,Int}[:code => 1, :check => 1, :table => 1, :panel => 1]
+            Pair{Symbol,Int}[:text => 1, :code => 1, :check => 1, :table => 1, :raw => 1]
         render_test_report([p]; out=joinpath(dir, "rep"))
-        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+        html = read(joinpath(dir, "rep", "html", "f_jl.html"), String)
         @test all(
             occursin(k, html) for
             k in ("a description", "a caption", "raw panel", "E = f(x)")
@@ -242,12 +252,12 @@ end
                 @raw "<p id=\"cinote\">from the merge job</p>"
             end,
         )
-        html = read(joinpath(dir, "rep_html", "overview.html"), String)
+        html = read(joinpath(dir, "rep", "html", "overview.html"), String)
         @test occursin("Every unit ran exactly once", html)
         @test occursin("units observed", html) && occursin("Completeness", html)
         @test occursin("id=\"cinote\"", html)
         # …and it is DATA in agent.json, not only pixels — the table rows are native
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
         @test occursin("units observed", agent) &&
             occursin("\"caption\":\"Completeness\"", agent)
         # the fixed tables are still there, and the hook's desc sits above them
@@ -262,9 +272,9 @@ end
             overview=() -> error("boom"),
         )
         # diagnostics are document-level, so they land on the gallery's index, not on the page
-        h2 = read(joinpath(d2, "rep_html", "index.html"), String)
+        h2 = read(joinpath(d2, "rep", "html", "index.html"), String)
         @test occursin("Diagnostics", h2) && occursin("boom", h2)   # named, with the cause
-        @test isfile(joinpath(d2, "rep_html", "overview.html"))     # …and the report still rendered
+        @test isfile(joinpath(d2, "rep", "html", "overview.html"))     # …and the report still rendered
     end
 
     @testset "a broken test is counted, never painted red" begin
@@ -282,9 +292,9 @@ end
     end
 
     @testset "the seam: content macros route into the open testset (A)" begin
-        # A PinaxTestSet on the stack IS the container — @figure/@desc land in it, in declaration
-        # order, through the one seam Pinax._current_container(). No @page/@section, no CTX; the
-        # gens are deferred, so nothing is plotted here.
+        # A PinaxTestSet on the stack is an adapter over ONE tree node (#173): @figure/@desc land in
+        # its `TestNode`, in declaration order, through the one seam Pinax._current_container(). No
+        # @page/@section, no CTX; the gens are deferred, so nothing is plotted here.
         root = PinaxTestSet("cap-root")
         captured = nothing
         Ext._with_testset(root) do
@@ -293,10 +303,69 @@ end
             @desc md"a description"
             @figure "plotB"
         end
-        @test captured === root
-        @test length(root.figures) == 2
-        @test root.desc !== nothing && occursin("a description", root.desc.source)
-        @test root.content == [:figure => 1, :figure => 2]   # @desc sets desc, not content order
+        @test root.node isa TestNode
+        @test captured === root.node
+        @test !any(f -> hasfield(PinaxTestSet, f), (:figures, :checks, :content, :nbroken))
+        @test length(root.node.figures) == 2
+        @test occursin("a description", only(root.node.texts).source)
+        @test root.node.content == [:figure => 1, :text => 1, :figure => 2]   # prose keeps its place
+    end
+
+    if isdefined(Test, :CURRENT_TESTSET)
+        @testset "a root testset dumps, renders or stays out — and a red suite still throws" begin
+            # The root's own `finish` (and the `Pkg.test` delegation's atexit hook) run only at
+            # depth 0, so build a suite by hand and finish it with no testset open.
+            pass = Test.Pass(:test, :(1 == 1), :(1 == 1), nothing)
+            fail = Test.Fail(
+                :test, :(1 == 2), "1 == 2", nothing, nothing, LineNumberNode(1), false
+            )
+            function suite(res; kw...)
+                root = PinaxTestSet("Test report"; kw...)
+                file = PinaxTestSet("test_x.jl")
+                Test.record(file, res)
+                Test.record(root, file)
+                return root
+            end
+            at_root(f) = Base.ScopedValues.with(
+                () -> redirect_stdout(f, devnull),
+                Test.CURRENT_TESTSET => Test.FallbackTestSet(),
+                Test.TESTSET_DEPTH => 0,
+            )
+            dir = mktempdir()
+
+            root = suite(pass; out=joinpath(dir, "r"), dump="")
+            @test at_root(() -> Test.finish(root)) === root
+            @test isfile(joinpath(dir, "r", "html", "index.html"))
+            @test !isnan(root.node.elapsed)
+
+            d = joinpath(dir, "s.toml")
+            at_root(() -> Test.finish(suite(pass; dump=d)))
+            @test only(Pinax.load_test_dump(d).children).description == "test_x.jl"
+
+            ign = suite(pass; out=joinpath(dir, "ign"), dump="")
+            ign.node.ignore = true
+            at_root(() -> Test.finish(ign))
+            @test !isdir(joinpath(dir, "ign", "html"))
+
+            @test_throws "1 failed" at_root(
+                () -> Test.finish(suite(fail; out=joinpath(dir, "red"), dump=""))
+            )
+            @test isfile(joinpath(dir, "red", "html", "index.html"))   # rendered before it throws
+
+            # the delegation's atexit hook: an empty root (a precompile / cache-flags probe) is left
+            # alone; a captured one dumps or renders exactly like `finish`
+            d2 = joinpath(dir, "s2.toml")
+            at_root(() -> Ext._finalize_test_capture!(PinaxTestSet("Test report"; dump=d2)))
+            @test !isfile(d2)
+            at_root(() -> Ext._finalize_test_capture!(suite(pass; dump=d2)))
+            @test isfile(d2)
+            at_root(
+                () -> Ext._finalize_test_capture!(
+                    suite(pass; out=joinpath(dir, "fin"), dump="")
+                ),
+            )
+            @test isfile(joinpath(dir, "fin", "html", "index.html"))
+        end
     end
 
     @testset "the seam is inert inside a stock testset, report off (invariant V)" begin
@@ -313,10 +382,10 @@ end
         end
     end
 
-    @testset "fold places captured tables / panels / figures; dump warns on a figure" begin
-        # Drive the fold over a node carrying every content kind (a live PinaxTestSet and a merged
-        # TestNode share this duck-typed shape), so the :table / :panel / :figure branches all run and
-        # land on the page in declaration order.
+    @testset "fold places captured tables / raw blocks / figures; dump warns on a figure" begin
+        # Drive the fold over a node carrying every content kind (a live PinaxTestSet holds the same
+        # `TestNode` a merged dump loads), so the :table / :raw / :figure branches all run and land
+        # on the page in declaration order.
         fig = Pinax.Figure(
             :f,
             "f",
@@ -343,15 +412,15 @@ end
             checks=[Check(:t0, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true)],
             figures=[fig],
             tables=[tbl],
-            panels=["<p>hand built</p>"],
-            content=[:panel => 1, :table => 1, :figure => 1, :check => 1],
+            raws=[Pinax.RawBlock(:hb, "hb", "<p>hand built</p>")],
+            content=[:raw => 1, :table => 1, :figure => 1, :check => 1],
         )
         root = TestNode("Pkg"; children=[node])
         dir = mktempdir()
         Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
-        html = read(joinpath(dir, "r_html", "test_x_jl.html"), String)
+        html = read(joinpath(dir, "r", "html", "test_x_jl.html"), String)
         @test occursin("a table caption", html)   # the @table folded onto the page
-        @test occursin("hand built", html)         # the @raw panel folded onto the page
+        @test occursin("hand built", html)         # the @raw block folded onto the page
         # the dump carries checks + structure and WARNS (never silently drops) a test's figure
         @test isfile(Pinax.dump_test_report(root, joinpath(dir, "d.toml")))
     end
@@ -372,10 +441,10 @@ end
         dir = mktempdir()
         Pinax.render_test_report(root; out=joinpath(dir, "r"), title="T")
         # duplicate page ids disambiguated → both files render (no silent overwrite)
-        @test isfile(joinpath(dir, "r_html", "test_a_jl.html"))
-        @test isfile(joinpath(dir, "r_html", "test_a_jl-2.html"))
+        @test isfile(joinpath(dir, "r", "html", "test_a_jl.html"))
+        @test isfile(joinpath(dir, "r", "html", "test_a_jl-2.html"))
         # section ids are page-qualified; the sibling collision within test_a.jl took the `-2` suffix
-        html = read(joinpath(dir, "r_html", "test_a_jl.html"), String)
+        html = read(joinpath(dir, "r", "html", "test_a_jl.html"), String)
         @test occursin("test_a_jl_basics", html) && occursin("test_a_jl_basics-2", html)
         # both collisions are surfaced as loud diagnostics (never silent)
         dups = count(
@@ -443,7 +512,7 @@ end
             # ---- bare run (no preamble): stock Test, red fails, nothing rendered ----
             r = run_script("using Pinax, Test\ninclude($(runtests))\n")
             @test !r.ok                                   # the top-level DefaultTestSet throws on red
-            @test !isdir(joinpath(dir, "rep_agent"))      # no report — a bare run is untouched
+            @test !isdir(joinpath(dir, "rep", "agent"))      # no report — a bare run is untouched
 
             # ---- delegation preamble: capture + render + exit code + @pinaxignore ----
             r = run_script(
@@ -451,11 +520,11 @@ end
             )
             @test !r.ok                                   # red suite fails the process (atexit exit(1))
             @test occursin("Pinax test report", r.log)
-            md = read(joinpath(dir, "rep_agent", "agent.md"), String)
+            md = read(joinpath(dir, "rep", "agent", "agent.md"), String)
             @test occursin("1/2 FAIL", md)                # verdict preserved on the file's page
             @test occursin("got 0.5, want 0.9", md)       # the failing check kept its real numbers
             @test occursin("convergence of E against the oracle", md)  # a @desc inside a test reached it
-            @test isfile(joinpath(dir, "rep_html", "test_demo_jl.html"))
+            @test isfile(joinpath(dir, "rep", "html", "test_demo_jl.html"))
             @test !occursin("noisy fixture", md)          # @pinaxignore dropped it (it still ran)
 
             # ---- the suite-side way in: same capture, without owning the `Pkg.test` call ----
@@ -468,7 +537,7 @@ end
             )
             @test !r.ok                                   # red suite still fails the process
             @test occursin("Pinax test report", r.log)
-            md_suite = read(joinpath(dir, "suite_agent", "agent.md"), String)
+            md_suite = read(joinpath(dir, "suite", "agent", "agent.md"), String)
             @test occursin("1/2 FAIL", md_suite)          # same verdict as the preamble produced
             @test occursin("got 0.5, want 0.9", md_suite) # same numbers
             @test occursin("convergence of E against the oracle", md_suite)
@@ -482,7 +551,7 @@ end
             )
             @test !r.ok                                   # the top-level DefaultTestSet throws on red
             @test !occursin("Pinax test report", r.log)   # nothing rendered, nothing dumped
-            @test !isdir(joinpath(dir, "test-report_agent"))   # not even at the default `out`
+            @test !isdir(joinpath(dir, "test-report", "agent"))   # not even at the default `out`
 
             # ---- idempotent: preamble AND suite call, still one root ----
             # A `runtests.jl` carrying the call is still a valid target for `Pinax.test()`, so the two
@@ -494,7 +563,7 @@ end
             )
             @test !r.ok
             @test length(collect(eachmatch(r"Pinax test report", r.log))) == 1
-            md_once = read(joinpath(dir, "once_agent", "agent.md"), String)
+            md_once = read(joinpath(dir, "once", "agent", "agent.md"), String)
             @test occursin("1/2 FAIL", md_once)           # the surviving root is the one that captured
 
             # ---- asked for, but there is no `Test` to capture: say so, do not fail silently ----
@@ -507,7 +576,7 @@ end
             )
             @test r.ok                                    # a warning, not an error
             @test occursin("is not loaded", r.log)
-            @test !isdir(joinpath(dir, "notest_agent"))
+            @test !isdir(joinpath(dir, "notest", "agent"))
         end
     end
 
@@ -548,8 +617,8 @@ end
         # green suite → Pinax.test succeeds and renders, from a suite with no @pinaxtestset in sight
         out = joinpath(dir, "rep")
         @test run_it(joinpath(dir, "suite.jl"), out)
-        @test isfile(joinpath(out * "_html", "ok_jl.html"))
-        md = read(joinpath(out * "_agent", "agent.md"), String)
+        @test isfile(joinpath(joinpath(out, "html"), "ok_jl.html"))
+        md = read(joinpath(joinpath(out, "agent"), "agent.md"), String)
         @test occursin("a description written inside a plain @testset", md)
 
         # red suite → Pinax.test re-throws (process fails): a report never turns a red suite green
@@ -589,14 +658,31 @@ end
             @test _is_swept(file, _looks_like_a_file)
             out = joinpath(mktempdir(), "rep")
             render_test_report(TestNode("Test report"; children=[file]); out=out)
-            html = read(joinpath(out * "_html", "test_conv_jl.html"), String)
-            md = read(joinpath(out * "_agent", "agent.md"), String)
+            html = read(joinpath(joinpath(out, "html"), "test_conv_jl.html"), String)
+            md = read(joinpath(joinpath(out, "agent"), "agent.md"), String)
             @test occursin("Convergence of", html)                 # the derived figure
             @test occursin("test_conv_jl_conv_1", md)              # convergence fig id
             @test occursin("test_conv_jl_swpmargin_1", md)         # margin-vs-axis fig id
             @test occursin("1/3 FAIL", md)                         # verdict untouched (2 of 3 fail)
             @test occursin("[χ = 8]", md) && occursin("[χ = 32]", md)  # checks binding-tagged
             @test !occursin("[id: test_conv_jl_8]", md)            # NOT rendered as a per-value section
+            # the data file holds the axis's values (not tick positions), and what the plot draws:
+            # each series' reference and tolerance band as series of their own
+            csv = read(
+                joinpath(
+                    out,
+                    "agent",
+                    "assets",
+                    "figures",
+                    "test_conv_jl",
+                    "test_conv_jl_conv_1.csv",
+                ),
+                String,
+            )
+            @test startswith(csv, "series,χ,got\n")
+            @test occursin("got,8.0,1.2", csv) && occursin("got,32.0,1.01", csv)
+            @test occursin("want,16.0,1.0", csv)
+            @test occursin(r"\nlo,8\.0,0\.9", csv) && occursin(r"\nhi,8\.0,1\.0", csv)
         end
 
         @testset "nested loops: innermost = x-axis, outer = legend (C3)" begin
@@ -612,7 +698,7 @@ end
             @test _is_swept(file, _looks_like_a_file)
             out = joinpath(mktempdir(), "rep")
             render_test_report(TestNode("Test report"; children=[file]); out=out)
-            html = read(joinpath(out * "_html", "test_nest_jl.html"), String)
+            html = read(joinpath(joinpath(out, "html"), "test_nest_jl.html"), String)
             @test occursin("χ = 8", html) && occursin("χ = 16", html)   # the two legend series
         end
 
@@ -624,8 +710,20 @@ end
             @test _is_swept(file, _looks_like_a_file)
             out = joinpath(mktempdir(), "rep")
             render_test_report(TestNode("Test report"; children=[file]); out=out)
-            html = read(joinpath(out * "_html", "test_cat_jl.html"), String)
+            html = read(joinpath(joinpath(out, "html"), "test_cat_jl.html"), String)
             @test occursin("TFIM", html) && occursin("Heisenberg", html) # string ticks, not numbers
+            csv = read(
+                joinpath(
+                    out,
+                    "agent",
+                    "assets",
+                    "figures",
+                    "test_cat_jl",
+                    "test_cat_jl_conv_1.csv",
+                ),
+                String,
+            )
+            @test occursin("got,TFIM,1.01", csv) && occursin("got,Heisenberg,1.03", csv)
         end
 
         @testset "mixed / inconsistent siblings do NOT fold — kept as sections, warned (III)" begin
@@ -639,9 +737,9 @@ end
             @test !_is_swept(file, _looks_like_a_file)              # not a consistent sweep
             out = joinpath(mktempdir(), "rep")
             render_test_report(TestNode("Test report"; children=[file]); out=out)
-            files = readdir(out * "_html")
+            files = readdir(joinpath(out, "html"))
             txt = join(
-                read(joinpath(out * "_html", f), String) for
+                read(joinpath(joinpath(out, "html"), f), String) for
                 f in files if endswith(f, ".html")
             )
             @test occursin("a smoke check", txt)                   # rendered as an ordinary section
@@ -676,7 +774,7 @@ end
                     "PINAX_TEST_OUT" => joinpath(dir, "rep"),
                 )
                 run(pipeline(ignorestatus(cmd); stdout=devnull, stderr=devnull))
-                md = read(joinpath(dir, "rep_agent", "agent.md"), String)
+                md = read(joinpath(dir, "rep", "agent", "agent.md"), String)
                 @test occursin("Convergence of", md)                   # the sweep figure, from a real forloop
                 @test occursin("[χ = 8]", md) && occursin("[χ = 32]", md)
                 @test occursin("1/3", md)                              # verdict preserved (only χ=32 passes)
@@ -711,7 +809,7 @@ end
             )
             out = joinpath(mktempdir(), "rep")
             render_test_report(n; out=out)
-            md = read(joinpath(out * "_agent", "agent.md"), String)
+            md = read(joinpath(joinpath(out, "agent"), "agent.md"), String)
             @test occursin("Provenance", md) && occursin("feat/x", md)
         end
 
@@ -744,27 +842,12 @@ end
             @test isapprox(1.0, 1.0009; rtol=0.01)   # records a check into the captured testset
             @caption "energy"
         end
-        @test root.checks[end].label == "energy"     # the caption renamed the quantity
+        @test root.node.checks[end].label == "energy"     # the caption renamed the quantity
 
-        # …and with nothing before it (no figure, no check) it is a loud diagnostic, not an error
+        # …and with nothing before it (no figure, no check) it is an error where it is written (#159)
         Pinax.reset!()
-        @page :orphan "P" begin
+        @test_throws "nothing before it" @page :orphan "P" begin
             @caption "nothing to name"
-        end
-        @test any(
-            e -> occursin("no preceding", e.message), Pinax.current_document().diag.entries
-        )
-    end
-
-    @testset "@expect inside a captured test is forbidden — @test is the assertion (F)" begin
-        # `@expect` is manuscript vocabulary. Directly inside a test — here a captured `PinaxTestSet`,
-        # the report-ON path — it errors and points to `@test`, so a check can never be recorded but
-        # left unenforced (which under a bare `Pkg.test()` would be a green run for a failing check).
-        root = PinaxTestSet("cap")
-        Ext._with_testset(root) do
-            @test_throws "manuscript check" Pinax._push_check!(;
-                id=:E, label="energy", got=1.0, want=1.0, tol=1e-3
-            )
         end
     end
 
@@ -772,16 +855,18 @@ end
         # A failing @test records WHERE it failed (its LineNumberNode), so the report says where to
         # look, not just what failed. Captured duck-typed (a Pass may carry no source), carried through
         # a shard dump, and emitted as a structured field in agent.json.
+        proj = mktempdir()   # a project: the location is relative to its Project.toml
+        write(joinpath(proj, "Project.toml"), "name = \"P\"\n")
         fail = Test.Fail(
             :test,
             :(isapprox(a, b)),
             "isapprox(0.5, 0.9; rtol = 0.01)",
             nothing,
             nothing,
-            LineNumberNode(42, Symbol("/proj/test/test_x.jl")),
+            LineNumberNode(42, Symbol(joinpath(proj, "test", "test_x.jl"))),
             false,
         )
-        @test Ext._source_str(fail) == "test_x.jl:42"          # basename:line, not the full path
+        @test Ext._source_str(fail) == "test/test_x.jl:42"   # relative to its project, never a machine path
         @test Ext._source_str(Test.Pass(:test, :x, :(1 == 1), nothing)) == ""   # no usable source → ""
 
         # recorded onto the check, alongside its (failing) verdict…
@@ -789,7 +874,8 @@ end
         Ext._with_testset(root) do
             Test.record(root, fail)
         end
-        @test root.checks[end].source == "test_x.jl:42" && !root.checks[end].pass
+        @test root.node.checks[end].source == "test/test_x.jl:42" &&
+            !Pinax.passed(root.node.checks[end])
 
         # …round-trips through a shard dump…
         dir = mktempdir()
@@ -804,8 +890,85 @@ end
             TestNode("Test report"; children=[TestNode("test_x.jl"; checks=[srcchk()])]);
             out=joinpath(dir, "rep"),
         )
-        aj = read(joinpath(dir, "rep_agent", "agent.json"), String)
-        @test occursin("\"source\":\"test_x.jl:42\"", aj)
+        aj = read(joinpath(dir, "rep", "agent", "agent.json"), String)
+        @test occursin("\"defined_at\":\"test_x.jl:42\"", aj)
+    end
+
+    @testset "content written at the top level has a page; a merge keeps every root's content" begin
+        # the usual top-level wrapper `@testset "MyPkg"` holds checks and prose of its own: they
+        # are shown on a page of their own, never folded away while the overview counts them
+        failing = Check(:t, "TOP_CHECK", 2.0, 1.0, 1.0, 0.5, :abs, false)
+        root(tag) = TestNode(
+            "MyPkg";
+            checks=[failing],
+            texts=[
+                Pinax.Prose(Symbol(tag, "_tx"), string(tag, "_tx"), "TOP_PROSE_$tag", ""),
+            ],
+            content=[:text => 1, :check => 1],
+            children=[
+                TestNode(
+                    "test_$(tag).jl";
+                    checks=[Check(:t, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+                ),
+            ],
+        )
+        dir = mktempdir()
+        render_test_report(root("a"); out=joinpath(dir, "one"))
+        aj = read(joinpath(dir, "one", "agent", "agent.json"), String)
+        @test occursin("TOP_CHECK", aj) && occursin("TOP_PROSE_a", aj)
+        # two shards, each with content at its root: the merged report shows both
+        da = Pinax.dump_test_report(root("a"), joinpath(dir, "a.toml"))
+        db = Pinax.dump_test_report(root("b"), joinpath(dir, "b.toml"))
+        render_test_report([da, db]; out=joinpath(dir, "two"))
+        md = read(joinpath(dir, "two", "agent", "agent.md"), String)
+        @test occursin("TOP_PROSE_a", md) && occursin("TOP_PROSE_b", md)
+        @test count("TOP_CHECK", md) >= 2
+    end
+
+    @testset "a shard dump carries every table cell: no crash, missing stays missing" begin
+        tbl = Pinax.Table(
+            :tb,
+            "tb",
+            "",
+            ["a", "b", "c", "d"],
+            [Any[1 // 3, π, missing, nothing]],
+            "",
+            nothing,
+            "",
+        )
+        n = TestNode("test_x.jl"; tables=[tbl], content=[:table => 1])
+        back = Pinax.load_test_dump(
+            Pinax.dump_test_report(n, joinpath(mktempdir(), "c.toml"))
+        )
+        row = only(only(back.tables).rows)
+        @test row[1] == "1//3" && row[2] == "π"   # the text the gallery shows for them
+        @test ismissing(row[3]) && row[4] === nothing
+    end
+
+    @testset "a shard dump keeps where each node was written and what each check points at" begin
+        at = "test/test_x.jl:7"
+        blk = CodeBlock(:code_x, "code_x", "y = 1", "", "", "julia", at)
+        chk = Check(:t, "y == 1", 1.0, 1.0, 0.0, 0.0, :abs, true, at)
+        chk.code_id = :code_x
+        n = TestNode(
+            "test_x.jl";
+            checks=[chk],
+            codes=[blk],
+            tables=[Pinax.Table(:tb, "tb", "", ["a"], [Any[1]], "(a=[1],)", nothing, at)],
+            raws=[Pinax.RawBlock(:rw, "rw", "<i>r</i>", at)],
+            texts=[Pinax.Prose(:tx, "tx", "prose", at)],
+            content=[:text => 1, :code => 1, :check => 1, :table => 1, :raw => 1],
+        )
+        back = Pinax.load_test_dump(
+            Pinax.dump_test_report(n, joinpath(mktempdir(), "s.toml"))
+        )
+        @test only(back.checks).source == at
+        @test only(back.checks).code_id === :code_x
+        @test all(
+            x -> x.defined_at == at,
+            (back.codes..., back.tables..., back.raws..., back.texts...),
+        )
+        @test back.content == n.content
     end
 
     @testset "at scale the human gallery caps rows; agent.json stays complete (J)" begin
@@ -827,7 +990,7 @@ end
 
         shown, hf, hp = Pinax._cap_gallery_checks(checks, Pinax._MAX_CHECK_ROWS)
         @test length(shown) == Pinax._MAX_CHECK_ROWS
-        @test count(c -> !c.pass, shown) == length(fails)          # every failure survives the cap
+        @test count(c -> !Pinax.passed(c), shown) == length(fails)          # every failure survives the cap
         @test hf == 0 && hp == 500 - Pinax._MAX_CHECK_ROWS
         small = checks[1:10]
         @test Pinax._cap_gallery_checks(small, Pinax._MAX_CHECK_ROWS) == (small, 0, 0)  # small = all
@@ -836,13 +999,13 @@ end
         render_test_report(
             TestNode("Test report"; children=[TestNode("big.jl"; checks=checks)]); out=out
         )
-        html = read(joinpath(out * "_html", "big_jl.html"), String)
+        html = read(joinpath(joinpath(out, "html"), "big_jl.html"), String)
         @test occursin("more not shown", html)                     # the loud summary row
         @test occursin("$(500 - length(fails))/500", html)         # verdict over ALL 500
         @test count("pinax-pass\"", html) + count("pinax-fail\"", html) <=
             Pinax._MAX_CHECK_ROWS
         @test occursin("worst of 500", html)                       # the margin figure capped too
-        aj = read(joinpath(out * "_agent", "agent.json"), String)
+        aj = read(joinpath(joinpath(out, "agent"), "agent.json"), String)
         @test count("\"pass\":", aj) >= 500                        # agent.json enumerates every check
     end
 
@@ -878,16 +1041,50 @@ end
             Pinax.dump_test_report(cellnode(false), joinpath(dir, "b.toml"))
         end
         @test occursin("matrix", read(dA, String))              # the cell rides in the dump
+        # a dump with no cell among cells has nowhere to go: it is an error naming it, never dropped
+        dO = withenv("PINAX_TEST_MATRIX" => "") do
+            Pinax.dump_test_report(cellnode(false), joinpath(dir, "orphan.toml"))
+        end
+        @test_throws r"orphan\.toml.*no matrix cell" render_test_report(
+            [dA, dB, dO]; out=joinpath(dir, "mo"), title="Matrix"
+        )
 
         out = joinpath(dir, "m")
         render_test_report([dA, dB]; out=out, title="Matrix")
-        idx = read(joinpath(out * "_html", "index.html"), String)
-        md = read(joinpath(out * "_agent", "agent.md"), String)
-        files = readdir(out * "_html")
+        idx = read(joinpath(joinpath(out, "html"), "index.html"), String)
+        md = read(joinpath(joinpath(out, "agent"), "agent.md"), String)
+        files = readdir(joinpath(out, "html"))
         @test occursin("julia 1.11 · ubuntu", idx) && occursin("julia 1.10 · ubuntu", idx)  # both parts
         # the SAME file in two cells → two pages, ids qualified per cell (no collision)
         @test count(f -> occursin("test_foo_jl", f) && endswith(f, ".html"), files) == 2
         @test occursin("1/1 PASS", md) && occursin("0/1 FAIL", md)   # per-cell verdict, not merged
+
+        # a cell sharded into several dumps is one part: its shards merge as shards do, then the
+        # cell is a part (two cells × two shards, each shard holding one file)
+        shard(file, pass) = TestNode(
+            "root";
+            children=[
+                TestNode(file; checks=[Check(:t, "c", 1.0, 1.0, 0.0, 0.5, :abs, pass)])
+            ],
+        )
+        dumps = String[]
+        for (cell, pass) in (("cell A", true), ("cell B", false)),
+            (k, file) in enumerate(("t1.jl", "t2.jl"))
+
+            withenv("PINAX_TEST_MATRIX" => cell) do
+                push!(
+                    dumps,
+                    Pinax.dump_test_report(
+                        shard(file, pass), joinpath(dir, "$(cell)_$(k).toml")
+                    ),
+                )
+            end
+        end
+        render_test_report(dumps; out=joinpath(dir, "m2"), title="Matrix")
+        doc = Pinax.current_document()
+        @test [first(p) for p in doc.parts] == [:cell_cell_a, :cell_cell_b]
+        @test count(pg -> pg.part === :cell_cell_a, doc.pages) == 2   # both of cell A's files
+        @test allunique(n.id for n in Pinax.node_ids(doc))
 
         # a single-cell (non-matrix) run is self-identifying: the cell is a provenance row
         withenv("PINAX_TEST_MATRIX" => "julia 1.11 · ubuntu") do
@@ -917,7 +1114,8 @@ end
                 filter(
                     p -> occursin("margins", p),
                     readdir(
-                        joinpath(out * "_html", "assets", "figures", "f_jl"); join=true
+                        joinpath(joinpath(out, "html"), "assets", "figures", "f_jl");
+                        join=true,
                     ),
                 ),
             ),
@@ -976,7 +1174,7 @@ end
             @code E = 1.0 + 1.0 / 8
             @assert E ≈ 1.125
         end
-        @test length(root.codes) == 1 && root.codes[1].output == "1.125"
+        @test length(root.node.codes) == 1 && root.node.codes[1].output == "1.125"
 
         dir = mktempdir()
         n = TestNode(
@@ -985,10 +1183,10 @@ end
         d = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
         @test Pinax.load_test_dump(d).children[1].codes[1].source == "E = f(x)"   # round-trips a shard
         render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
-        @test occursin("E = f(x)", read(joinpath(dir, "rep_html", "f_jl.html"), String))
+        @test occursin("E = f(x)", read(joinpath(dir, "rep", "html", "f_jl.html"), String))
         @test occursin(
             "\"source\":\"E = f(x)\"",
-            read(joinpath(dir, "rep_agent", "agent.json"), String),
+            read(joinpath(dir, "rep", "agent", "agent.json"), String),
         )
     end
 
@@ -1035,20 +1233,50 @@ end
         # block and the reference ride a shard dump.
         dir = mktempdir()
         blk = CodeBlock(:code_f_jl_1_2, "code_f_jl_1_2", "x = compute()", "", "", "julia")
-        chk = Check(:t, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true, "", blk.anchor)
+        chk = Check(:t, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true, "", blk.id)
         n = TestNode("f.jl"; checks=[chk], codes=[blk])
         d = Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
         back = Pinax.load_test_dump(d).children[1]
-        @test back.checks[1].code_anchor == blk.anchor &&
-            back.codes[1].source == "x = compute()"
+        @test back.checks[1].code_id === blk.id && back.codes[1].source == "x = compute()"
         render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
-        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+        html = read(joinpath(dir, "rep", "html", "f_jl.html"), String)
         @test occursin("pinax-code-src", html) && occursin("x = compute()", html)
         @test occursin("class=\"pinax-codelink\" href=\"#code_f_jl_1_2\"", html)
         @test !occursin("pinax-code-row", html)               # no second code renderer
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
-        @test occursin("\"code_anchor\":\"code_f_jl_1_2\"", agent)
-        @test occursin("\"anchor\":\"code_f_jl_1_2\"", agent)  # resolvable against the code object
+        agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
+        @test occursin("\"code_id\":\"code_f_jl_1_2\"", agent)
+        @test occursin("{\"id\":\"code_f_jl_1_2\",\"caption\"", agent)  # resolvable against the code object
+    end
+
+    # A check refers to its code block by the block's id, whatever characters the id holds: the
+    # gallery links to the anchor derived from it, and agent.json's `code_id` is the id itself.
+    @testset "a check's code reference is the id, not an anchor read back as one" begin
+        dir = mktempdir()
+        id = Symbol("code.x y")                              # not anchor-safe
+        blk = CodeBlock(id, Pinax._anchor(id), "x = compute()", "", "", "julia")
+        chk = Check(:t, "chk", 1.0, 1.0, 0.0, 0.5, :abs, true, "", id)
+        n = TestNode("f.jl"; checks=[chk], codes=[blk])
+        back = Pinax.load_test_dump(
+            Pinax.dump_test_report(TestNode("r"; children=[n]), joinpath(dir, "s.toml"))
+        )
+        @test only(only(back.children).checks).code_id === id
+        # a dump from before 0.2 wrote the anchor, `code_anchor`
+        old = Dict{String,Any}(
+            "label" => "c",
+            "got" => 1.0,
+            "want" => 1.0,
+            "delta" => 0.0,
+            "tol" => 0.5,
+            "kind" => "abs",
+            "pass" => true,
+            "code_anchor" => "code_x",
+        )
+        @test Pinax._dict_to_check(old).code_id === :code_x
+        render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "rep"))
+        agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
+        @test occursin("\"code_id\":\"code.x y\"", agent)
+        html = read(joinpath(dir, "rep", "html", "f_jl.html"), String)
+        @test occursin("class=\"pinax-codelink\" href=\"#$(Pinax._anchor(id))\"", html)
     end
 
     @testset "one code artifact per region: a sweep's samples and N shards collapse onto it" begin
@@ -1065,9 +1293,78 @@ end
         ]
         node = TestNode("f.jl"; children=samples)
         render_test_report(TestNode("T"; children=[node]); out=joinpath(dir, "rep"))
-        html = read(joinpath(dir, "rep_html", "f_jl.html"), String)
+        html = read(joinpath(dir, "rep", "html", "f_jl.html"), String)
         @test count("@test n &gt; 0", html) == 1               # ONE block, not one per sample
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
-        @test count("\"anchor\":\"code_s_jl_2_3\"", agent) == 1   # one code object in `codes`
+        agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
+        @test count("{\"id\":\"code_s_jl_2_3\",\"caption\"", agent) == 1   # one code object in `codes`
+    end
+
+    # The figures and tables a test report draws itself (a page's margin figure, a sweep's figures,
+    # the overview's tables) have ids Pinax generates: one that meets an id a test's own description
+    # produced steps aside (`-2`) rather than stopping the report, and none of them is author-written.
+    @testset "a report's own figures never collide with a testset's section" begin
+        ok() = [Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)]
+        n = TestNode("test_x.jl"; children=[TestNode("margins"; checks=ok())], checks=ok())
+        dir = mktempdir()
+        Pinax.render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "r"))
+        ns = Pinax.node_ids(Pinax.current_document())
+        ids = [x.id for x in ns]
+        @test allunique(ids)
+        @test :test_x_jl_margins in ids                       # the testset's section keeps its id
+        fig = only(
+            x for
+            x in ns if x.kind === :figure && startswith(string(x.id), "test_x_jl_margins")
+        )
+        @test fig.id === Symbol("test_x_jl_margins-2") && fig.generated
+        @test all(x -> x.generated, filter(x -> x.kind in (:figure, :table), ns))
+    end
+
+    # Every id the fold places is claimed in the whole document. Captured content was named inside
+    # its test node, so two testsets that hold the same snippet (or two same-named testsets in two
+    # files that hold the same prose) would otherwise give one id twice. A generated id steps aside
+    # with `-2`, a check keeps pointing at its own code block, and an id the author wrote twice is an
+    # error, as everywhere.
+    @testset "the fold claims every id: no duplicates across test nodes" begin
+        blk = CodeBlock(
+            :code_test_x_jl_abc, "code_test_x_jl_abc", "f(1) == 2", "", "", "julia"
+        )
+        prose = Pinax.Prose(:conv_txt_q, "conv_txt_q", "the same words")
+        chk() =
+            Check(:c, "f(1) == 2", 1.0, 1.0, 0.0, 0.5, :abs, true, "", :code_test_x_jl_abc)
+        mk(d) = TestNode(
+            d;
+            codes=[blk],
+            texts=[prose],
+            checks=[chk()],
+            content=[:text => 1, :code => 1, :check => 1],
+        )
+        files = [
+            TestNode("test_x.jl"; children=[mk("a"), mk("b")]),
+            TestNode("test_y.jl"; children=[mk("a")]),
+        ]
+        Pinax.render_test_report(TestNode("T"; children=files); out=mktempdir())
+        doc = Pinax.current_document()
+        ns = Pinax.node_ids(doc)
+        @test allunique(n.id for n in ns)
+        @test count(n -> n.kind === :code, ns) == 3 && count(n -> n.kind === :text, ns) == 3
+        # each check points at the code block placed in its own section
+        for pg in doc.pages, sec in Pinax._all_sections(pg), c in sec.checks
+            @test c.code_id in [b.id for b in sec.codes]
+        end
+
+        # the same author-written id in two test files is an error naming it
+        t(id) = Pinax.Table(id, string(id), "", ["a"], Vector{Any}[Any[1]], "", nothing)
+        wr(f) = TestNode(
+            f; tables=[t(:summary)], content=[:table => 1], written=Set([:summary])
+        )
+        err = try
+            Pinax.render_test_report(
+                TestNode("T"; children=[wr("a.jl"), wr("b.jl")]); out=mktempdir()
+            )
+            nothing
+        catch e
+            e
+        end
+        @test err isa ErrorException && occursin("duplicate id :summary", err.msg)
     end
 end

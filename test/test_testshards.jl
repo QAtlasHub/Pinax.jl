@@ -34,7 +34,9 @@ function shard_suite()
     )
     write(
         joinpath(d, "unit_b.jl"),
-        "using Test\n@testset \"plain\" begin\n    @test true\nend\n",
+        # evidence recorded at the unit's top level, outside any `@testset`: the unit's own node
+        "using Test\nusing TestShards: evidence!\nevidence!(; oracle = \"unit level\")\n" *
+        "@testset \"plain\" begin\n    @test true\nend\n",
     )
     write(
         joinpath(d, "runtests.jl"),
@@ -45,6 +47,29 @@ function shard_suite()
             include("unit_b.jl")
         end
         """,
+    )
+    return d
+end
+
+# A red fixture, so the counts compared below are not all zero: one unit holding one test of each
+# outcome. Run only in a subprocess, where its red suite cannot fail this one.
+function red_suite()
+    d = mktempdir()
+    write(
+        joinpath(d, "unit_r.jl"),
+        """
+        using Test
+        @testset "red" begin
+            @test true
+            @test 1 == 2
+            @test error("boom")
+            @test_broken false
+        end
+        """,
+    )
+    write(
+        joinpath(d, "runtests.jl"),
+        "using TestShards\nTestShards.@shard begin\n    include(\"unit_r.jl\")\nend\n",
     )
     return d
 end
@@ -122,7 +147,7 @@ end
         ok, log, _, rep = captured_run()
         @test ok
         @test occursin("2/2 units ran", log)
-        html = read(joinpath(rep * "_html", "unit_a_jl.html"), String)
+        html = read(joinpath(joinpath(rep, "html"), "unit_a_jl.html"), String)
         # the checks reached Pinax at all — the assertion that fails without the provider
         @test occursin("PASS", html)
         # …with their NUMBERS: 1.0 against 1.0098 spent 97% of its tolerance
@@ -132,7 +157,7 @@ end
         # …and each check shows the code that produced it, as a @code block
         @test occursin("@test isapprox(1.0, 1.0098; rtol=0.01)", html)
         # one page per unit, and the second unit is there too
-        @test isfile(joinpath(rep * "_html", "unit_b_jl.html"))
+        @test isfile(joinpath(joinpath(rep, "html"), "unit_b_jl.html"))
     end
 
     @testset "what a test established becomes content, not only a record" begin
@@ -140,10 +165,10 @@ end
         # the provider attaches it as a @table on the node that recorded it — legible for a reader,
         # and native rows in agent.json, where it is the binding for reconciling a claim.
         _, _, _, rep = captured_run()
-        html = read(joinpath(rep * "_html", "unit_a_jl.html"), String)
+        html = read(joinpath(joinpath(rep, "html"), "unit_a_jl.html"), String)
         @test occursin("What this test established", html)
         @test occursin("closed form", html) && occursin("tolerance", html)
-        agent = read(joinpath(rep * "_agent", "agent.json"), String)
+        agent = read(joinpath(joinpath(rep, "agent"), "agent.json"), String)
         # native rows, and sorted keys so a rebuild is the same table rather than the same facts
         # in a different order
         @test occursin("[\"achieved\",0.0097]", agent)
@@ -153,7 +178,10 @@ end
         @test i_ach !== nothing && i_tol !== nothing && first(i_ach) < first(i_tol)
         # it landed on the section that recorded it, not on the page — and the table id is
         # UNIT-qualified, so two files each with a `@testset "tight"` cannot share one anchor
-        @test occursin("\"id\":\"unit_a_jl_tight_tbl1\"", agent)
+        @test occursin("\"id\":\"unit_a_jl_tight_evidence\"", agent)
+        # evidence of the unit itself is the unit's, under `<unit>_evidence`
+        @test occursin("\"id\":\"unit_b_jl_evidence\"", agent)
+        @test occursin("[\"oracle\",\"unit level\"]", agent)
     end
 
     @testset "TestShards' own records are unchanged" begin
@@ -164,6 +192,17 @@ end
         _, _, captured, _ = captured_run()
         @test !isempty(unit_counts(plain))
         @test unit_counts(plain) == unit_counts(captured)
+    end
+
+    @testset "…and so are a red unit's: failed, errored and broken each counted" begin
+        # The fixture above passes everything, so its fail / error / broken counts are zeros on
+        # both sides and would agree with a fold that never counted them.
+        red = red_suite()
+        ok_plain, _, plain, _ = run_fixture(red; capture=false)
+        ok_captured, _, captured, _ = run_fixture(red; capture=true)
+        @test !ok_plain && !ok_captured        # red both ways: the capture hides nothing
+        @test unit_counts(plain) == [("unit_r.jl", 1, 1, 1, 1)]
+        @test unit_counts(captured) == unit_counts(plain)
     end
 
     @testset "the completeness verdict rides in the artifact" begin
@@ -185,11 +224,11 @@ end
             out=joinpath(dir, "rep"),
             overview=Pinax.completeness_overview(whole),
         )
-        html = read(joinpath(dir, "rep_html", "overview.html"), String)
+        html = read(joinpath(dir, "rep", "html", "overview.html"), String)
         @test occursin("Every unit ran exactly once", html)
         @test occursin("units observed", html) &&
             occursin("every unit ran exactly once", html)
-        agent = read(joinpath(dir, "rep_agent", "agent.json"), String)
+        agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
         @test occursin("[\"units observed\",2]", agent)      # native, not "2"
         @test occursin("\"id\":\"completeness\"", agent)
 
@@ -202,10 +241,10 @@ end
             out=joinpath(d2, "rep"),
             overview=Pinax.completeness_overview(holed),
         )
-        h2 = read(joinpath(d2, "rep_html", "overview.html"), String)
+        h2 = read(joinpath(d2, "rep", "html", "overview.html"), String)
         @test occursin("Completeness FAILED", h2)
         @test occursin("1 unit never ran", h2) && occursin("position 2", h2)
-        @test occursin("FAILED", read(joinpath(d2, "rep_agent", "agent.json"), String))
+        @test occursin("FAILED", read(joinpath(d2, "rep", "agent", "agent.json"), String))
     end
 
     @testset "sharded, the shards merge into one document" begin
@@ -226,7 +265,7 @@ end
         @test length(readdir(dumps)) == 2
         merged = joinpath(mktempdir(), "merged")
         Pinax.render_test_report(readdir(dumps; join=true); out=merged, title="Merged")
-        md = read(joinpath(merged * "_agent", "agent.md"), String)
+        md = read(joinpath(joinpath(merged, "agent"), "agent.md"), String)
         # Both units, ONE page each — a per-shard document would repeat them. Asserted on the ids
         # rather than on the ABSENCE of the word "shard": TestShards' own name contains it, and the
         # provenance table carries the repository name, so the tidier assertion is a false positive

@@ -10,6 +10,15 @@ Enable it in the preamble:
 @pinaxsetup features = (:comments, :bookmarks, :export)
 ```
 
+All three are on by default. A name outside these three is an error, so a typo cannot switch a
+layer off silently; and when `:comments` is off while the store holds comments, the diagnostics say
+the gallery hides them, and likewise for bookmarks while `:bookmarks` is off. A bookmark is
+`id = true` (or `false`) in one `[bookmark]` table; any other value is reported, not set. Comments
+are `[[comment.<id>]]` turns; a `comment` or `bookmark` key of any other shape is reported and read
+as empty. The gallery shows a bookmark on a section (marked) and on a figure (its page's card thumbnail): one
+on another kind, or on an id that names
+no node, is reported like such a comment.
+
 Every **figure** and every **section** then gets a small `✎` control: click it to comment on that
 node. Sections are commented at their heading; figures at their caption.
 

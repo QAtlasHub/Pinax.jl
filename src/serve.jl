@@ -71,20 +71,22 @@ function _resolves_under_root(file::AbstractString, root::AbstractString)
     return _under_root(resolved[1], resolved[2])
 end
 
+# The reason phrase of every status this server sends. A status not listed is a bug here, so it is
+# an error, never a wrong label.
+const _REASONS = Dict(
+    200 => "OK",
+    206 => "Partial Content",
+    403 => "Forbidden",
+    404 => "Not Found",
+    416 => "Range Not Satisfiable",
+    500 => "Internal Server Error",
+)
+
 function _respond(conn, status, ct, body; extra=String[])
-    reason = if status == 200
-        "OK"
-    elseif status == 206
-        "Partial Content"
-    elseif status == 404
-        "Not Found"
-    elseif status == 403
-        "Forbidden"
-    else
-        "OK"
-    end
     head = [
-        "HTTP/1.1 $status $reason", "Content-Type: $ct", "Content-Length: $(length(body))"
+        "HTTP/1.1 $status $(_REASONS[status])",
+        "Content-Type: $ct",
+        "Content-Length: $(length(body))",
     ]
     append!(head, extra)
     push!(head, "Connection: close", "", "")
@@ -94,59 +96,114 @@ function _respond(conn, status, ct, body; extra=String[])
 end
 
 # Serve one request: GET <target> -> file under `root`, with MIME, single-range (PDF byte-serving),
-# path-traversal protection, and 404 for misses.
+# path-traversal protection, and 404 for misses. A client that went away is let go quietly; any
+# other failure is a bug or an unreadable file, so it is answered with a 500 and a warning.
 function _serve_handle(conn, root)
+    target = ""
     try
-        reqline = readline(conn)
-        isempty(reqline) && return nothing
-        parts = split(reqline)
-        length(parts) >= 2 || return nothing
-        target = parts[2]
-        rangehdr = ""
-        while true
-            h = readline(conn)
-            isempty(h) && break
-            if startswith(lowercase(h), "range:")
-                rangehdr = strip(h[(findfirst(':', h) + 1):end])
-            end
-        end
-        rel = lstrip(_urldecode(split(target, '?')[1]), '/')
-        isempty(rel) && (rel = "index.html")
-        file = normpath(joinpath(root, rel))
-        if !_under_root(file, root)                       # no `..` out of the served root
-            return _respond(conn, 403, "text/plain", Vector{UInt8}("403 Forbidden"))
-        end
-        isdir(file) && (file = joinpath(file, "index.html"))
-        if !isfile(file)
-            return _respond(conn, 404, "text/plain", Vector{UInt8}("404 Not Found: $(rel)"))
-        end
-        if !_resolves_under_root(file, root)              # and no symlink out of it either
-            return _respond(conn, 403, "text/plain", Vector{UInt8}("403 Forbidden"))
-        end
-        data = read(file)
-        ct = _mime(file)
-        m = isempty(rangehdr) ? nothing : match(r"^bytes=(\d*)-(\d*)$", rangehdr)
-        if m !== nothing                                  # single-range request (e.g. PDF viewer)
-            n = length(data)
-            lo = isempty(m.captures[1]) ? 0 : parse(Int, m.captures[1])
-            hi = isempty(m.captures[2]) ? n - 1 : parse(Int, m.captures[2])
-            lo = clamp(lo, 0, max(n - 1, 0))
-            hi = clamp(hi, lo, max(n - 1, 0))
-            return _respond(
-                conn,
-                206,
-                ct,
-                data[(lo + 1):(hi + 1)];
-                extra=["Content-Range: bytes $(lo)-$(hi)/$(n)", "Accept-Ranges: bytes"],
-            )
-        end
-        return _respond(conn, 200, ct, data; extra=["Accept-Ranges: bytes"])
+        req = _read_request(conn)
+        req === nothing && return nothing
+        target = req.target
+        found = _resolve_file(root, req.target)
+        found isa Tuple && return _respond(conn, found...)   # a refusal
+        return _respond_file(conn, found, req.range)
     catch e
         e isa InterruptException && rethrow()
-        return nothing                                    # client closed / malformed: drop it
+        e isa Union{Base.IOError,EOFError} && return nothing   # the client closed the connection
+        @warn "Pinax.serve: failed to answer GET $(target)" exception = (
+            e, catch_backtrace()
+        )
+        return _respond_500(conn)
     finally
         close(conn)
     end
+end
+
+# A 500 for a request that failed, if the client is still there to receive it.
+function _respond_500(conn)
+    try
+        _respond(conn, 500, "text/plain", Vector{UInt8}("500 Internal Server Error"))
+    catch e
+        e isa Union{Base.IOError,EOFError} || rethrow()
+    end
+    return nothing
+end
+
+# The request line's target and its `Range:` header ("" when none), or `nothing` for no request.
+function _read_request(conn)
+    parts = split(readline(conn))
+    length(parts) >= 2 || return nothing
+    range = ""
+    while true
+        h = readline(conn)
+        isempty(h) && break
+        startswith(lowercase(h), "range:") &&
+            (range = strip(h[(findfirst(':', h) + 1):end]))
+    end
+    return (; target=parts[2], range)
+end
+
+# The served file's path for `target`, or the `(status, type, body)` of the refusal: nothing
+# outside the served root, by `..` or by a symlink.
+function _resolve_file(root, target)
+    rel = lstrip(_urldecode(split(target, '?')[1]), '/')
+    isempty(rel) && (rel = "index.html")
+    file = normpath(joinpath(root, rel))
+    forbidden = (403, "text/plain", Vector{UInt8}("403 Forbidden"))
+    _under_root(file, root) || return forbidden
+    isdir(file) && (file = joinpath(file, "index.html"))
+    isfile(file) || return (404, "text/plain", Vector{UInt8}("404 Not Found: $(rel)"))
+    _resolves_under_root(file, root) || return forbidden
+    return file
+end
+
+# The file, whole or as the one byte range asked for (a PDF viewer asks for ranges).
+function _respond_file(conn, file, range)
+    data = read(file)
+    ct = _mime(file)
+    n = length(data)
+    r = _byte_range(range, n)
+    r === nothing && return _respond(conn, 200, ct, data; extra=["Accept-Ranges: bytes"])
+    r === :unsatisfiable && return _respond(
+        conn,
+        416,
+        "text/plain",
+        Vector{UInt8}("416 Range Not Satisfiable");
+        extra=["Content-Range: bytes */$(n)"],
+    )
+    lo, hi = r
+    return _respond(
+        conn,
+        206,
+        ct,
+        data[(lo + 1):(hi + 1)];
+        extra=["Content-Range: bytes $(lo)-$(hi)/$(n)", "Accept-Ranges: bytes"],
+    )
+end
+
+# The one range `bytes=a-b`, `bytes=a-` or `bytes=-k` (the last k bytes) of a file of `n` bytes, as
+# 0-based inclusive `(lo, hi)`; `:unsatisfiable` when no byte of the file is in it (416); `nothing`
+# when there is no range to honor — none asked, or one this server does not read (several ranges,
+# `b < a`) — and the whole file is sent, as RFC 9110 says. A number too large for an `Int` is past
+# any file.
+function _byte_range(range, n)
+    m = match(r"^bytes=(\d*)-(\d*)$", range)
+    m === nothing && return nothing
+    a, b = m.captures
+    isempty(a) && return _suffix_range(b, n)
+    lo = something(tryparse(Int, a), typemax(Int))
+    hi = isempty(b) ? typemax(Int) : something(tryparse(Int, b), typemax(Int))
+    hi < lo && return nothing
+    lo >= n && return :unsatisfiable
+    return (lo, min(hi, n - 1))
+end
+
+# `bytes=-k`: the last `k` bytes, all of them when `k` is longer than the file.
+function _suffix_range(k, n)
+    isempty(k) && return nothing                           # `bytes=-` names no range
+    len = something(tryparse(Int, k), typemax(Int))
+    (len == 0 || n == 0) && return :unsatisfiable
+    return (max(n - len, 0), n - 1)
 end
 
 function _listen_any(addr, port)

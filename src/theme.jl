@@ -24,13 +24,24 @@ Then `render(; out, theme=MyTheme())`, `theme=:mine`, or `theme="path/to/mytheme
 `emit_document` is refused by name at the first `render`, not at subtyping time.
 
 The shipped bases — `GalleryBase` (HTML), `LaTeXBase`, `AgentBase` — instead implement
-`emit_document` as a walk that dispatches to one generic per node (`emit_page`, `emit_section`,
-`emit_figure`, `emit_table`, `emit_check`, `emit_code`, `emit_text`, `emit_view`, `emit_comments`,
-`emit_index`). Subtype one of those to change some nodes and inherit the rest; those generics have
-no fallback of their own, so they are only relevant once something calls them.
+`emit_document` as a walk that dispatches to per-node generics. Subtype one of those to change some
+nodes and inherit the rest. What each base defines:
+
+  - `GalleryBase` defines every generic: `emit_page`, `emit_section`, `emit_figure`, `emit_node`,
+    `emit_table`, `emit_check`, `emit_code`, `emit_text`, `emit_view`, `emit_comments` and
+    `emit_index`;
+  - `LaTeXBase` defines all of them but `emit_view` and `emit_index`;
+  - `AgentBase` defines `emit_page`, `emit_section`, `emit_figure`, `emit_table`, `emit_check` and
+    `emit_code`, and walks its own tree: `_agent_json` calls those six, `_agent_markdown` none, so
+    an override changes `agent.json` only and another generic on an `AgentBase` subtype is never
+    called.
+
+Only `emit_node` has a fallback of its own — an error naming the theme and the node type, so a node a
+theme has no form for is never dropped silently; the others have none, so they are only relevant
+once something calls them.
 
 Traits, which do have defaults: `output_format` (`:html` | `:latex` | `:agent`), `figure_formats`
-(which formats are requested from figure objects), `index_level`, `figure_as_table` and `number`.
+(which formats are requested from figure objects), `index_level` and `number`.
 """
 abstract type Theme end
 
@@ -39,7 +50,6 @@ abstract type Theme end
 output_format(::Theme) = :html            # :html | :latex
 figure_formats(::Theme) = Symbol[:svg]    # formats requested from figure objects (paths copied as-is)
 index_level(::Theme) = :cards             # default table-of-contents verbosity (:toc | :cards | :rich)
-figure_as_table(::Theme) = false          # if true, a backend presents a @figure AS its data table (LLM view)
 number(::Theme, node) = nothing           # optional numbering override (the gallery numbers server-side)
 
 # ---- per-node rendering contract (the "display UI" for each IR node; notes 11) ----
@@ -72,11 +82,23 @@ function emit_figure end
 "Render one table artifact (an HTML/LaTeX table, or a JSON object with native-typed rows). `emit_table(theme, table, ctx)`."
 function emit_table end
 
-"Render one `@expect` check (a gallery `<tr>`, a LaTeX tabular row, or a JSON check object). `emit_check(theme, check, ctx)`."
+"Render one check (a gallery `<tr>`, a LaTeX tabular row, or a JSON check object). `emit_check(theme, check, ctx)`."
 function emit_check end
 
 "Render one `@code` block (source + captured output). `emit_code(theme, codeblock, ctx)`."
 function emit_code end
+
+"""
+    emit_node(theme, node, ctx)
+
+Render one leaf of a container's content walk — a `Prose` block, a `Table`, a `CodeBlock` or a
+`RawBlock` — where it was written. The walk itself places figures (a face may group them),
+sections (it recurses) and checks (they sit in the container's check table). A theme overrides one
+node type and inherits the rest; a node type it has no method for is an error naming the theme and
+the type (#168).
+"""
+function emit_node end
+emit_node(theme::Theme, node, ctx) = _unhandled_node(theme, node)
 
 "Render a markdown+math source (a `@desc`/`@caption`). `emit_text(theme, source, item, ctx; block)`."
 function emit_text end

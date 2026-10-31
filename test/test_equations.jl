@@ -90,7 +90,8 @@ using Test
             end
         end
         html = read(Pinax.render(; out=site("eqauto")), String)
-        @test occursin("id=\"s_eq1\"", html)   # <section anchor>_eq<k>
+        tid = only(Pinax.current_document().pages[1].sections[1].texts).id
+        @test occursin("id=\"$(tid)_eq1\"", html)   # <prose block id>_eq<k>
     end
 
     @testset "equation in a figure caption is numbered" begin

@@ -1,8 +1,8 @@
 # cache.jl — incremental render: skip unchanged figures across renders, clean orphans (notes 10).
 #
 # A figure is re-materialized only when its cache key changed or its asset files are gone.
-# The cache key = hash(@figure source `code` + params identity + requested formats); it is
-# computed WITHOUT calling `gen`, so a hit skips materialization entirely. The previous render's
+# The cache key = hash(@figure source `code` + params identity + requested formats + the data
+# fingerprint, when a vault is given — see below); it is computed WITHOUT calling `gen`, so a hit skips materialization entirely. The previous render's
 # outputs are tracked in a manifest under `out/`; assets it produced but this render did not are
 # deleted (orphan cleanup).
 #
@@ -55,13 +55,19 @@ end
 # Manifest key: the figure's output base path (unique per page/section/figure), TOML-safe.
 _manifest_key(base, outdir) = replace(relpath(base, outdir), r"[^A-Za-z0-9_-]" => "_")
 
+# The previous render's manifest, or an empty one when there is none. It is a derived cache, so a
+# corrupt one is not fatal — every figure re-materializes and the render writes a new one — but it is
+# said: until then its orphans are not cleaned and `rendered_assets` lists nothing.
 function _read_manifest(outdir)
     f = joinpath(outdir, MANIFEST_FILE)
     isfile(f) || return Dict{String,Any}()
     try
         return TOML.parsefile(f)
-    catch
-        return Dict{String,Any}()   # corrupt manifest -> treat as empty (everything re-materializes)
+    catch e
+        e isa TOML.ParserError || rethrow()
+        @warn "Pinax: render manifest $(f) is not valid TOML; ignoring it. Assets it listed " *
+            "are not cleaned up, and the next render writes a new one." exception = e
+        return Dict{String,Any}()
     end
 end
 

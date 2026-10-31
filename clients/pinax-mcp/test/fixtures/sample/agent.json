@@ -1,1 +1,267 @@
-{"title":"Demo Atlas","parts":[{"id":"grp","title":"Group A","desc":"a group of pages"}],"pages":[{"id":"p1","title":"Page One","part":"grp","summary":"overview page","desc":"page-level description","figures":[{"id":"p1_fig1","caption":"magnetization vs temperature","code":"MF()","params":null,"assets":["assets/figures/p1/p1_fig1.svg"],"data":"assets/figures/p1/p1_fig1.csv","table":{"header":["series","x","y"],"rows":[["N=8",0.1,0.99],["N=8",0.2,0.8],["N=8",0.3,0.55]],"total":3},"comments":[{"author":"reviewer","text":"looks converged"}]}],"tables":[{"id":"p1_tbl1","caption":"critical temperatures","code":"(N = [8, 16, 32], Tc = [2.1, 2.2, 2.27])","header":["N","Tc"],"rows":[[8,2.1],[16,2.2],[32,2.27]]}],"content":[{"kind":"figure","id":"p1_fig1"},{"kind":"table","id":"p1_tbl1"}],"sections":[{"id":"s1","title":"Section One","desc":"a section","figures":[{"id":"s1_fig1","caption":"a section figure","code":"MF()","params":null,"assets":["assets/figures/p1/s1/s1_fig1.svg"],"data":"assets/figures/p1/s1/s1_fig1.csv","table":{"header":["series","x","y"],"rows":[["N=8",0.1,0.99],["N=8",0.2,0.8],["N=8",0.3,0.55]],"total":3},"comments":[]}],"tables":[],"content":[{"kind":"figure","id":"s1_fig1"}]}]},{"id":"p2","title":"Page Two","part":"grp","summary":null,"desc":null,"figures":[],"tables":[{"id":"p2_tbl1","caption":"a small table","code":"[(name = \"x\", v = 1), (name = \"y\", v = 2)]","header":["name","v"],"rows":[["x",1],["y",2]]}],"content":[{"kind":"table","id":"p2_tbl1"}],"sections":[]}]}
+{
+ "title": "Demo Atlas",
+ "parts": [
+  {
+   "id": "grp",
+   "title": "Group A",
+   "desc": "a group of pages"
+  }
+ ],
+ "pages": [
+  {
+   "id": "p1",
+   "title": "Page One",
+   "part": "grp",
+   "summary": "overview page",
+   "texts": [
+    {
+     "id": "p1_txt1",
+     "text": "page-level description"
+    }
+   ],
+   "figures": [
+    {
+     "id": "p1_fig1",
+     "caption": "magnetization vs temperature",
+     "code": "MF()",
+     "params": null,
+     "assets": [
+      "assets/figures/p1/p1_fig1.svg"
+     ],
+     "data": {
+      "path": "assets/figures/p1/p1_fig1.csv",
+      "columns": [
+       "series",
+       "T",
+       "M"
+      ],
+      "series": [
+       {
+        "label": "N=8",
+        "points": 3
+       }
+      ]
+     },
+     "comments": [
+      {
+       "author": "reviewer",
+       "text": "looks converged"
+      }
+     ]
+    }
+   ],
+   "tables": [
+    {
+     "id": "p1_tbl1",
+     "caption": "critical temperatures",
+     "code": "(N = [8, 16, 32], Tc = [2.1, 2.2, 2.27])",
+     "header": [
+      "N",
+      "Tc"
+     ],
+     "rows": [
+      [
+       8,
+       2.1
+      ],
+      [
+       16,
+       2.2
+      ],
+      [
+       32,
+       2.27
+      ]
+     ]
+    }
+   ],
+   "content": [
+    {
+     "kind": "text",
+     "id": "p1_txt1"
+    },
+    {
+     "kind": "figure",
+     "id": "p1_fig1"
+    },
+    {
+     "kind": "table",
+     "id": "p1_tbl1"
+    }
+   ],
+   "sections": [
+    {
+     "id": "s1",
+     "title": "Section One",
+     "depth": 2,
+     "verdict": {
+      "verdict": "FAIL",
+      "passed": 1,
+      "total": 2,
+      "failed": [
+       "s2_t1"
+      ]
+     },
+     "texts": [
+      {
+       "id": "s1_txt1",
+       "text": "a section"
+      }
+     ],
+     "figures": [
+      {
+       "id": "s1_fig1",
+       "caption": "a section figure",
+       "code": "MF()",
+       "params": null,
+       "assets": [
+        "assets/figures/p1/s1/s1_fig1.svg"
+       ],
+       "data": {
+        "path": "assets/figures/p1/s1/s1_fig1.csv",
+        "columns": [
+         "series",
+         "T",
+         "M"
+        ],
+        "series": [
+         {
+          "label": "N=8",
+          "points": 3
+         }
+        ]
+       },
+       "comments": []
+      }
+     ],
+     "tables": [],
+     "codes": [],
+     "checks": [
+      {
+       "id": "s1_t1",
+       "label": "isapprox(1.0001, 1.0; rtol = 0.001)",
+       "got": 1.0001,
+       "want": 1.0,
+       "delta": 0.0001,
+       "tol": 0.001,
+       "kind": "rel",
+       "pass": true,
+       "source": "",
+       "code_id": null
+      }
+     ],
+     "content": [
+      {
+       "kind": "text",
+       "id": "s1_txt1"
+      },
+      {
+       "kind": "figure",
+       "id": "s1_fig1"
+      },
+      {
+       "kind": "check",
+       "id": "s1_t1"
+      },
+      {
+       "kind": "section",
+       "id": "s2"
+      }
+     ],
+     "sections": [
+      {
+       "id": "s2",
+       "title": "Section Two",
+       "depth": 3,
+       "verdict": {
+        "verdict": "FAIL",
+        "passed": 0,
+        "total": 1,
+        "failed": [
+         "s2_t1"
+        ]
+       },
+       "texts": [],
+       "figures": [],
+       "tables": [],
+       "codes": [],
+       "checks": [
+        {
+         "id": "s2_t1",
+         "label": "isapprox(0.5, 0.0; atol = 0.001)",
+         "got": 0.5,
+         "want": 0.0,
+         "delta": 0.5,
+         "tol": 0.001,
+         "kind": "abs",
+         "pass": false,
+         "source": "test.jl:9",
+         "code_id": null
+        }
+       ],
+       "content": [
+        {
+         "kind": "check",
+         "id": "s2_t1"
+        }
+       ],
+       "sections": []
+      }
+     ]
+    }
+   ],
+   "status": "final",
+   "codes": [],
+   "verdict": {
+    "verdict": "FAIL",
+    "passed": 1,
+    "total": 2,
+    "failed": [
+     "s2_t1"
+    ]
+   },
+   "checks": []
+  },
+  {
+   "id": "p2",
+   "title": "Page Two",
+   "part": "grp",
+   "summary": null,
+   "texts": [],
+   "figures": [],
+   "tables": [
+    {
+     "id": "p2_tbl1",
+     "caption": "a small table",
+     "code": "[(name = \"x\", v = 1), (name = \"y\", v = 2)]",
+     "header": [
+      "name",
+      "v"
+     ],
+     "rows": [
+      [
+       "x",
+       1
+      ],
+      [
+       "y",
+       2
+      ]
+     ]
+    }
+   ],
+   "content": [
+    {
+     "kind": "table",
+     "id": "p2_tbl1"
+    }
+   ],
+   "sections": [],
+   "status": "final",
+   "codes": [],
+   "verdict": null,
+   "checks": []
+  }
+ ],
+ "diagnostics": []
+}

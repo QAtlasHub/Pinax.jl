@@ -5,25 +5,10 @@
 //   pinax-mcp --agent path/to/agent.json     # the file directly
 //   pinax-mcp --agent path/to/out --comments comments.toml   # also enable the add_comment write tool
 //   PINAX_AGENT=path/to/out pinax-mcp        # or via env (PINAX_COMMENTS for the store)
+import { parseArgs } from "./args.js";
 import { loadAtlas } from "./atlas.js";
 import { CommentStore } from "./comments.js";
 import { serveStdio } from "./server.js";
-
-interface Args {
-  agent: string;
-  comments?: string;
-}
-
-function parseArgs(argv: string[]): Args {
-  let agent = process.env.PINAX_AGENT ?? "";
-  let comments = process.env.PINAX_COMMENTS || undefined;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if ((a === "--agent" || a === "-a") && argv[i + 1] !== undefined) agent = argv[++i];
-    else if (a === "--comments" && argv[i + 1] !== undefined) comments = argv[++i];
-  }
-  return { agent, comments };
-}
 
 async function main(): Promise<void> {
   const { agent, comments } = parseArgs(process.argv.slice(2));

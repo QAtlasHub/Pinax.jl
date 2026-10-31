@@ -13,17 +13,58 @@ function resolve!(doc::Document)
     empty!(doc.refs)
     for pg in doc.pages
         doc.refs[pg.id] = pg
-        for f in pg.figures            # page-level figures (page-as-leaf)
-            doc.refs[f.id] = f
-        end
-        for sec in pg.sections
-            doc.refs[sec.id] = sec
-            for f in sec.figures
-                doc.refs[f.id] = f
-            end
-        end
+        foreach(sec -> doc.refs[sec.id] = sec, _all_sections(pg))
+        figs = _page_figs(pg)
+        foreach(f -> doc.refs[f.id] = f, figs)
+        # `@thumbnail :id` names a figure on its page; one it cannot find is an error, not a blank card
+        t = pg.thumbnail
+        t === nothing ||
+            any(f -> f.id === t.id, figs) ||
+            error(
+                "Pinax: @thumbnail :$(t.id) on page :$(pg.id) names no figure on that page"
+            )
     end
     return doc
+end
+
+# Where a face writes a container's figures: `<outdir>/assets/figures/<page>[/<section>]`, by the
+# anchors; a nested section's directory sits under its page, by its own anchor. LaTeX keeps them out
+# of `assets` (`assets=false`): `<outdir>/figures/…`.
+function _figure_dir(outdir, pg, sec=nothing; assets::Bool=true)
+    root = assets ? joinpath(outdir, "assets", "figures") : joinpath(outdir, "figures")
+    return if sec === nothing
+        joinpath(root, pg.anchor)
+    else
+        joinpath(root, pg.anchor, sec.anchor)
+    end
+end
+
+# Every figure of a page in display order: page-level (page-as-leaf) first, then each section's.
+function _page_figs(pg::Page)
+    figs = copy(pg.figures)
+    for sec in _all_sections(pg)
+        append!(figs, sec.figures)
+    end
+    return figs
+end
+
+# Materialize one figure into a face's directory. A failure is recorded in `rdiag` (the face then
+# shows the figure as a gap, never drops it silently) and `false` is returned.
+function _try_materialize!(fig, base, fmts, cache, rdiag)
+    try
+        materialize!(fig, base, fmts, cache)
+        return true
+    catch e
+        e isa InterruptException && rethrow()
+        push!(rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+        return false
+    end
+end
+
+# A part's title as `@part` registered it; the id itself for a part that was never declared.
+function _part_title(doc::Document, pid)
+    i = findfirst(p -> first(p) === pid, doc.parts)
+    return i === nothing ? string(pid) : last(doc.parts[i])
 end
 
 """
@@ -68,6 +109,13 @@ function render(
     )
     _finalize_cache!(cache)
     vault === nothing || _record_provenance(vault, study)
+    # Every output is on disk; now a failing check nobody has reported yet makes the call fail, the way
+    # the outermost testset throws at its end (#173). Checks a suite already counted are not repeated.
+    unreported = [
+        string(c.id) for pg in doc.pages for
+        c in _subtree_checks(pg) if !passed(c) && !c.reported
+    ]
+    isempty(unreported) || throw(ChecksFailed(unreported, String(path)))
     return path
 end
 
@@ -81,8 +129,9 @@ names the bytes the recipe saw), hands the `(key, dict)` pairs to the project-su
 (which builds the doc with `@page`/`@figure`/`@table`), then renders the human gallery
 **and** the agent.json with the vault wired in (data-fingerprint cache tracking +
 provenance). The driver — discover, load, render, lineage — is project-independent; only
-`recipe` is project-specific. Requires `using DataVault` (which also loads ParamIO); the
-core method errors with a hint when the extension is not loaded.
+`recipe` is project-specific. `out` is a directory: the faces go to `out/html/` and `out/agent/`,
+which share `out/comments.toml`. Requires `using DataVault` (which also loads ParamIO); the core
+method errors with a hint when the extension is not loaded.
 
 `reads` has one record per key — its canonical id, file, `read_sha256`, and what the key's
 `.done` recorded (`result_sha256`, `observation`, `completed_at`) — so a registry can say which

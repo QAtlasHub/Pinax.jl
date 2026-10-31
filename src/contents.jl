@@ -41,7 +41,9 @@ answers "what is here" and not "what state is it in".
 
 Entries carrying `tags` also get a filter bar above the cards: clicking a chip narrows the page to
 the entries that carry it. The filtering is a few lines of inline JavaScript over `data-tags`, so a
-reader without a server, and a reader without JavaScript, both still get the whole list.
+reader without a server, and a reader without JavaScript, both still get the whole list. A tag may
+hold any character, a space included (`"spin chain"`): `data-tags` is each entry's tags as a JSON
+array.
 
 `search=true` mounts the [Pagefind](https://pagefind.app/) UI from `pagefind/` NEXT TO the generated
 page, which is where `add_search` puts it. It is emitted only when asked, because a search box over
@@ -135,8 +137,8 @@ function _emit_contents_search(io)
     return nothing
 end
 
-# Every tag that appears, as a row of toggles. The cards carry `data-tags`, so the filter is a
-# string match in the page rather than a query anywhere.
+# Every tag that appears, as a row of toggles. The cards carry `data-tags` (a JSON array), so the
+# filter is a match in the page rather than a query anywhere.
 function _emit_contents_filters(io, entries)
     tags = String[]
     for e in entries
@@ -168,60 +170,73 @@ function _emit_contents_filters(io, entries)
         "var t=b.getAttribute('data-tag');",
         "bar.querySelectorAll('.pinax-chip').forEach(function(c){c.classList.toggle('is-on',c===b);});",
         "document.querySelectorAll('.pinax-card,.pinax-toc>li').forEach(function(card){",
-        "var ts=(card.getAttribute('data-tags')||'').split(' ');",
+        "var ts=JSON.parse(card.getAttribute('data-tags')||'[]');",
         "card.style.display=(!t||ts.indexOf(t)>=0)?'':'none';});});})();</script>",
     )
     return nothing
 end
 
+# An entry's tags as the ` data-tags` attribute the filter matches on: a JSON array, since a tag may
+# hold any character a separator could be ("spin chain"). Nothing for an untagged entry.
+function _print_tags_attr(io, tags)
+    isempty(tags) && return nothing
+    json = string("[", join((_jsonstr(t) for t in tags), ","), "]")
+    return print(io, " data-tags=\"", _esc(json), "\"")
+end
+
 function _emit_contents_cards(io, entries, rich::Bool)
     println(io, "<div class=\"pinax-cards\">")
-    for e in entries
-        thumb = _entry_get(e, :thumbnail, nothing)
-        summary = _entry_get(e, :summary, nothing)
-        metaline = _entry_get(e, :meta, nothing)
-        items = _entry_get(e, :items, nothing)
-        tags = String[string(t) for t in _entry_get(e, :tags, ())]
-        print(io, "<a class=\"pinax-card\"")
-        isempty(tags) || print(io, " data-tags=\"", _esc(join(tags, " ")), "\"")
-        print(io, " href=\"", _esc(_entry_str(e, :href)), "\">")
+    foreach(e -> _emit_contents_card(io, e, rich), entries)
+    return println(io, "</div>")
+end
+
+# One entry's card: its thumbnail, title, summary, (rich) section list, tags and meta line.
+function _emit_contents_card(io, e, rich::Bool)
+    tags = String[string(t) for t in _entry_get(e, :tags, ())]
+    print(io, "<a class=\"pinax-card\"")
+    _print_tags_attr(io, tags)
+    print(io, " href=\"", _esc(_entry_str(e, :href)), "\">")
+    thumb = _entry_get(e, :thumbnail, nothing)
+    print(
+        io,
         if thumb === nothing
-            print(io, "<div class=\"card-thumb card-thumb-empty\"></div>")
+            "<div class=\"card-thumb card-thumb-empty\"></div>"
         else
-            print(
-                io,
+            string(
                 "<div class=\"card-thumb\"><img src=\"",
                 _esc(string(thumb)),
                 "\" alt=\"\"></div>",
             )
-        end
-        print(
-            io,
-            "<div class=\"card-body\"><div class=\"card-title\">",
-            _esc(_entry_str(e, :title)),
-            "</div>",
-        )
-        summary === nothing ||
-            print(io, "<div class=\"card-summary\">", _esc(string(summary)), "</div>")
-        if rich && items !== nothing && !isempty(items)
-            print(io, "<div class=\"card-sections\">")
-            for it in items
-                print(io, "<div class=\"sec-item\">", _esc(string(it)), "</div>")
-            end
-            print(io, "</div>")
-        end
-        if !isempty(tags)
-            print(io, "<div class=\"card-tags\">")
-            for t in tags
-                print(io, "<span class=\"card-tag\">", _esc(t), "</span>")
-            end
-            print(io, "</div>")
-        end
-        metaline === nothing ||
-            print(io, "<div class=\"card-meta\">", _esc(string(metaline)), "</div>")
-        print(io, "</div></a>")
+        end,
+    )
+    print(
+        io,
+        "<div class=\"card-body\"><div class=\"card-title\">",
+        _esc(_entry_str(e, :title)),
+        "</div>",
+    )
+    _card_div(io, "card-summary", _entry_get(e, :summary, nothing))
+    items = _entry_get(e, :items, nothing)
+    rich && items !== nothing && _card_list(io, "card-sections", "div", "sec-item", items)
+    _card_list(io, "card-tags", "span", "card-tag", tags)
+    _card_div(io, "card-meta", _entry_get(e, :meta, nothing))
+    return print(io, "</div></a>")
+end
+
+# `<div class=…>text</div>`, or nothing when there is no text.
+function _card_div(io, class, x)
+    return x === nothing ||
+           print(io, "<div class=\"", class, "\">", _esc(string(x)), "</div>")
+end
+
+# A wrapping `<div class=…>` of one `<tag class=…>` per item, or nothing when there are none.
+function _card_list(io, class, tag, itemclass, items)
+    isempty(items) && return nothing
+    print(io, "<div class=\"", class, "\">")
+    for it in items
+        print(io, "<", tag, " class=\"", itemclass, "\">", _esc(string(it)), "</", tag, ">")
     end
-    return println(io, "</div>")
+    return print(io, "</div>")
 end
 
 function _emit_contents_toc(io, entries)
@@ -233,7 +248,7 @@ function _emit_contents_toc(io, entries)
         # The filter bar is emitted at every level, so a `:toc` row has to carry what it matches on
         # or a click would empty the page.
         print(io, "<li")
-        isempty(tags) || print(io, " data-tags=\"", _esc(join(tags, " ")), "\"")
+        _print_tags_attr(io, tags)
         print(
             io,
             "><a href=\"",

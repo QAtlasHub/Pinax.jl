@@ -15,9 +15,9 @@
 #            `Test.finish` it has 1.
 #
 # TestShards answers both with a registered provider (`register_unit_provider!`), and the provider
-# belongs HERE: it needs the counts out of `PinaxTestSet`, which is ours and private, while its side
-# of the seam is one function call and no types of theirs. The reverse placement would have TestShards
-# reading six private fields of a type it does not own.
+# belongs HERE: it needs the counts out of `PinaxTestSet`'s tree, which is ours and private, while
+# its side of the seam is one function call and no types of theirs. The reverse placement would have
+# TestShards reading private fields of a type it does not own.
 module PinaxTestShardsExt
 
 using Pinax: Pinax
@@ -89,7 +89,7 @@ sweep is not folded.
 """
 function _attach_evidence!(ts, prefix::Symbol=Pinax._slug(ts.description))
     ev = TestShards.evidence(ts)
-    isempty(ev) || _push_evidence_table!(ts, ev, prefix)
+    isempty(ev) || _push_evidence_table!(ts.node, ev, prefix)
     for c in ts.children
         _attach_evidence!(c, prefix)
     end
@@ -98,10 +98,11 @@ end
 
 function _push_evidence_table!(node, ev, prefix::Symbol)
     rows = Vector{Any}[Any[k, ev[k]] for k in sort!(collect(keys(ev)))]
+    # one evidence table per node, so its generated id needs no hash (Conventions › Identity)
     id = if node.id === prefix
-        Pinax._auto_table_id(node)
+        Symbol(prefix, "_evidence")
     else
-        Symbol(prefix, :_, node.id, "_tbl", length(node.tables) + 1)
+        Symbol(prefix, :_, node.id, "_evidence")
     end
     tbl = Pinax.Table(
         id,
@@ -112,8 +113,7 @@ function _push_evidence_table!(node, ev, prefix::Symbol)
         "",
         nothing,
     )
-    push!(node.tables, tbl)
-    push!(node.content, :table => length(node.tables))
+    Pinax._add_node!(node, :table, tbl)
     return tbl
 end
 
@@ -130,16 +130,17 @@ Pinax converts each result into a `Check` as it is recorded rather than keeping 
 BROKEN test is counted without becoming a check at all (it did not pass, but the runner is content,
 and calling it a failure would paint the unit red).
 """
-function _fold(ts)
-    kids = [_fold(c) for c in ts.children]
-    nerror = ts.nerror
+_fold(ts) = _fold_node(ts.node)
+function _fold_node(n)
+    kids = [_fold_node(c) for c in n.children]
     return (;
-        name=ts.description,
-        duration=isnan(ts.elapsed) ? 0.0 : ts.elapsed,
-        npass=count(c -> c.pass, ts.checks) + sum(k -> k.npass, kids; init=0),
-        nfail=count(c -> !c.pass, ts.checks) - nerror + sum(k -> k.nfail, kids; init=0),
-        nerror=nerror + sum(k -> k.nerror, kids; init=0),
-        nbroken=ts.nbroken + sum(k -> k.nbroken, kids; init=0),
+        name=n.description,
+        duration=isnan(n.elapsed) ? 0.0 : n.elapsed,
+        npass=count(Pinax.passed, n.checks) + sum(k -> k.npass, kids; init=0),
+        nfail=count(c -> c.outcome === :fail, n.checks) + sum(k -> k.nfail, kids; init=0),
+        nerror=count(c -> c.outcome === :error, n.checks) +
+               sum(k -> k.nerror, kids; init=0),
+        nbroken=n.nbroken + sum(k -> k.nbroken, kids; init=0),
         sections=kids,
     )
 end
@@ -162,7 +163,7 @@ function Pinax.completeness_overview(c::TestShards.Completeness)
                 (; metric="verdict", value=ok ? "every unit ran exactly once" : "FAILED"),
             ],
             code="",
-            id=:completeness,
+            gen_id=:completeness,
             caption="Completeness — whether the shards between them ran every unit they observed, " *
                     "exactly once. A report missing a shard reads as a smaller suite unless it says so.",
         )

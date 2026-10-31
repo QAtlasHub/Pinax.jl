@@ -110,8 +110,8 @@ function _mk_gallery(dir; title="T")
     Pinax.reset!(; title=title)
     @page :demo "Demo" begin
         @section :s "S" begin
-            @figure pdf caption = "a pdf"
-            @figure svg caption = "an svg"
+            @figure pdf caption = "a pdf" id = :s_fig1
+            @figure svg caption = "an svg" id = :s_fig2
         end
     end
     Pinax.render(; out=dir)

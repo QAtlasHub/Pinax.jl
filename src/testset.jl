@@ -1,12 +1,11 @@
 # testset.jl — the Test-FREE half of the `Test` bridge (the other half is ext/PinaxTestExt.jl).
 #
 # A test suite is normally a binary: green or red. But Pinax already has the pieces to say
-# something much more useful — `@expect` records a `Check(got, want, delta, tol, pass)`, and a
-# `status=:benchmark` page renders those as a colored pass/fail report (and emits
-# `{verdict, passed, total, failed, checks:[…]}` into `agent.json`). All that was missing was
-# the bridge FROM `Test`:
+# something much more useful — a `Check(got, want, delta, tol, pass)` per assertion, and every
+# container holding checks renders them as a colored pass/fail report (and emits its `verdict` and
+# `checks` into `agent.json`). All that was missing was the bridge FROM `Test`:
 #
-#     test file  (@testset "test_foo.jl")  →  @page (status=:benchmark)
+#     test file  (@testset "test_foo.jl")  →  @page
 #     @testset   (nested)                  →  @section  (recursively)
 #     @test                                →  a Check  +  the @code that produced it
 #
@@ -35,11 +34,11 @@ touch is the call. Two forms:
   - `Pinax.test(runtests::AbstractString)` — render a specific test file in the current process (no
     sandbox): open a capturing root testset, `include` the file, render.
 
-Each test *file* (a `.jl`-named `@testset`) becomes a `status = :benchmark` page, each nested
+Each test *file* (a `.jl`-named `@testset`) becomes a page, each nested
 `@testset` a section, each `@test` a `Check` carrying its real `got`/`want`/`tol` — and, by default,
 a `@code` block holding the source that produced it, so a reader sees what was measured and not only
 whether it passed. Writes
-`<out>_html` + `<out>_agent`; with `dump` set, dumps the tree there instead (a sharded CI shard) for
+`<out>/html/` + `<out>/agent/`; with `dump` set, dumps the tree there instead (a sharded CI shard) for
 [`render_test_report`](@ref) to merge later. A red suite still fails the process — the report never
 changes the verdict. A suite may also draw (`@desc`/`@figure`/`@table`/…); that content is captured,
 and is a no-op under a bare `Pkg.test()`.
@@ -126,7 +125,7 @@ function install_test_capture!()
     return _install_test_capture!()
 end
 
-"Where the test report is written (`PINAX_TEST_OUT`, default `test-report`) → `<out>_html` + `<out>_agent`."
+"Where the test report is written (`PINAX_TEST_OUT`, default `test-report`) → `<out>/html/` + `<out>/agent/`."
 report_out() = get(ENV, "PINAX_TEST_OUT", "test-report")
 
 "Report title (`PINAX_TEST_TITLE`, default `Test report`) — the document title + overview heading."
@@ -163,7 +162,12 @@ function _ignore_current_testset! end
 
 _looks_like_a_file(desc::AbstractString) = endswith(desc, ".jl")
 
-_slug(s) = Symbol(replace(lowercase(strip(s)), r"[^a-z0-9]+" => "_"))
+# A description as an id: its letters and digits, in any script, joined by `_` (`:エネルギー`,
+# `:test_foo_jl`); one with none (`"!!"`) is a hash of itself, so it is still its own and not positional.
+function _slug(s)
+    t = replace(lowercase(strip(s)), r"[^\p{L}\p{N}]+" => "_")
+    return occursin(r"[\p{L}\p{N}]", t) ? Symbol(t) : Symbol("t", _stable_hash(s))
+end
 
 # ── the code behind a check: one code format, captured by default ────
 #
@@ -248,7 +252,6 @@ const _SELF_RENDERING_MACROS = Set([
     "@section",
     "@page",
     "@part",
-    "@benchmark",
     "@pinaxsetup",
     "@newcommand",
     "@bibliography",
@@ -265,7 +268,6 @@ const _ASSERTION_MACROS = Set([
     "@test_deprecated",
     "@test_warn",
     "@test_nowarn",
-    "@expect",
 ])
 
 _is_assertion_stmt(s) = _macroname(s) in _ASSERTION_MACROS
@@ -322,14 +324,10 @@ function _file_ast(file::AbstractString)
     end
 end
 
-"""
-    _test_code_block(file, line) -> CodeBlock | nothing
-
-The `@code` artifact for the assertion at `file:line` — the code that produced it. The id is derived
-from the line span, so every sample of a `@testset for` (the same line, N iterations) maps to ONE
-block: the sweep shows its specification once, not once per point.
-"""
-function _test_code_block(file::AbstractString, line::Integer)
+# The statement written at `file:line`: the innermost block holding a statement there, that
+# statement's index in it, and the file's lines — or `nothing` when the file is not readable (a REPL,
+# a Documenter `@example`) or no statement starts at that line.
+function _code_site(file, line)
     fa = _file_ast(file)
     fa === nothing && return nothing
     lines, ast = fa
@@ -338,35 +336,65 @@ function _test_code_block(file::AbstractString, line::Integer)
     cands = filter(b -> any(s -> s[1] == line, b.stmts), blks)
     isempty(cands) && return nothing
     b = argmin(x -> x.hi - x.lo, cands)          # the innermost block holding a statement at `line`
-    idx = findlast(s -> s[1] == line, b.stmts)
-    from = 1
-    for i in 1:(idx - 1)
-        _is_assertion_stmt(b.stmts[i][2]) && (from = i + 1)
-    end
-    keep = [i for i in from:idx if !_is_self_rendering_stmt(b.stmts[i][2])]
-    isempty(keep) && return nothing
-    pieces = [(b.stmts[i][1], _stmt_hi(b, i, lines)) for i in keep]
+    return (; lines, b, idx=findlast(s -> s[1] == line, b.stmts))
+end
+
+"""
+    _test_code_block(file, line) -> CodeBlock | nothing
+
+The `@code` artifact for the assertion at `file:line` — the code that produced it. The id hashes
+the code text (#123), so shifted lines never move it, and every sample of a `@testset for` (the same
+code, N iterations) maps to ONE block: the sweep shows its specification once, not once per point.
+"""
+function _test_code_block(file::AbstractString, line::Integer)
+    site = _code_site(file, line)
+    site === nothing && return nothing
+    (; lines, b, idx) = site
+    pieces = _region_pieces(b, idx, lines)
+    out = _region_lines(pieces, lines)
+    isempty(out) && return nothing
+    hdr = _sweep_header_line(b)
+    src = _snippet_source(out, lines, b, hdr)
+    # keyed on the code itself, not its line span, so shifting lines never changes it (#123)
+    id = Symbol("code_", _slug(basename(String(file))), "_", _stable_hash(src))
+    at = _defined_at((String(file), hdr == 0 ? pieces[1][1] : hdr))
+    return CodeBlock(id, _anchor(id), src, "", "", "julia", at)
+end
+
+# The `(first, last)` source lines of the statements behind assertion `idx` of block `b`: those after
+# the block's previous assertion, up to it, less the Pinax content macros (they render themselves).
+function _region_pieces(b::_CodeBlk, idx::Int, lines)
+    prev = findlast(i -> _is_assertion_stmt(b.stmts[i][2]), 1:(idx - 1))
+    from = prev === nothing ? 1 : prev + 1
+    return [
+        (b.stmts[i][1], _stmt_hi(b, i, lines)) for
+        i in from:idx if !_is_self_rendering_stmt(b.stmts[i][2])
+    ]
+end
+
+# The text of those statements. A trailing blank / comment line introduces whatever comes NEXT, not
+# this region, so it is left off.
+function _region_lines(pieces, lines)
     out = String[]
     for (lo, hi) in pieces
         append!(out, lines[lo:min(hi, length(lines))])
     end
-    # a trailing blank / comment line introduces whatever comes NEXT, not this region
-    while !isempty(out) && (isempty(strip(out[end])) || startswith(strip(out[end]), "#"))
+    while !isempty(out) && _blank_or_comment(out[end])
         pop!(out)
     end
-    isempty(out) && return nothing
-    hdr = _sweep_header_line(b)
-    head = hdr == 0 ? String[] : String[lines[l] for l in hdr:(b.lo - 1)]
+    return out
+end
+_blank_or_comment(l) = (t=strip(l); isempty(t) || startswith(t, "#"))
+
+# The snippet: a sweep's header (line `hdr`, 0 when none) ahead of the region and its `end` after,
+# within `_MAX_CODE_LINES`. Never silently truncated: an elided region says so (the full file is a
+# click away in CI).
+function _snippet_source(out, lines, b::_CodeBlk, hdr::Int)
+    head = hdr == 0 ? String[] : lines[hdr:(b.lo - 1)]
     budget = _MAX_CODE_LINES - length(head) - (hdr == 0 ? 0 : 1)
-    # never silently truncate: an elided region says so (the full file is a click away in CI)
     length(out) > budget && (out = vcat(["#   …"], out[(end - budget + 2):end]))
-    body = vcat(head, out)
-    src = _dedent(body)
-    hdr == 0 || (src = string(src, "\nend"))
-    id = Symbol(
-        "code_", _slug(basename(String(file))), "_", first(pieces)[1], "_", last(pieces)[2]
-    )
-    return CodeBlock(id, _anchor(id), src, "", "", "julia")
+    src = _dedent(vcat(head, out))
+    return hdr == 0 ? src : string(src, "\nend")
 end
 
 _strip_lnn(x) = x
@@ -377,7 +405,10 @@ end
 function _dedent(ls)
     indents = [length(l) - length(lstrip(l)) for l in ls if !isempty(strip(l))]
     ind = isempty(indents) ? 0 : minimum(indents)
-    return rstrip(join((isempty(strip(l)) ? "" : l[(ind + 1):end] for l in ls), "\n"))
+    # `ind` counts characters (an indent may hold a multi-byte space), so cut by characters
+    return rstrip(
+        join((isempty(strip(l)) ? "" : chop(l; head=ind, tail=0) for l in ls), "\n")
+    )
 end
 
 """
@@ -391,96 +422,104 @@ remainder parses to the very expression the macro was handed. `nothing` when the
 (a REPL, a Documenter `@example`), where the deparsed form is all there is.
 """
 function _verbatim_code(file, line, expr)
-    fa = _file_ast(file)
-    fa === nothing && return nothing
-    lines, ast = fa
-    blks = _CodeBlk[]
-    _walk_code_blocks!(blks, ast, Any[])
-    cands = filter(b -> any(s -> s[1] == line, b.stmts), blks)
-    isempty(cands) && return nothing
-    b = argmin(x -> x.hi - x.lo, cands)
-    i = findlast(s -> s[1] == line, b.stmts)
-    lo = b.stmts[i][1]
-    hi = min(_stmt_hi(b, i, lines), length(lines))
-    text = _dedent(lines[lo:hi])
+    site = _code_site(file, line)
+    site === nothing && return nothing
+    (; lines, b, idx) = site
+    hi = min(_stmt_hi(b, idx, lines), length(lines))
+    text = _dedent(lines[b.stmts[idx][1]:hi])
     target = _strip_lnn(expr)
-    nl = something(findfirst('\n', text), length(text) + 1)
-    starts = Int[1]
-    for (j, ch) in enumerate(text)
-        j >= nl && break
-        isspace(ch) && j < length(text) && push!(starts, j + 1)
-    end
-    for s in starts
-        e = try
-            Meta.parse(SubString(text, s))
-        catch
-            continue
-        end
-        e isa Expr && e.head === :incomplete && continue
-        _strip_lnn(e) == target && return _dedent(split(SubString(text, s), '\n'))
+    for s in _first_line_starts(text)
+        _parses_to(text, s, target) && return _dedent(split(SubString(text, s), '\n'))
     end
     return nothing
 end
 
-"""
-    _push_auto_code!(container, blk) -> CodeBlock | nothing
+# Where each token of `text`'s first line starts, as byte indices (what `SubString` takes): where a
+# peeled-off macro call may end. A multi-byte character before a token does not shift it.
+function _first_line_starts(text)
+    starts = Int[1]
+    for (j, ch) in pairs(text)
+        ch == '\n' && break
+        k = nextind(text, j)
+        isspace(ch) && k <= ncodeunits(text) && push!(starts, k)
+    end
+    return starts
+end
 
-Place an auto-captured `@code` artifact into a container, at most once per id. Deduplication by id is
-what collapses a sweep's N samples — and N shards' dumps — onto the one block they share.
+# Whether `text` from `s` on parses, completely, to `target` (line numbers aside).
+function _parses_to(text, s, target)
+    e = try
+        Meta.parse(SubString(text, s))
+    catch
+        return false
+    end
+    e isa Expr && e.head === :incomplete && return false
+    return _strip_lnn(e) == target
+end
+
+"""
+    _push_auto_code!(container, blk) -> Symbol
+
+Place an auto-captured `@code` artifact into a container, at most once per id, and return the id it
+holds there. Deduplication by id is what collapses a sweep's N samples — and N shards' dumps — onto
+the one block they share. A test node keeps the block as captured (the fold places it in the
+document); a document container places it now, under an id no other node holds.
 """
 function _push_auto_code!(c, blk)
-    any(b -> b.id === blk.id, c.codes) && return nothing
-    push!(c.codes, blk)
-    push!(c.content, :code => length(c.codes))
-    return blk
+    if !(c isa TestNode)
+        _place_code!(c, blk, ())
+        return _ensure_document!().fold_codes[(c.id, blk.id)]
+    end
+    any(b -> b.id === blk.id, c.codes) && return blk.id
+    _add_node!(c, :code, blk)
+    return blk.id
 end
 
 # ── recovering the NUMBERS out of a test's expression ────────────────
 #
-# `isapprox(got, want; rtol=…, atol=…)` / `got ≈ want` → (got, want, tol, kind), or nothing.
-# The Expr arrives with its arguments already EVALUATED (that is what `Test` records), so these are
-# the real numbers the assertion actually compared.
+# `isapprox(got, want; rtol=…, atol=…)` / `got ≈ want` → (; got, want, atol, rtol), with isapprox's
+# own defaults filled in, or nothing. The Expr arrives with its arguments already EVALUATED (that is
+# what `Test` records), so these are the real numbers the assertion actually compared.
 function _approx_numbers(e::Expr)
-    e.head === :call || return nothing
-    f = e.args[1]
-    (f === :isapprox || f === :≈) || return nothing
-    pos = Float64[]
-    rtol = nothing
-    atol = nothing
-    for a in e.args[2:end]
-        if a isa Expr && a.head === :parameters
-            for kw in a.args
-                kw isa Expr && kw.head === :kw || continue
-                kw.args[1] === :rtol && (rtol = _tofloat(kw.args[2]))
-                kw.args[1] === :atol && (atol = _tofloat(kw.args[2]))
-            end
-        elseif a isa Expr && a.head === :kw
-            a.args[1] === :rtol && (rtol = _tofloat(a.args[2]))
-            a.args[1] === :atol && (atol = _tofloat(a.args[2]))
-        else
-            v = _tofloat(a)
-            v === nothing || push!(pos, v)
-        end
-    end
+    (e.head === :call && e.args[1] in (:isapprox, :≈)) || return nothing
+    args = _flat_args(e.args[2:end])
+    kw = Dict(a.args[1] => _tofloat(a.args[2]) for a in args if _is_kw(a))
+    pos = Float64[v for v in (_tofloat(a) for a in args if !_is_kw(a)) if v !== nothing]
     length(pos) >= 2 || return nothing
-    got, want = pos[1], pos[2]
-    # isapprox is `|x-y| <= max(atol, rtol*max(|x|,|y|))`. A Check carries ONE kind, so report the
-    # one that actually governs: relative when there is a nonzero reference, else absolute.
-    if rtol !== nothing && rtol > 0 && abs(want) > 0
-        return (got, want, rtol, :rel)
-    elseif atol !== nothing && atol > 0
-        return (got, want, atol, :abs)
-    elseif rtol !== nothing && rtol > 0
-        return (got, want, rtol, :rel)
-    end
-    return nothing
+    a = something(get(kw, :atol, nothing), 0.0)
+    # isapprox's default: rtol = √eps when no atol is given, 0 when one is.
+    r = something(get(kw, :rtol, nothing), a > 0 ? 0.0 : sqrt(eps(Float64)))
+    return (; got=pos[1], want=pos[2], atol=a, rtol=r)
+end
+_is_kw(a) = a isa Expr && a.head === :kw
+# A call's arguments with its `; …` keywords spliced in, in order (a bare `; rtol` is not a value).
+function _flat_args(args)
+    return reduce(
+        vcat,
+        (
+            a isa Expr && a.head === :parameters ? filter(_is_kw, a.args) : Any[a] for
+            a in args
+        );
+        init=Any[],
+    )
 end
 _approx_numbers(::Any) = nothing
 
+# A recorded number. `Test` stores a failing expression as a string and it is reparsed, which turns a
+# NaN/Inf value back into an identifier (and -Inf into a call): read those as the floats they were
+# (#116), so a diverged computation keeps its numbers instead of losing them.
 _tofloat(x::Real) = Float64(x)
+function _tofloat(x::Symbol)
+    x in (:NaN, :NaN64, :NaN32, :NaN16) && return NaN
+    x in (:Inf, :Inf64, :Inf32, :Inf16) && return Inf
+    return nothing
+end
+function _tofloat(x::Expr)
+    (x.head === :call && length(x.args) == 2 && x.args[1] === :-) || return nothing
+    v = _tofloat(x.args[2])
+    return v === nothing ? nothing : -v
+end
 _tofloat(x::Any) = nothing
-
-_margin(c::Check) = c.tol > 0 ? c.delta / c.tol : 0.0
 
 # A stable fingerprint of the data a DERIVED figure (the margin / convergence SVGs) draws, folded into
 # the figure's `code` so the render cache (which keys on code+params, computed without calling `gen`)
@@ -489,60 +528,92 @@ _margin(c::Check) = c.tol > 0 ? c.delta / c.tol : 0.0
 # moved. Dumps carry the checks, so they carry this key material implicitly — no separate cache key.
 function _checks_fingerprint(checks)
     return string(
-        hash([(c.label, c.got, c.want, c.delta, c.tol, c.kind, c.pass) for c in checks])
+        hash([(c.label, c.got, c.want, c.delta, c.tol, c.kind, c.outcome) for c in checks])
     )
 end
 
 # ── the checks ───────────────────────────────────────────────────────
 
 # One Check per @test. A numeric `isapprox` keeps its real got/want/tol (that is the whole point);
-# anything else is encoded as a 1/0 indicator so that EVERY assertion still shows up in the
+# anything else is an indicator check (no numbers) so that EVERY assertion still shows up in the
 # machine-readable verdict rather than silently vanishing.
 #
-# `passed` is the TEST RUNNER's verdict, never recomputed from delta<=tol: isapprox combines atol and
-# rtol in a way a single-kind Check cannot reproduce, and a report that disagrees with the test
-# runner is worse than no report.
-function _check_from(expr, label::AbstractString, passed::Bool, i::Int)
+# `outcome` is the TEST RUNNER's verdict (`:pass` / `:fail` / `:error`, or a Bool for pass/fail),
+# never recomputed from delta<=tol: isapprox combines atol and rtol in a way a single-kind Check cannot
+# reproduce, and a report that disagrees with the test runner is worse than no report. An error has
+# no numbers: it is an indicator.
+function _check_from(expr, label::AbstractString, outcome, i::Int)
     id = Symbol("t", i)
-    nums = _approx_numbers(expr)
-    if nums === nothing
-        got = passed ? 1.0 : 0.0
-        return Check(id, String(label), got, 1.0, abs(got - 1.0), 0.5, :abs, passed)
-    end
-    got, want, tol, kind = nums
-    delta = kind === :rel ? abs(got - want) / abs(want) : abs(got - want)
-    return Check(id, String(label), got, want, delta, tol, kind, passed)
+    o = _outcome(outcome)
+    nums = o === :error ? nothing : _approx_numbers(expr)
+    nums === nothing && return _indicator_check(id, label, o)
+    (; got, want, atol, rtol) = nums
+    # No margin exists for a non-finite value or tolerance (or a zero one, below): say so on the
+    # check, flagged as an indicator, rather than emitting non-finite or fabricated numbers (#116).
+    (isfinite(got) && isfinite(want)) || return _indicator_check(
+        id, "$(label)  [got = $(got), want = $(want): no margin]", o
+    )
+    (isfinite(atol) && isfinite(rtol)) || return _indicator_check(
+        id, "$(label)  [atol = $(atol), rtol = $(rtol): no margin]", o
+    )
+    return _margin_check(id, String(label), got, want, atol, rtol, o)
 end
 
-# ── the tree DTO (Test-free) ─────────────────────────────────────────
+# isapprox passes iff |x-y| <= max(atol, rtol*max(|x|,|y|)) (#115). Record the term that governs, so
+# `delta <= tol` is exactly that test: absolute when atol is the larger bound, else relative to
+# max(|x|,|y|). Finite got, want and tolerances, as `_check_from` hands them over.
+function _margin_check(id, label, got, want, atol, rtol, o)
+    scale = max(abs(got), abs(want))
+    atol <= 0 &&
+        rtol * scale <= 0 &&
+        return _indicator_check(id, "$(label)  [zero tolerance: no margin]", o)
+    diff = abs(got - want)
+    isfinite(diff) ||
+        return _indicator_check(id, "$(label)  [|got - want| overflows: no margin]", o)
+    atol >= rtol * scale && return Check(id, label, got, want, diff, atol, :abs, o)
+    return Check(id, label, got, want, diff / scale, rtol, :rel, o)
+end
+
+# An indicator: every assertion still shows up in the verdict, but it has no numbers and no margin.
+function _indicator_check(id, label, outcome)
+    return Check(id, String(label), NaN, NaN, NaN, NaN, :indicator, outcome)
+end
+
+# ── the test tree (Test-free) ────────────────────────────────────────
 #
-# `TestNode` is the **serialisation DTO** for the shard dump — the testset tree with `Test` and its
-# closures factored OUT. It is NOT a second document model: the live tree is `PinaxTestSet` objects
-# (in the extension) holding Pinax's own structs directly, and the fold below is duck-typed so it
-# walks EITHER a live `PinaxTestSet` (direct render) or a merged `TestNode` (a sharded run). A
-# `TestNode` carries the same container fields as a `PinaxTestSet` (figures/tables/panels/desc +
-# content order) so that one fold serves both; the TOML dump currently persists checks + structure
-# only (a `Figure.gen` is a closure and cannot cross the process boundary — carrying user figures
-# through a shard is the E/L follow-up), so a loaded `TestNode` has those extra vectors empty.
+# `TestNode` is the ONE shape of a captured suite: a live run builds it (each `PinaxTestSet` in the
+# extension is a thin `AbstractTestSet` adapter holding one, #173), a shard dumps and reloads it, and
+# the fold below walks it. It is a container in its own right — the same payload a `Section` carries
+# (id/anchor, figures/tables/raws/codes/checks/texts + content order) — so a content macro inside a
+# test pushes into it through the `_current_container()` seam exactly as into a section.
+#
+# It is not a `Section` because a section's place in the document is not known while the suite runs:
+# whether a testset is a page (a file), a section, a grouping to flatten, or one sample of a swept
+# `@testset for` is decided by the fold, from its siblings and `page_when`, after the run. The TOML
+# dump persists checks + structure + tables/codes/desc (a `Figure.gen` is a closure and cannot cross
+# the process boundary — carrying user figures through a shard is the E/L follow-up), so a loaded
+# `TestNode` has no figures.
 #
 # This is what makes sharded CI work. Eight shards each run a disjoint set of test FILES; instead of
 # eight disconnected galleries, each shard dumps its tree (no rendering at all) and one later job
 # merges the trees and renders the single coherent gallery: one page per test file.
-struct TestNode
+mutable struct TestNode
     description::String
+    id::Symbol                  # the slug of `description` — what content-macro ids are built from
+    anchor::String
     elapsed::Float64
     ignore::Bool                # @pinaxignore: ran and counted, but kept out of the document
     checks::Vector{Check}       # one per Pass / Fail / Error recorded directly here
     nbroken::Int                # @test_broken / skipped: counted, never a Check — see below
-    nerror::Int                 # how many of the failing checks were ERRORS rather than plain fails
     children::Vector{TestNode}
-    # container payload — same shape a `PinaxTestSet` captures live (the closure-free DTO half).
     figures::Vector{Figure}
     tables::Vector{Table}
-    panels::Vector{String}
+    raws::Vector{RawBlock}
     codes::Vector{CodeBlock}
-    desc::Union{Desc,Nothing}
-    content::Vector{Pair{Symbol,Int}}   # declaration order of figures/tables/panels/checks/codes
+    texts::Vector{Prose}                # @desc prose blocks
+    content::Vector{Pair{Symbol,Int}}   # declaration order of texts/figures/tables/raws/checks/codes
+    written::Set{Symbol}                # ids of its content the author wrote (`id=`); others generated
+    dropped::Vector{Pair{String,String}} # id => why: what a shard dump could not carry (see the dump)
 end
 
 function TestNode(
@@ -551,41 +622,48 @@ function TestNode(
     ignore::Bool=false,
     checks::Vector{Check}=Check[],
     nbroken::Integer=0,
-    nerror::Integer=0,
     children::Vector{TestNode}=TestNode[],
     figures::Vector{Figure}=Figure[],
     tables::Vector{Table}=Table[],
-    panels::Vector{String}=String[],
+    raws::Vector{RawBlock}=RawBlock[],
     codes::Vector{CodeBlock}=CodeBlock[],
-    desc::Union{Desc,Nothing}=nothing,
+    texts::Vector{Prose}=Prose[],
     content::Vector{Pair{Symbol,Int}}=Pair{Symbol,Int}[],
+    written::Set{Symbol}=Set{Symbol}(),
+    dropped::Vector{Pair{String,String}}=Pair{String,String}[],
 )
+    id = _slug(description)
     return TestNode(
         String(description),
+        id,
+        _anchor(id),
         Float64(elapsed),
         ignore,
         checks,
         nbroken,
-        nerror,
         children,
         figures,
         tables,
-        panels,
+        raws,
         codes,
-        desc,
+        texts,
         content,
+        written,
+        dropped,
     )
 end
 
 # A broken/skipped test is deliberately NOT a Check. It has no verdict to show: it did not pass, but
-# it did not fail either, and encoding it as `pass=false` would paint the page red and flip the
-# benchmark verdict to FAIL — for a test the runner is perfectly happy about.
+# it did not fail either, and encoding it as a `:fail` check would paint the page red and flip the
+# verdict to FAIL — for a test the runner is perfectly happy about.
 _ntests(n) = length(n.checks) + n.nbroken + sum(_ntests, n.children; init=0)
-_nerror(n) = n.nerror + sum(_nerror, n.children; init=0)
+# Failed and errored are each read from the checks' own outcome, so they can never disagree with them.
+_nerror(n) = _noutcome(n, :error)
+_nfail(n) = _noutcome(n, :fail)
 _nbroken(n) = n.nbroken + sum(_nbroken, n.children; init=0)
-function _nfail(n)
-    here = count(c -> !c.pass, n.checks) - n.nerror
-    return here + sum(_nfail, n.children; init=0)
+function _noutcome(n, o::Symbol)
+    return count(c -> c.outcome === o, n.checks) +
+           sum(ch -> _noutcome(ch, o), n.children; init=0)
 end
 
 function _summary_line(n)
@@ -598,19 +676,15 @@ function _summary_line(n)
            t
 end
 
-# The largest delta/tol among this subtree's NUMERIC checks — how close the file came to red.
+# The largest delta/tol among this subtree's checks — how close the file came to red — or nothing
+# when none has a margin (an indicator has none).
 function _worst_margin(n)
-    worst = nothing
-    for c in n.checks
-        c.kind === :abs && c.tol == 0.5 && c.want == 1.0 && continue   # the 1/0 indicator, not a margin
-        m = _margin(c)
-        worst = worst === nothing ? m : max(worst, m)
-    end
+    ms = Float64[m for m in (_margin(c) for c in n.checks) if m !== nothing]
     for ch in n.children
         m = _worst_margin(ch)
-        m === nothing || (worst = worst === nothing ? m : max(worst, m))
+        m === nothing || push!(ms, m)
     end
-    return worst
+    return isempty(ms) ? nothing : maximum(ms)
 end
 
 # ── the margin profile figure ────────────────────────────────────────
@@ -641,14 +715,14 @@ function _margin_svg(checks::Vector{Check}, path::AbstractString)
     for (i, c) in enumerate(checks)
         m = _margin(c)
         y = top + (i - 1) * _BAR_H
-        fill = if !c.pass
+        fill = if !passed(c)
             "#d9534f"
         elseif m > 0.75
             "#e8a33d"
         else
             "#4c9f70"
         end
-        lab = length(c.label) > 34 ? c.label[1:31] * "…" : c.label
+        lab = _trunc(c.label, 34)
         w = max(x_of(m) - left, 1.0)
         print(
             io,
@@ -681,20 +755,24 @@ _fmt_margin(m) = m >= 10 ? "$(round(Int, m))×" : "$(round(m; digits=2))"
 # and the caption says how many of how many are shown. The full per-check data is still in `agent.json`.
 const _MAX_MARGIN_BARS = 40
 
-# The figure for one page's checks: how far each assertion sat from its own tolerance.
+# The figure for one page's checks: how far each assertion sat from its own tolerance. An indicator
+# has no margin and is not drawn; a page of indicators alone has no margin figure.
 function _push_margin_figure!(page_id::Symbol, checks::Vector{Check})
-    isempty(checks) && return nothing
-    total = length(checks)
-    shown = if total <= _MAX_MARGIN_BARS
-        checks
+    numbered = [i for (i, c) in enumerate(checks) if _margin(c) !== nothing]
+    isempty(numbered) && return nothing
+    total = length(numbered)
+    # the checks drawn, by their number on the page, in that order — capped or not
+    xs = if total <= _MAX_MARGIN_BARS
+        numbered
     else
-        checks[partialsortperm(checks, 1:_MAX_MARGIN_BARS; by=_margin, rev=true)]
+        worst = partialsortperm(checks[numbered], 1:_MAX_MARGIN_BARS; by=_margin, rev=true)
+        sort(numbered[worst])
     end
+    shown = checks[xs]
     capped = length(shown) < total
     # `data=` must be plot-data (`series=[(; label, x, y)]`) — it is the figure's TEXT channel for the
-    # agent backend. The per-check got/want/tol already ride along in the benchmark `checks` JSON, so
-    # the series carries only what the picture itself shows: the margin of check i.
-    xs = collect(1:length(shown))
+    # agent backend. The per-check got/want/tol already ride along in each container's `checks` in
+    # agent.json, so the series carries only what the picture itself shows: the margin of check i.
     data = (;
         xlabel="check #",
         ylabel="delta / tol",
@@ -708,13 +786,16 @@ function _push_margin_figure!(page_id::Symbol, checks::Vector{Check})
     else
         ""
     end
+    total < length(checks) && (
+        cap_note *= " A check with no numbers (pass/fail only) has no margin and is not drawn."
+    )
     _push_figure!(;
         gen=() -> _margin_svg(shown, tempname() * ".svg"),
         code=_checks_fingerprint(shown),   # data-keyed so a rebuild re-draws iff the checks moved (L)
         caption="Tolerance budget spent by each check. The dashed line is the pass/fail " *
                 "boundary — a bar close to it passed, but barely." *
                 cap_note,
-        id=Symbol(page_id, :_margins),
+        gen_id=Symbol(page_id, :_margins),
         data=data,
     )
     return nothing
@@ -741,7 +822,7 @@ end
 #   • C3 three or more nested loops → innermost = x, ALL outer bindings join into ONE legend key.
 #   • C4 a render-side `x_axis=` override is deferred: the code is the figure spec (innermost = x).
 #
-# The whole thing is Test-free and duck-typed over the same shape `_emit_node!` already walks, so a
+# The whole thing is Test-free and walks the same `TestNode` tree `_emit_node!` does, so a
 # sharded run gets its sweeps too: a dump carries child descriptions + checks, and the fold rebuilds the
 # convergence figure from the merged tree with no extra machinery.
 
@@ -846,11 +927,14 @@ function _swept_codes(n, out=CodeBlock[])
     return out
 end
 
-function _sweep_has_user_content(n)
-    return !isempty(n.figures) ||
-           !isempty(n.tables) ||
-           !isempty(n.panels) ||
-           any(_sweep_has_user_content, n.children)
+# What a sweep cannot place: the content its samples wrote besides checks and code (the checks and
+# the code are folded), as `macro => count` in a fixed order, over the whole swept subtree.
+const _SWEEP_UNPLACED = (
+    "@desc" => :texts, "@figure" => :figures, "@table" => :tables, "@raw" => :raws
+)
+_sweep_unplaced(n) = [m => _subtree_count(n, f) for (m, f) in _SWEEP_UNPLACED]
+function _subtree_count(n, f)
+    return length(getfield(n, f)) + sum(ch -> _subtree_count(ch, f), n.children; init=0)
 end
 
 # Group samples by quantity = the check label (the test expression `orig_expr`, which is loop-invariant,
@@ -868,42 +952,34 @@ end
 
 # Render a swept level: a convergence + margin figure per quantity, then every sample check placed flat
 # (binding-tagged) so the page's pass/fail counts and `agent.json` verdict stay exactly what they were —
-# the sweep changes only how the checks are DRAWN, never the verdict.
-function _emit_sweep!(n, counter::Ref{Int}, page_when::Function, acc::Vector{Check})
+# the sweep changes only how the checks are DRAWN, never the verdict. A sweep with no checks still
+# lifts its code and names what it omits.
+function _emit_sweep!(n, page_when::Function, acc::Vector{Check}, id_prefix="")
     c = _ctx_container()
     samples = _sweep_samples!(
         Tuple{Vector{Pair{Symbol,String}},Check}[], n, Pair{Symbol,String}[], page_when
     )
-    isempty(samples) && return acc
-    _sweep_has_user_content(n) && _diag!(
+    unplaced = join(("$(k) × $(m)" for (m, k) in _sweep_unplaced(n) if k > 0), ", ")
+    isempty(unplaced) || _diag!(
         WARNING,
         string(c.id, "_sweep"),
-        "@figure/@table inside a swept `@testset for` is not folded yet — omitted from the sweep view (issue #69 E follow-up)",
+        "$(unplaced) inside a swept `@testset for` is not folded yet — omitted from the sweep view (issue #69 E follow-up)",
     )
     # The samples are folded away, but the CODE they captured is the sweep's specification (the loop
     # header + the assertion), so it must survive the fold: lift it to the section, deduplicated, ahead
     # of the figures it explains.
     for blk in _swept_codes(n)
-        _push_auto_code!(c, blk)
+        _place_code!(c, blk, n.written; id_prefix)
     end
     qi = Ref(0)
     for (label, pts) in _group_quantities(samples)
-        _push_sweep_figures!(c.id, qi, label, pts)
+        # an indicator has no value to plot and no margin: only the samples with numbers are drawn
+        drawn = filter(p -> _margin(p[2]) !== nothing, pts)
+        isempty(drawn) || _push_sweep_figures!(c.id, qi, label, drawn)
     end
     for (bind, chk) in samples
-        tagged = Check(
-            chk.id,
-            string(chk.label, "  [", _binding_str(bind), "]"),
-            chk.got,
-            chk.want,
-            chk.delta,
-            chk.tol,
-            chk.kind,
-            chk.pass,
-            chk.source,
-            chk.code_anchor,
-        )
-        _place_check!(c, tagged, counter, acc)
+        tagged = _copy_check(chk; label=string(chk.label, "  [", _binding_str(bind), "]"))
+        _place_check!(c, tagged, acc)
     end
     return acc
 end
@@ -911,100 +987,137 @@ end
 # Build the two figures for one quantity. Innermost binding = x (numeric → a real axis, else categorical
 # ticks); outer bindings = the legend. `want`/`tol` recover the reference line and tolerance band.
 function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, pts)
-    xvar = last(_binding_vars(pts[1][1]))
-    xval(p) = last(p[1])[2]
-    numeric = all(p -> tryparse(Float64, xval(p)) !== nothing, pts)
-    ticks =
-        numeric ? sort(unique(xval.(pts)); by=s -> parse(Float64, s)) : unique(xval.(pts))
-    xticklabels = numeric ? [_fmt_num(parse(Float64, t)) for t in ticks] : ticks
-    tickindex = Dict(t => i for (i, t) in enumerate(ticks))
-    K = length(ticks)
-    legkey(p) = _binding_str(p[1][1:(end - 1)])
-    legs = unique(legkey.(pts))
-    wantv = fill(NaN, K)
-    bandlo = fill(NaN, K)
-    bandhi = fill(NaN, K)
-    conv_series = NamedTuple[]
-    marg_series = NamedTuple[]
-    for lg in legs
-        xs, gy, my, ok = Int[], Float64[], Float64[], Bool[]
-        for p in pts
-            legkey(p) == lg || continue
-            i = tickindex[xval(p)]
-            c = p[2]
-            push!(xs, i)
-            push!(gy, c.got)
-            push!(my, _margin(c))
-            push!(ok, c.pass)
-            wantv[i] = c.want
-            tolabs = c.kind === :rel ? c.tol * abs(c.want) : c.tol
-            bandlo[i] = c.want - tolabs
-            bandhi[i] = c.want + tolabs
-        end
-        perm = sortperm(xs)
-        push!(conv_series, (; label=lg, xs=xs[perm], ys=gy[perm], ok=ok[perm]))
-        push!(marg_series, (; label=lg, xs=xs[perm], ys=my[perm], ok=ok[perm]))
-    end
-    band = [(bandlo[i], bandhi[i]) for i in 1:K]
+    ax = _sweep_axis(pts)
+    conv, marg = _sweep_series(pts, ax)
     qi[] += 1
     q = _trunc(label, 44)
     # both SVGs derive from `pts` (+ the axis) — one data fingerprint keys their cache (issue #69 L).
     fp = string(
         hash((
-            xvar,
-            xticklabels,
+            ax.xvar,
+            ax.labels,
             [
-                (_binding_str(b), c.got, c.want, c.delta, c.tol, c.kind, c.pass) for
+                (_binding_str(b), c.got, c.want, c.delta, c.tol, c.kind, c.outcome) for
                 (b, c) in pts
             ],
         )),
     )
-    _push_figure!(;
-        gen=() -> _sweep_plot_svg(
-            tempname() * ".svg";
-            title="convergence — $(q)",
-            xlabel=string(xvar),
-            ylabel="got",
-            xticklabels=xticklabels,
-            series=conv_series,
-            band=band,
-            refline=wantv,
-        ),
-        code=fp,
-        caption="Convergence of `$(q)` over the swept axis `$(xvar)`. Dashed line = `want`; the shaded " *
-                "band is the tolerance; a red marker is a failed check.",
-        id=Symbol(cid, :_conv_, qi[]),
-        data=(;
-            xlabel=string(xvar),
-            ylabel="got",
-            series=[
-                (; label=isempty(s.label) ? "got" : s.label, x=s.xs, y=s.ys) for
-                s in conv_series
-            ],
-        ),
+    _conv_figure!(Symbol(cid, :_conv_, qi[]), q, ax, conv, fp)
+    _margin_figure!(Symbol(cid, :_swpmargin_, qi[]), q, ax, marg, fp)
+    return nothing
+end
+
+# The swept axis: its variable, its ticks in order (numeric ones by value), their labels, and each
+# tick's position.
+function _sweep_axis(pts)
+    vals = _sweep_x.(pts)
+    numeric = all(v -> tryparse(Float64, v) !== nothing, vals)
+    ticks = numeric ? sort(unique(vals); by=s -> parse(Float64, s)) : unique(vals)
+    return (;
+        xvar=last(_binding_vars(pts[1][1])),
+        numeric,
+        ticks,
+        labels=numeric ? [_fmt_num(parse(Float64, t)) for t in ticks] : ticks,
+        index=Dict(t => i for (i, t) in enumerate(ticks)),
     )
+end
+_sweep_x(p) = last(p[1])[2]
+_legend_key(p) = _binding_str(p[1][1:(end - 1)])
+# The axis's value at a tick: the number itself, or the category — what a data file must hold (a
+# tick's position is a drawing detail).
+_axis_value(ax, i) = ax.numeric ? parse(Float64, ax.ticks[i]) : ax.ticks[i]
+
+# One convergence and one margin series per legend entry. Each series keeps its own reference and
+# tolerance band (#130): two series with different `want` at one tick must not share whichever band
+# was folded last.
+function _sweep_series(pts, ax)
+    both = [
+        _one_series(filter(p -> _legend_key(p) == lg, pts), ax, lg) for
+        lg in unique(_legend_key.(pts))
+    ]
+    return NamedTuple[first(b) for b in both], NamedTuple[last(b) for b in both]
+end
+
+function _one_series(pts, ax, lg)
+    xs = [ax.index[_sweep_x(p)] for p in pts]
+    perm = sortperm(xs)
+    cs = [p[2] for p in pts][perm]
+    # the pass boundary isapprox applies: rel is relative to max(|got|,|want|) (#115)
+    tolabs = [c.kind === :rel ? c.tol * max(abs(c.got), abs(c.want)) : c.tol for c in cs]
+    want = [c.want for c in cs]
+    ok = [passed(c) for c in cs]
+    conv = (;
+        label=lg,
+        xs=xs[perm],
+        ys=[c.got for c in cs],
+        ok,
+        want,
+        lo=want .- tolabs,
+        hi=want .+ tolabs,
+    )
+    return conv, (; label=lg, xs=xs[perm], ys=_margin.(cs), ok)
+end
+
+function _conv_figure!(id, q, ax, series, fp)
+    return _sweep_figure!(
+        id,
+        ax,
+        series,
+        fp;
+        title="convergence — $(q)",
+        ylabel="got",
+        caption="Convergence of `$(q)` over the swept axis `$(ax.xvar)`. Dashed line = `want`; the shaded " *
+                "band is the tolerance; a red marker is a failed check.",
+        # what the plot draws, per series: the values, the reference and the tolerance band
+        data=[
+            (;
+                label=isempty(s.label) ? name : string(s.label, " ", name),
+                x=[_axis_value(ax, i) for i in s.xs],
+                y=getfield(s, field),
+            ) for s in series for
+            (name, field) in (("got", :ys), ("want", :want), ("lo", :lo), ("hi", :hi))
+        ],
+    )
+end
+
+function _margin_figure!(id, q, ax, series, fp)
+    return _sweep_figure!(
+        id,
+        ax,
+        series,
+        fp;
+        title="margin — $(q)",
+        ylabel="delta / tol",
+        caption="Tolerance budget `delta/tol` of `$(q)` over `$(ax.xvar)`; the dashed line at 1.0 is the " *
+                "pass/fail boundary.",
+        data=[
+            (;
+                label=isempty(s.label) ? "margin" : s.label,
+                x=[_axis_value(ax, i) for i in s.xs],
+                y=s.ys,
+            ) for s in series
+        ],
+        hline=1.0,
+    )
+end
+
+# A sweep figure: `series` drawn over the swept axis, with `data` as its text channel.
+function _sweep_figure!(id, ax, series, fp; title, ylabel, caption, data, hline=nothing)
+    xlabel = string(ax.xvar)
     _push_figure!(;
         gen=() -> _sweep_plot_svg(
             tempname() * ".svg";
-            title="margin — $(q)",
-            xlabel=string(xvar),
-            ylabel="delta / tol",
-            xticklabels=xticklabels,
-            series=marg_series,
-            hline=1.0,
+            title,
+            xlabel,
+            ylabel,
+            xticklabels=ax.labels,
+            series,
+            hline,
         ),
         code=fp,
-        caption="Tolerance budget `delta/tol` of `$(q)` over `$(xvar)`; the dashed line at 1.0 is the " *
-                "pass/fail boundary.",
-        id=Symbol(cid, :_swpmargin_, qi[]),
-        data=(;
-            xlabel=string(xvar),
-            ylabel="delta / tol",
-            series=[
-                (; label=isempty(s.label) ? "margin" : s.label, x=s.xs, y=s.ys) for
-                s in marg_series
-            ],
-        ),
+        caption,
+        gen_id=id,
+        data=(; xlabel, ylabel, series=data),
     )
     return nothing
 end
@@ -1018,41 +1131,54 @@ end
 # A small multi-series line plot as hand-written SVG (same reason as `_margin_svg`: `@figure`'s gen may
 # return a file path, so a test report draws itself without dragging a plotting backend into every test
 # env). `series` is `[(; label, xs::Vector{Int}, ys::Vector{Float64}, ok::Vector{Bool}), …]` where `xs`
-# index into `xticklabels`; `band` shades a per-tick `(lo, hi)`, `refline` dashes a per-tick reference,
-# `hline` draws one horizontal boundary. y is auto-scaled over everything drawn.
+# index into `xticklabels`; a series carrying `want`/`lo`/`hi` also gets its own shaded tolerance band
+# and dashed reference; `hline` draws one horizontal boundary. y is auto-scaled over everything drawn.
 function _sweep_plot_svg(
-    path;
-    title,
-    xlabel,
-    ylabel,
-    xticklabels::Vector{String},
-    series,
-    band=nothing,
-    refline=nothing,
-    hline=nothing,
+    path; title, xlabel, ylabel, xticklabels::Vector{String}, series, hline=nothing
 )
-    K = length(xticklabels)
-    W, H, L, R, T, Bm = 640, 300, 66, 150, 30, 46
-    plotw, ploth = W - L - R, H - T - Bm
-    xat(i) = K <= 1 ? L + plotw / 2 : L + plotw * (i - 1) / (K - 1)
+    g = _plot_frame(length(xticklabels), _y_extent(series, hline)...)
+    io = IOBuffer()
+    _svg_axes(io, g, title, xlabel, ylabel, xticklabels)
+    _svg_bands(io, g, series)
+    hline === nothing || _svg_hline(io, g, hline)
+    _svg_series(io, g, series)
+    print(io, "</svg>\n")
+    write(path, take!(io))
+    return path
+end
+
+_series_color(si) = _SERIES_COLORS[(si - 1) % length(_SERIES_COLORS) + 1]
+
+# The y range drawn — every finite value, reference and band edge, and `hline` — padded by 8%, with
+# the pad itself (the outer ticks sit one pad inside the range).
+function _y_extent(series, hline)
     ys = Float64[]
-    for s in series, y in s.ys
-        isfinite(y) && push!(ys, y)
+    for s in series
+        append!(ys, filter(isfinite, s.ys))
+        hasproperty(s, :want) && append!(
+            ys, filter(isfinite, s.lo), filter(isfinite, s.hi), filter(isfinite, s.want)
+        )
     end
-    band === nothing || for (lo, hi) in band
-        isfinite(lo) && push!(ys, lo)
-        isfinite(hi) && push!(ys, hi)
-    end
-    refline === nothing || append!(ys, filter(isfinite, refline))
     hline === nothing || push!(ys, hline)
     isempty(ys) && (ys = [0.0, 1.0])
     ylo, yhi = extrema(ys)
     ylo == yhi && (ylo -= 0.5; yhi += 0.5)
     pad = 0.08 * (yhi - ylo)
-    ylo -= pad
-    yhi += pad
+    return ylo - pad, yhi + pad, pad
+end
+
+# The plot's geometry: the canvas, its margins, and where tick `i` and value `v` land.
+function _plot_frame(K, ylo, yhi, pad)
+    W, H, L, R, T, Bm = 640, 300, 66, 150, 30, 46
+    plotw, ploth = W - L - R, H - T - Bm
+    xat(i) = K <= 1 ? L + plotw / 2 : L + plotw * (i - 1) / (K - 1)
     yat(v) = T + ploth * (1 - (v - ylo) / (yhi - ylo))
-    io = IOBuffer()
+    return (; W, H, L, T, plotw, ploth, ylo, yhi, pad, xat, yat)
+end
+
+# The canvas, the title, both axes with their labels and ticks.
+function _svg_axes(io, g, title, xlabel, ylabel, xticklabels)
+    (; W, H, L, T, plotw, ploth, ylo, yhi, pad, xat, yat) = g
     print(
         io,
         """<svg xmlns="http://www.w3.org/2000/svg" width="$(W)" height="$(H)" font-family="ui-monospace,Menlo,monospace" font-size="11">
@@ -1070,50 +1196,75 @@ function _sweep_plot_svg(
             """<line x1="$(L - 4)" y1="$(y)" x2="$(L)" y2="$(y)" stroke="#bbb"/><text x="$(L - 7)" y="$(y + 3)" text-anchor="end" fill="#888">$(_fmt_num(v))</text>\n""",
         )
     end
-    for i in 1:K
+    for (i, lab) in enumerate(xticklabels)
         x = xat(i)
         print(
             io,
-            """<line x1="$(x)" y1="$(T + ploth)" x2="$(x)" y2="$(T + ploth + 4)" stroke="#bbb"/><text x="$(x)" y="$(T + ploth + 16)" text-anchor="middle" fill="#888">$(_xml(xticklabels[i]))</text>\n""",
+            """<line x1="$(x)" y1="$(T + ploth)" x2="$(x)" y2="$(T + ploth + 4)" stroke="#bbb"/><text x="$(x)" y="$(T + ploth + 16)" text-anchor="middle" fill="#888">$(_xml(lab))</text>\n""",
         )
     end
-    if band !== nothing
-        hi_pts, lo_pts = String[], String[]
-        for i in 1:K
-            lo, hi = band[i]
-            (isfinite(lo) && isfinite(hi)) || continue
-            push!(hi_pts, "$(xat(i)),$(yat(hi))")
-            pushfirst!(lo_pts, "$(xat(i)),$(yat(lo))")
-        end
-        isempty(hi_pts) || print(
-            io,
-            """<polygon points="$(join(vcat(hi_pts, lo_pts), " "))" fill="#4c9f70" fill-opacity="0.12"/>\n""",
-        )
+    return nothing
+end
+
+# Each series' own tolerance band and dashed reference, in its colour (#130); a band identical to
+# one already drawn (series sharing a reference) is drawn once.
+function _svg_bands(io, g, series)
+    drawn = Set{Any}()
+    for (si, s) in enumerate(series)
+        hasproperty(s, :want) || continue
+        key = (s.xs, s.lo, s.hi, s.want)
+        key in drawn && continue
+        push!(drawn, key)
+        _svg_band(io, g, s, _series_color(si))
     end
-    if refline !== nothing
-        d = ["$(xat(i)),$(yat(refline[i]))" for i in 1:K if isfinite(refline[i])]
-        length(d) >= 2 && print(
-            io,
-            """<polyline points="$(join(d, " "))" fill="none" stroke="#4c9f70" stroke-width="1.3" stroke-dasharray="4,3"/>\n""",
-        )
-    end
-    if hline !== nothing
-        y = yat(hline)
-        print(
-            io,
-            """<line x1="$(L)" y1="$(y)" x2="$(L + plotw)" y2="$(y)" stroke="#d9534f" stroke-width="1" stroke-dasharray="3,2"/><text x="$(L + plotw)" y="$(y - 3)" text-anchor="end" fill="#d9534f">tol</text>\n""",
-        )
-    end
+    return nothing
+end
+
+function _svg_band(io, g, s, col)
+    (; xat, yat) = g
+    keep = [j for j in eachindex(s.xs) if isfinite(s.lo[j]) && isfinite(s.hi[j])]
+    hi_pts = ["$(xat(s.xs[j])),$(yat(s.hi[j]))" for j in keep]
+    lo_pts = reverse!(["$(xat(s.xs[j])),$(yat(s.lo[j]))" for j in keep])
+    isempty(hi_pts) || print(
+        io,
+        """<polygon points="$(join(vcat(hi_pts, lo_pts), " "))" fill="$(col)" fill-opacity="0.12"/>\n""",
+    )
+    _svg_polyline(
+        io,
+        g,
+        s.xs,
+        s.want,
+        "stroke=\"$(col)\" stroke-width=\"1.3\" stroke-dasharray=\"4,3\"",
+    )
+    return nothing
+end
+
+# A line through the finite points of `ys` at ticks `xs`, when there are two to join.
+function _svg_polyline(io, g, xs, ys, style)
+    (; xat, yat) = g
+    d = ["$(xat(xs[j])),$(yat(ys[j]))" for j in eachindex(xs) if isfinite(ys[j])]
+    length(d) >= 2 &&
+        print(io, """<polyline points="$(join(d, " "))" fill="none" $(style)/>\n""")
+    return nothing
+end
+
+function _svg_hline(io, g, hline)
+    (; L, plotw, yat) = g
+    y = yat(hline)
+    print(
+        io,
+        """<line x1="$(L)" y1="$(y)" x2="$(L + plotw)" y2="$(y)" stroke="#d9534f" stroke-width="1" stroke-dasharray="3,2"/><text x="$(L + plotw)" y="$(y - 3)" text-anchor="end" fill="#d9534f">tol</text>\n""",
+    )
+    return nothing
+end
+
+# Each series' line and markers (a failed check's in red), and its legend entry when it has a label.
+function _svg_series(io, g, series)
+    (; L, T, plotw, xat, yat) = g
     ly = T + 4
     for (si, s) in enumerate(series)
-        col = _SERIES_COLORS[(si - 1) % length(_SERIES_COLORS) + 1]
-        d = [
-            "$(xat(s.xs[j])),$(yat(s.ys[j]))" for j in eachindex(s.xs) if isfinite(s.ys[j])
-        ]
-        length(d) >= 2 && print(
-            io,
-            """<polyline points="$(join(d, " "))" fill="none" stroke="$(col)" stroke-width="1.6"/>\n""",
-        )
+        col = _series_color(si)
+        _svg_polyline(io, g, s.xs, s.ys, "stroke=\"$(col)\" stroke-width=\"1.6\"")
         for j in eachindex(s.xs)
             isfinite(s.ys[j]) || continue
             print(
@@ -1121,17 +1272,14 @@ function _sweep_plot_svg(
                 """<circle cx="$(xat(s.xs[j]))" cy="$(yat(s.ys[j]))" r="3" fill="$(s.ok[j] ? col : "#d9534f")" stroke="#fff" stroke-width="0.6"/>\n""",
             )
         end
-        if !isempty(s.label)
-            print(
-                io,
-                """<line x1="$(L + plotw + 10)" y1="$(ly)" x2="$(L + plotw + 26)" y2="$(ly)" stroke="$(col)" stroke-width="2"/><text x="$(L + plotw + 30)" y="$(ly + 3)" fill="#555">$(_xml(_trunc(s.label, 18)))</text>\n""",
-            )
-            ly += 15
-        end
+        isempty(s.label) && continue
+        print(
+            io,
+            """<line x1="$(L + plotw + 10)" y1="$(ly)" x2="$(L + plotw + 26)" y2="$(ly)" stroke="$(col)" stroke-width="2"/><text x="$(L + plotw + 30)" y="$(ly + 3)" fill="#555">$(_xml(_trunc(s.label, 18)))</text>\n""",
+        )
+        ly += 15
     end
-    print(io, "</svg>\n")
-    write(path, take!(io))
-    return path
+    return nothing
 end
 
 # ── the document ─────────────────────────────────────────────────────
@@ -1141,17 +1289,9 @@ end
 # flat, so two same-named test files or sections would otherwise clash). `seen` accumulates every
 # page/section id assigned in the document; page ids are global, section ids are page-qualified.
 function _unique_id!(seen::Set{Symbol}, base::Symbol, desc)
-    if !(base in seen)
-        push!(seen, base)
-        return base
-    end
-    k = 2
-    while Symbol(base, "-", k) in seen
-        k += 1
-    end
-    id = Symbol(base, "-", k)
+    id = _free_id(base, in(seen))
     push!(seen, id)
-    _diag!(
+    id === base || _diag!(
         WARNING,
         string(id),
         "duplicate id \"$(base)\" (from \"$(desc)\") → disambiguated to $(id); rename the testset to fix",
@@ -1163,127 +1303,218 @@ end
 # spread across its @sections (that is the whole nesting), so the page-level margin figure cannot be
 # rebuilt from the page container alone — it has to be accumulated on the way down.
 #
-# `n` is duck-typed: a live `PinaxTestSet` (direct render — carries user `@figure`/`@desc`/… too) or
-# a merged `TestNode` (a sharded run — checks + structure only). Same fold either way.
+# `n` is a live run's tree (it carries user `@figure`s too) or a merged shard dump (no figures) — the
+# same `TestNode` either way, so there is one fold.
 function _emit_node!(
-    n,
-    counter::Ref{Int},
+    n::TestNode,
     page_when::Function,
     seen::Set{Symbol},
     acc::Vector{Check}=Check[];
     id_prefix::AbstractString="",
 )
-    _emit_own_content!(n, counter, acc)
+    if _ctx_container() === nothing && _has_own_content(n)
+        # content written at the top level (the usual `@testset "MyPkg"` wrapper holds checks and
+        # prose of its own) has no page to land on, so it gets one — never folded away while the
+        # overview counts it
+        _emit_page_node!(n, n, page_when, seen, acc; id_prefix, recurse=false)
+    else
+        _emit_own_content!(n, acc, id_prefix)
+    end
     # A level whose children are all canonical `@testset for` samples is a SWEEP, not a stack of
     # sections: fold it into convergence + margin figures (issue #69 C). Only inside an open container
     # (a page/section) — never at the root, where children are files and the grouping-flatten runs.
     if _ctx_container() !== nothing && _is_swept(n, page_when)
-        _emit_sweep!(n, counter, page_when, acc)
+        _emit_sweep!(n, page_when, acc, id_prefix)
         return acc
     end
     # Nested testsets become pages (a file) or sections (a group). @pinaxignore'd ones are skipped
     # HERE only — never in the counts, so an ignored subtree still fails the suite if it is red.
     for ch in n.children
-        ch.ignore && continue
-        if page_when(ch.description)
-            # Page ids are GLOBAL. Under a CI matrix (issue #69 K) the same file appears in every cell,
-            # so `id_prefix` qualifies the id per cell — distinct pages under distinct `@part`s, no
-            # spurious duplicate-id collisions.
-            pid = _unique_id!(
-                seen, Symbol(id_prefix, _slug(ch.description)), ch.description
-            )
-            _enter_page!(pid, ch.description; status=:benchmark, summary=_summary_line(ch))
-            try
-                page_checks = Check[]
-                _emit_node!(ch, counter, page_when, seen, page_checks; id_prefix=id_prefix)
-                append!(acc, page_checks)
-                # Back at page level (every section closed), so the figure lands on the page.
-                _push_margin_figure!(pid, page_checks)
-            finally
-                _exit_page!()
-            end
-        elseif _ctx_container() === nothing
-            # At the root with no page open, a non-file testset is a GROUPING (e.g. the top-level
-            # `@testset "MyPkg"` that most runtests wrap everything in) → flatten it: its children
-            # become top-level pages, exactly as `_collect_rows!` already treats it. A section needs a
-            # page, which a grouping at this level does not provide.
-            _emit_node!(ch, counter, page_when, seen, acc; id_prefix=id_prefix)
-        else
-            # A child that parses as a canonical binding but is being rendered as a SECTION means its
-            # siblings are not a consistent sweep (mixed/partial) — so we did not fold. Say so once
-            # (invariant III: never fall back to silence), then render it as an ordinary section.
-            if _parse_binding(ch.description) !== nothing && !(:_sweep_warned in seen)
-                push!(seen, :_sweep_warned)
-                _diag!(
-                    WARNING,
-                    "sweep",
-                    "a `@testset for` sample could not be folded (its siblings are not a consistent " *
-                    "canonical sweep) — rendered as a section instead",
-                )
-            end
-            # Section ids are PAGE-QUALIFIED (`<pageid>_<slug>`) so a "conv" section in two files does
-            # not clash; a true sibling collision within one page then gets the `-2` suffix.
-            sid = _unique_id!(
-                seen, Symbol(current_page().id, :_, _slug(ch.description)), ch.description
-            )
-            _enter_section!(sid, ch.description; summary=_summary_line(ch))
-            try
-                _emit_node!(ch, counter, page_when, seen, acc; id_prefix=id_prefix)
-            finally
-                _exit_section!()
-            end
-        end
+        ch.ignore || _emit_child!(ch, page_when, seen, acc, id_prefix)
     end
     return acc
 end
 
-# Move THIS node's own captured content (desc + figures/tables/panels + checks) into the CTX
-# container just entered, preserving declaration order. A live `PinaxTestSet` carries the full
-# interleaved `content`; a merged `TestNode` carries checks with empty `content`, so fall back to the
-# checks in that case. Uses `_ctx_container()` (never the probe) — the fold builds the doc in `CTX`.
-function _emit_own_content!(n, counter::Ref{Int}, acc::Vector{Check})
+function _emit_child!(ch::TestNode, page_when, seen, acc, id_prefix)
+    if _ctx_container() !== nothing
+        # A file is a page only at the top level: a page is never written inside another page
+        # (Conventions › Structure), so a file-like testset inside one is a section of it.
+        _emit_section_node!(ch, page_when, seen, acc, id_prefix)
+    elseif page_when(ch.description)
+        # Page ids are GLOBAL. Under a CI matrix (issue #69 K) the same file appears in every cell,
+        # so `id_prefix` qualifies the id per cell — distinct pages under distinct `@part`s, no
+        # spurious duplicate-id collisions.
+        _emit_page_node!(ch, ch, page_when, seen, acc; id_prefix)
+    else
+        # At the root with no page open, a non-file testset is a GROUPING (e.g. the top-level
+        # `@testset "MyPkg"` that most runtests wrap everything in) → flatten it: its children
+        # become top-level pages, exactly as `_collect_rows!` already treats it. A section needs a
+        # page, which a grouping at this level does not provide.
+        _emit_node!(ch, page_when, seen, acc; id_prefix=id_prefix)
+    end
+    return acc
+end
+
+function _emit_section_node!(ch::TestNode, page_when, seen, acc, id_prefix)
+    _warn_unfolded_sample!(ch, seen)
+    # Section ids are PAGE-QUALIFIED (`<pageid>_<slug>`) so a "conv" section in two files does
+    # not clash; a true sibling collision within one page then gets the `-2` suffix.
+    sid = _unique_id!(
+        seen, Symbol(current_page().id, :_, _slug(ch.description)), ch.description
+    )
+    _enter_section!(sid, ch.description; summary=_summary_line(ch))
+    try
+        _emit_node!(ch, page_when, seen, acc; id_prefix=id_prefix)
+    finally
+        _exit_section!()
+    end
+    return acc
+end
+
+# A child that parses as a canonical binding but is being rendered as a SECTION means its siblings
+# are not a consistent sweep (mixed/partial) — so it was not folded. Say so once (invariant III:
+# never fall back to silence); it is then rendered as an ordinary section.
+function _warn_unfolded_sample!(ch::TestNode, seen)
+    (_parse_binding(ch.description) === nothing || :_sweep_warned in seen) && return nothing
+    push!(seen, :_sweep_warned)
+    _diag!(
+        WARNING,
+        "sweep",
+        "a `@testset for` sample could not be folded (its siblings are not a consistent " *
+        "canonical sweep) — rendered as a section instead",
+    )
+    return nothing
+end
+
+# Move THIS node's own captured content (texts + figures/tables/raws + checks) into the CTX
+# container just entered, preserving declaration order. A captured node carries the full interleaved
+# `content`; one without it (a legacy dump, or a node built by hand) falls back to its checks. Uses
+# `_ctx_container()` (never the probe) — the fold builds the doc in `CTX`. `id_prefix` qualifies every
+# id it places (a matrix cell's, see `_cell_keys`).
+function _emit_own_content!(n::TestNode, acc::Vector{Check}, id_prefix="")
     c = _ctx_container()
     c === nothing && return acc
-    n.desc === nothing || (c.desc = n.desc)
-    # A merged shard `TestNode` carries checks + codes but no interleaved `content` (a live
-    # `PinaxTestSet` does) — place them directly, checks then codes, so a dumped `@code` still shows.
-    if isempty(n.content) && (!isempty(n.checks) || !isempty(n.codes))
-        for chk in n.checks
-            _place_check!(c, chk, counter, acc)
-        end
-        for blk in n.codes
-            _push_auto_code!(c, blk)
-        end
-        return acc
-    end
-    for (kind, i) in n.content
+    # the ids its author wrote stay written, as they are placed
+    union!(_ensure_document!().written, (Symbol(id_prefix, id) for id in n.written))
+    # the one registry of content kinds: a kind it does not know is an error, never dropped
+    for (kind, i) in _content_order(n)
+        node = getfield(n, _content_field(n, kind))[i]
         if kind === :check
-            _place_check!(c, n.checks[i], counter, acc)
-        elseif kind === :figure
-            push!(c.figures, n.figures[i])
-            push!(c.content, :figure => length(c.figures))
-        elseif kind === :table
-            push!(c.tables, n.tables[i])
-            push!(c.content, :table => length(c.tables))
-        elseif kind === :panel
-            push!(c.panels, n.panels[i])
-            push!(c.content, :panel => length(c.panels))
+            _place_check!(c, node, acc)
         elseif kind === :code
-            # Deduplicated by id: N shards of one sweep carry the same captured snippet, and it must
-            # appear once (the ids of explicit `@code` blocks are already container-unique).
-            _push_auto_code!(c, n.codes[i])
+            _place_code!(c, node, n.written; id_prefix)
+        else
+            what = _KIND_NAME[kind]
+            _add_node!(c, kind, _place_captured(c, node, n.written, what; id_prefix))
         end
     end
     return acc
 end
 
-# Assign the render-time id (t1, t2, … so a merge renumbers cleanly rather than N shards colliding at
-# t1) and place the check into the current container + content order + margin accumulator.
-function _place_check!(c, chk::Check, counter::Ref{Int}, acc::Vector{Check})
-    counter[] += 1
-    chk.id = Symbol("t", counter[])
-    push!(c.checks, chk)
-    push!(c.content, :check => length(c.checks))
+# A node's content order: the one it recorded, or — with none (a dump from before `content` was
+# written, a node built by hand) — its code blocks, then its checks, the order a capture records them
+# in (the code that produced a check reads before it).
+function _content_order(n::TestNode)
+    isempty(n.content) || return n.content
+    return vcat(
+        [:code => i for i in eachindex(n.codes)], [:check => i for i in eachindex(n.checks)]
+    )
+end
+
+# What a placed node is called in an id collision's error.
+const _KIND_NAME = (; figure="figure", table="table", raw="raw block", text="prose block")
+
+# A node captured in a test, placed in the document: its id is claimed in the whole document
+# (Conventions › Identity), since it was named inside its test node only. An id the author wrote is
+# claimed as is — a repeat is an error, as everywhere — and a generated one steps aside with `-2`.
+# `id_prefix` qualifies either (a matrix cell's, see `_cell_keys`).
+function _place_captured(c, node, written, what; id_prefix="")
+    where = string(what, " in \"", c.anchor, "\"")
+    base = Symbol(id_prefix, node.id)
+    id = node.id in written ? _claim!(base, where) : _claim!(_free_id(base), where)
+    return id === node.id ? node : _with_id(node, id)
+end
+
+# The same node under another id, with the anchor that follows it.
+function _with_id(x::T, id::Symbol) where {T}
+    return T((
+        if f === :id
+            id
+        elseif f === :anchor
+            _anchor(id)
+        else
+            getfield(x, f)
+        end for f in fieldnames(T)
+    )...)
+end
+
+# A captured code block, placed at most once per container: a sweep's samples and a sweep's shards
+# carry the same snippet under one id, and it shows once. Its id in the document is remembered, so
+# the checks that point at it keep pointing at it. The same snippet in another container is a node
+# of its own, under a free id.
+function _place_code!(c, blk, written; id_prefix="")
+    key = (c.id, blk.id)
+    haskey(_ensure_document!().fold_codes, key) && return nothing
+    placed = _place_captured(c, blk, written, "code block"; id_prefix)
+    _ensure_document!().fold_codes[key] = placed.id
+    _add_node!(c, :code, placed)
+    return placed
+end
+
+# Point a placed check at its code block's id in the document. The block is placed in the same
+# container before the check (a capture records it first, and a sweep lifts its code ahead of its
+# checks), so a check whose block was not placed would point at nothing: an error, never kept.
+function _repoint_code!(c, chk)
+    chk.code_id === nothing && return chk
+    id = get(_ensure_document!().fold_codes, (c.id, chk.code_id), nothing)
+    id === nothing && error(
+        "Pinax: check \"$(chk.label)\" in \"$(c.anchor)\" points at code block " *
+        "$(chk.code_id), which was not placed there before it",
+    )
+    chk.code_id = id
+    return chk
+end
+
+function _has_own_content(n::TestNode)
+    return !isempty(n.checks) || !isempty(n.content) || !isempty(n.codes)
+end
+
+# `n` as a page of its own: its content and (with `recurse`) its subtree, then its margin figure.
+# `summary_of` is the node whose verdict the page header states.
+function _emit_page_node!(
+    n::TestNode, summary_of, page_when, seen, acc; id_prefix="", recurse=true
+)
+    pid = _unique_id!(seen, Symbol(id_prefix, _slug(n.description)), n.description)
+    _enter_page!(pid, n.description; summary=_summary_line(summary_of))
+    try
+        page_checks = Check[]
+        if recurse
+            _emit_node!(n, page_when, seen, page_checks; id_prefix=id_prefix)
+        else
+            _emit_own_content!(n, page_checks, id_prefix)
+        end
+        append!(acc, page_checks)
+        # Back at page level (every section closed), so the figure lands on the page.
+        _push_margin_figure!(pid, page_checks)
+    finally
+        _exit_page!()
+    end
+    return acc
+end
+
+# A check's id in a page or section — stable: container + source text (#123) — claimed in the whole
+# document, so no node written later takes it (Conventions › Identity).
+function _claim_check_id!(c, label)
+    return _claim!(_check_id(c, label), string("check in \"", c.anchor, "\""))
+end
+
+# Assign the check its id in the document (a dump carries none, so N merged shards never collide)
+# and place it into the current container + content order + margin accumulator.
+function _place_check!(c, chk::Check, acc::Vector{Check})
+    # a copy: the fold must not renumber (or later tag) the tree's own Check (#130)
+    chk = _copy_check(chk; id=_claim_check_id!(c, chk.label))
+    _repoint_code!(c, chk)
+    _add_node!(c, :check, chk)
     push!(acc, chk)
     return chk
 end
@@ -1383,9 +1614,9 @@ function completeness_overview end
 # The caller's own content on the overview page. What the CI job knows and the document does not — a
 # completeness verdict, a note about the environment — belongs IN the artifact rather than in a log
 # that expires, and the way to say it is Pinax's own vocabulary rather than a second one: the hook
-# runs with the overview page open, so `@desc` / `@table` / `@raw` land on it. A `@desc` renders
-# ABOVE the standard tables (a page's description is not content-ordered), which is where a verdict
-# wants to be; tables follow the fixed ones.
+# runs with the overview page open, so `@desc` / `@table` / `@raw` land on it. It runs FIRST, so its
+# content — in the order written — leads the page, above the fixed provenance and per-file tables,
+# which is where a verdict wants to be.
 #
 # It cannot break the render. A throwing hook is recorded as a diagnostic — loud in the artifact,
 # silent in the exit code — exactly like every other failure in the report machinery.
@@ -1409,7 +1640,7 @@ end
     render_test_report(dumps::AbstractVector{<:AbstractString}; out, …)       -> (; gallery, agent)
 
 Render a testset tree as a Pinax document: an overview page (one row per test file, ranked by
-`worst margin`), then one `status=:benchmark` page per file whose sections mirror the nested
+`worst margin`), then one page per file whose sections mirror the nested
 testsets, each with its margin figure.
 
 Given a list of TOML dumps (see [`dump_test_report`](@ref)) their trees are **merged** under one root
@@ -1420,11 +1651,11 @@ ones.
 with Pinax's ordinary content macros — `@desc`, `@table`, `@raw` — and its content lands there. This
 is how something the running job knows but the tree does not gets into the artifact instead of into a
 CI log that expires: a completeness verdict ("every unit ran exactly once"), the environment, a note
-about what was skipped. A `@desc` appears above the fixed tables. If the hook throws, that is a
+about what was skipped. Its content leads the page, above the fixed tables. If the hook throws, that is a
 diagnostic in the report, not a failed render.
 
-Writes `<out>_html` (the human gallery) and `<out>_agent` (`agent.json`), following the same
-convention as [`report`](@ref).
+Writes `<out>/html/` (the human gallery) and `<out>/agent/` (`agent.json`), which share one
+`<out>/comments.toml` — the same layout as [`report`](@ref).
 
 ```julia
 render_test_report(dumps; out="test-report", overview = () -> begin
@@ -1441,37 +1672,58 @@ function render_test_report(
     overview=nothing,
 )
     reset!(; title=title)
-    counter = Ref(0)
-    seen = Set{Symbol}((:overview, :per_file, :provenance))   # ids the overview page already owns
-    # An overview page first: one row per file, so the whole suite is one glance — and the SAME rows
-    # land in agent.json as data, so an LLM reads the suite without scraping a log.
-    _enter_page!(:overview, title; layout=:wide, summary=_summary_line(root))
-    try
+    _diag_dropped!(root)
+    seen = _overview_page!(title, root, overview) do
         prov = _provenance_rows()
         isempty(prov) || _push_table!(;
             data=prov,
             code="",
             caption="Provenance — when this report ran, against what code, on which Julia / OS. " *
                     "A report that omits these cannot be told apart from a stale one.",
-            id=:provenance,
+            gen_id=:provenance,
         )
         rows = NamedTuple[]
         _collect_rows!(rows, root, page_when)
-        isempty(rows) || _push_table!(;
+        return isempty(rows) || _push_table!(;
             data=rows,
             code="",
             caption="Per-file result profile. `worst margin` is the largest `delta/tol` seen in " *
                     "that file: 1.0 means a check landed exactly on its tolerance.",
-            id=:per_file,
+            gen_id=:per_file,
         )
+    end
+    _emit_node!(root, page_when, seen)
+    return _render_report_doc(current_document(), out)
+end
+
+# The ids the overview page owns, so no testset's page takes one.
+const _OVERVIEW_IDS = (:overview, :per_file, :provenance)
+
+# An overview page first: one row per file, so the whole suite is one glance — and the SAME rows land
+# in agent.json as data, so an LLM reads the suite without scraping a log. The caller's `overview`
+# hook leads, above the fixed tables `tables()` pushes. Returns the page ids taken so far.
+function _overview_page!(tables::Function, title, root, overview)
+    _enter_page!(:overview, title; layout=:wide, summary=_summary_line(root))
+    try
         _overview_hook(overview)
+        tables()
     finally
         _exit_page!()
     end
-    _emit_node!(root, counter, page_when, seen)
-    doc = current_document()
-    gallery = render(doc; out="$(out)_html", theme=:gallery)
-    agent = render(doc; out="$(out)_agent", theme=:agent)
+    return Set{Symbol}(_OVERVIEW_IDS)
+end
+
+# Render a test report's document to both faces. Every check in it came from a `@test` the test runner
+# already counted and reported, so `render` must not report it a second time (#173: a failing check
+# is reported exactly once).
+function _render_report_doc(doc, out)
+    for pg in doc.pages, c in _subtree_checks(pg)
+        c.reported = true
+    end
+    # `out` is a directory (Conventions › Output): one face per subdirectory, one comment store
+    cf = joinpath(out, "comments.toml")
+    gallery = render(doc; out=joinpath(out, "html"), theme=:gallery, comments_file=cf)
+    agent = render(doc; out=joinpath(out, "agent"), theme=:agent, comments_file=cf)
     return (; gallery, agent)
 end
 
@@ -1480,31 +1732,52 @@ function render_test_report(
 )
     isempty(dumps) && error("Pinax.render_test_report: no dumps given.")
     parsed = [TOML.parsefile(d) for d in dumps]
-    roots = [_dict_to_node(d["root"]) for d in parsed]
+    roots = [_dict_to_node(d["root"], p) for (d, p) in zip(parsed, dumps)]
     cells = [String(get(d, "matrix", "")) for d in parsed]
     # A CI MATRIX (issue #69 K): ≥2 distinct cells means the SAME files ran in each cell — NOT disjoint
     # like shards — so we group each cell under a `@part` rather than concatenating (which would merge
     # cells away). One report, structure preserved, navigable by cell; the cell IS the provenance.
     if length(unique(c for c in cells if !isempty(c))) >= 2
+        k = findfirst(isempty, cells)
+        k === nothing || error(
+            "Pinax.render_test_report: $(dumps[k]) has no matrix cell (PINAX_TEST_MATRIX), while " *
+            "the other dumps name theirs: a matrix report has no place for it. Set the cell in " *
+            "the job that wrote it, or leave it out.",
+        )
         return _render_matrix(roots, cells; title=title, kwargs...)
     end
-    # SHARDS: the shards partition the test FILES, so their children are disjoint and concatenating is
-    # the whole merge (invariant VI). Elapsed time is summed, not maxed: CPU time spent, not wall clock.
-    merged = TestNode(
+    return render_test_report(_merge_shards(roots, title); title=title, kwargs...)
+end
+
+# SHARDS partition the test FILES, so their children are disjoint and concatenating is the whole merge
+# (invariant VI). Elapsed time is summed, not maxed: CPU time spent, not wall clock.
+# A root's own content (checks, prose, tables, … written at its top level) is kept too, each root's
+# after the last, in its own order.
+function _merge_shards(roots, title)
+    m = TestNode(
         title;
         elapsed=sum(r -> isnan(r.elapsed) ? 0.0 : r.elapsed, roots; init=0.0),
-        children=reduce(vcat, (r.children for r in roots)),
-        checks=reduce(vcat, (r.checks for r in roots)),
+        children=reduce(vcat, (r.children for r in roots); init=TestNode[]),
         nbroken=sum(r -> r.nbroken, roots; init=0),
-        nerror=sum(r -> r.nerror, roots; init=0),
+        dropped=reduce(vcat, (r.dropped for r in roots); init=Pair{String,String}[]),
     )
-    return render_test_report(merged; title=title, kwargs...)
+    foreach(r -> _append_content!(m, r), roots)
+    return m
+end
+
+# `r`'s own content after `m`'s: its nodes appended to `m`'s, its `content` indices shifted past them.
+function _append_content!(m::TestNode, r::TestNode)
+    for (k, i) in _content_order(r)
+        _add_node!(m, k, getfield(r, _content_field(r, k))[i])
+    end
+    union!(m.written, r.written)
+    return m
 end
 
 # A CI matrix merge (issue #69 K): each cell is a `@part` holding that cell's file pages (ids qualified
-# by the cell so the same file across cells does not collide). One overview across all cells, then the
-# cells; nothing is merged away and the file structure is preserved. The `julia/os/commit` provenance
-# of a merge job is not the cells', so the cell label carries that instead.
+# by the cell, see `_cell_keys`). One overview across all cells, then the cells; nothing is merged away
+# and the file structure is preserved. The `julia/os/commit` provenance of a merge job is not the
+# cells', so the cell label carries that instead.
 function _render_matrix(
     roots,
     cells;
@@ -1513,27 +1786,23 @@ function _render_matrix(
     page_when::Function=_looks_like_a_file,
     overview=nothing,
 )
-    pairs = [(r, c) for (r, c) in zip(roots, cells) if !isempty(c)]
+    # A cell may arrive as several shard dumps: merge each cell's shards first (they partition its
+    # files), so every cell is one part.
+    order = unique(cells)
+    pairs = [
+        (_merge_shards([r for (r, rc) in zip(roots, cells) if rc == c], c), c) for
+        c in order
+    ]
     reset!(; title=title)
-    counter = Ref(0)
-    seen = Set{Symbol}((:overview, :per_file, :provenance))
-    allfiles = reduce(vcat, (r.children for (r, _) in pairs); init=TestNode[])
-    rowsroot = TestNode(
-        title;
-        children=allfiles,
-        checks=reduce(vcat, (r.checks for (r, _) in pairs); init=Check[]),
-        nbroken=sum(((r, _),) -> r.nbroken, pairs; init=0),
-        nerror=sum(((r, _),) -> r.nerror, pairs; init=0),
-        elapsed=sum(((r, _),) -> isnan(r.elapsed) ? 0.0 : r.elapsed, pairs; init=0.0),
-    )
-    _enter_page!(:overview, title; layout=:wide, summary=_summary_line(rowsroot))
-    try
+    foreach(((r, _),) -> _diag_dropped!(r), pairs)
+    # the overview states the verdict of every cell together: the cells merged as if shards
+    seen = _overview_page!(title, _merge_shards(first.(pairs), title), overview) do
         _push_table!(;
             data=[(;
                 field="matrix cells", value=join(unique(c for (_, c) in pairs), "  ·  ")
             )],
             code="",
-            id=:provenance,
+            gen_id=:provenance,
             caption="This report merges CI matrix cells (issue #69 K); each cell is a part below. " *
                     "The provenance (Julia / OS / commit) is the cell label — a merge job's own is not the cells'.",
         )
@@ -1543,28 +1812,37 @@ function _render_matrix(
             _collect_rows!(cr, r, page_when)
             append!(rows, (merge((; cell=c), row) for row in cr))
         end
-        isempty(rows) || _push_table!(;
+        return isempty(rows) || _push_table!(;
             data=rows,
             code="",
-            id=:per_file,
+            gen_id=:per_file,
             caption="Per-cell, per-file result profile. `worst margin` is the largest `delta/tol` in that (cell, file).",
         )
-        _overview_hook(overview)
-    finally
-        _exit_page!()
     end
-    for (r, c) in pairs
-        _enter_part!(Symbol("cell_", _slug(c)), c)
+    for ((r, c), key) in zip(pairs, _cell_keys(order))
+        _enter_part!(Symbol("cell_", key), c)
         try
-            _emit_node!(r, counter, page_when, seen; id_prefix=string(_slug(c), "_"))
+            _emit_node!(r, page_when, seen; id_prefix=string(key, "_"))
         finally
             _exit_part!()
         end
     end
     doc = current_document()
-    gallery = render(doc; out="$(out)_html", theme=:gallery)
-    agent = render(doc; out="$(out)_agent", theme=:agent)
+    gallery, agent = _render_report_doc(doc, out)
     return (; gallery, agent)
+end
+
+# Within a matrix report the cell is part of every node's identity: every cell ran the same files,
+# so one node of the source is a node per cell here, and only its cell tells them apart. Each cell
+# gets a key — the slug of its label, generated, so two labels that slug alike are `-2`, `-3` rather
+# than an error — and every id the fold places from that cell carries it: the part is `cell_<key>`,
+# and every page, section, check, figure, table, code block, prose and `@raw` block is `<key>_<id>`,
+# an id its author wrote included. The author's id is qualified, never otherwise changed: written
+# twice within one cell, it is still an error.
+function _cell_keys(cells)
+    keys = Symbol[]
+    foreach(c -> push!(keys, _free_id(_slug(c), in(keys))), cells)
+    return keys
 end
 
 # ── the dump (how a sharded run gets merged) ─────────────────────────
@@ -1582,7 +1860,6 @@ gallery.
 function dump_test_report(root, path::AbstractString)
     dir = dirname(path)
     isempty(dir) || mkpath(dir)
-    _warn_if_undumpable(root)
     d = Dict{String,Any}("root" => _node_to_dict(root))
     m = report_matrix()
     isempty(m) || (d["matrix"] = m)   # the CI matrix cell, so a later merge can group cells (#69 K)
@@ -1592,17 +1869,31 @@ function dump_test_report(root, path::AbstractString)
     return path
 end
 
-# Everything a test captures crosses a shard dump EXCEPT a `@figure`: its `gen` is a closure, and a
-# closure cannot be serialized (materializing the asset into the dump would make the dump a directory —
-# deliberately not done). So the one exception is warned about loudly rather than dropped silently: a
-# sharded report must never be quietly missing content. `@desc` / `@table` / `@raw` / declaration order
-# all ride along, which is what makes the sharded and unsharded documents the same document.
-function _warn_if_undumpable(n)
-    isempty(n.figures) ||
-        @warn "Pinax: a `@figure` written inside a test cannot cross a shard dump \
-               (its generator is a closure) — it appears in a direct \
-               (non-sharded) render only." testset = n.description maxlog = 1
-    foreach(_warn_if_undumpable, n.children)
+# Everything a test captures crosses a shard dump EXCEPT a `@figure` (its `gen` is a closure, and a
+# closure cannot be serialized; materializing the asset would make the dump a directory — deliberately
+# not done) and a `@table`'s `params`. A sharded report must never be quietly missing content, so each
+# such node is written INTO the dump as `id => why`, and the merged report states every one in its
+# diagnostics (`_diag_dropped!`); the shard's log says it too. `@desc` / `@table` / `@raw` /
+# declaration order all ride along, which is what makes the sharded and unsharded documents the same.
+function _dump_drops(n)
+    at = "in testset \"$(n.description)\""
+    fig = [
+        String(f.id) =>
+            "the `@figure` $(f.id) $(at) cannot cross a shard dump (its generator is a closure) — " *
+            "it appears in a direct (non-sharded) render only" for f in n.figures
+    ]
+    tbl = [
+        String(t.id) => "the `@table` $(t.id) $(at) lost its `params` in a shard dump — its data and caption crossed"
+        for t in n.tables if t.params !== nothing
+    ]
+    return vcat(n.dropped, fig, tbl)
+end
+
+# Every node the shard dumps dropped, as a diagnostic of the document being built.
+function _diag_dropped!(n)
+    n.ignore && return nothing
+    foreach(((id, why),) -> _diag!(WARNING, id, why), n.dropped)
+    foreach(_diag_dropped!, n.children)
     return nothing
 end
 
@@ -1611,61 +1902,105 @@ end
 
 Read back a tree written by [`dump_test_report`](@ref).
 """
-load_test_dump(path::AbstractString) = _dict_to_node(TOML.parsefile(path)["root"])
+load_test_dump(path::AbstractString) = _dict_to_node(TOML.parsefile(path)["root"], path)
 
 function _node_to_dict(n)
     d = Dict{String,Any}(
-        "description" => n.description,
-        "ignore" => n.ignore,
-        "nbroken" => n.nbroken,
-        "nerror" => n.nerror,
+        "description" => n.description, "ignore" => n.ignore, "nbroken" => n.nbroken
     )
     # TOML has no NaN, so an unmeasured elapsed is simply absent.
     isnan(n.elapsed) || (d["elapsed"] = n.elapsed)
-    isempty(n.checks) || (d["check"] = [_check_to_dict(c) for c in n.checks])
+    _put!(d, "check", n.checks, _check_to_dict)
     # Everything except a `@figure` closure is plain data, so it crosses the dump — and so does the
     # DECLARATION ORDER, without which a merged shard would re-order its own content (issue #67: the
     # sharded and unsharded documents must be the same document, by construction).
-    isempty(n.codes) || (d["code"] = [_code_to_dict(c) for c in n.codes])
-    isempty(n.tables) || (d["table"] = [_table_to_dict(t) for t in n.tables])
-    isempty(n.panels) || (d["panel"] = collect(n.panels))
-    n.desc === nothing || (d["desc"] = n.desc.source)
-    isempty(n.content) || (
-        d["content"] = [
-            Dict{String,Any}("kind" => String(k), "i" => i) for (k, i) in n.content
-        ]
+    _put!(d, "code", n.codes, _code_to_dict)
+    _put!(d, "table", n.tables, _table_to_dict)
+    _put!(d, "raw", n.raws, _raw_to_dict)
+    _put!(d, "text", n.texts, _text_to_dict)
+    _put!(
+        d,
+        "content",
+        n.content,
+        ((k, i),) -> Dict{String,Any}("kind" => String(k), "i" => i),
     )
-    isempty(n.children) || (d["child"] = [_node_to_dict(c) for c in n.children])
+    isempty(n.written) || (d["written"] = sort!([String(id) for id in n.written]))
+    drops = _dump_drops(n)
+    foreach(((_, why),) -> @warn("Pinax: $(why)."), drops)
+    _put!(d, "dropped", drops, ((id, why),) -> Dict{String,Any}("id" => id, "why" => why))
+    _put!(d, "child", n.children, _node_to_dict)
     return d
 end
 
-# TOML has no `missing` / `nothing` and no arbitrary objects, so a cell outside its type system is
-# carried as its display string — the same text the gallery would have shown for it.
-_toml_cell(x::Union{Real,Bool,AbstractString}) = x
+# `d[key]`, each of `xs` as a dump entry — and no key at all for none, so an empty list is absent.
+_put!(d, key, xs, f) = (isempty(xs) || (d[key] = [f(x) for x in xs]); d)
+
+function _raw_to_dict(r::RawBlock)
+    return Dict{String,Any}(
+        "id" => String(r.id), "html" => r.html, "defined_at" => r.defined_at
+    )
+end
+function _dict_to_raw(r::AbstractDict, at)
+    id = Symbol(_dump_key(r, "id", at))
+    return RawBlock(id, _anchor(id), _dump_key(r, "html", at), get(r, "defined_at", ""))
+end
+function _text_to_dict(t::Prose)
+    return Dict{String,Any}(
+        "id" => String(t.id), "source" => t.source, "defined_at" => t.defined_at
+    )
+end
+function _dict_to_text(t::AbstractDict, at)
+    id = Symbol(_dump_key(t, "id", at))
+    return Prose(id, _anchor(id), _dump_key(t, "source", at), get(t, "defined_at", ""))
+end
+
+# TOML holds integers, floats, booleans and strings. `missing` / `nothing` cross as a marker table and
+# come back as themselves; any other cell (a `1//3`, a `π`, an object) as its display string — the
+# same text the gallery shows for it.
+_toml_cell(x::Union{Integer,AbstractFloat,Bool,AbstractString}) = x
+_toml_cell(::Missing) = Dict{String,Any}("missing" => true)
+_toml_cell(::Nothing) = Dict{String,Any}("nothing" => true)
 _toml_cell(x) = _cellstr(x)
+_from_toml_cell(x, at) = x
+function _from_toml_cell(d::AbstractDict, at)
+    keys(d) == Set(["missing"]) && return missing
+    keys(d) == Set(["nothing"]) && return nothing
+    return error(
+        "Pinax: $(at) holds a cell $(repr(d)), which is no marker table — a table cell is " *
+        "{missing = true} or {nothing = true}",
+    )
+end
 
 function _table_to_dict(t::Table)
-    t.params === nothing ||
-        @warn "Pinax: a `@table`'s `params` are not carried through a shard \
-               dump — the table's data and caption are." table = t.id maxlog = 1
     return Dict{String,Any}(
         "id" => String(t.id),
         "caption" => t.caption,
         "header" => collect(t.header),
         "rows" => [[_toml_cell(c) for c in row] for row in t.rows],
         "code" => t.code,
+        "defined_at" => t.defined_at,
     )
 end
-function _dict_to_table(d::AbstractDict)
-    id = Symbol(d["id"])
+function _dict_to_table(d::AbstractDict, at)
+    id = Symbol(_dump_key(d, "id", at))
+    header = String[string(h) for h in _dump_key(d, "header", at)]
+    rows = Vector{Any}[
+        Any[_from_toml_cell(c, at) for c in r] for r in _dump_key(d, "rows", at)
+    ]
+    for (j, r) in enumerate(rows)
+        length(r) == length(header) || error(
+            "Pinax: $(at): row $(j) has $(length(r)) cell(s), and the header $(length(header))",
+        )
+    end
     return Table(
         id,
         _anchor(id),
         get(d, "caption", ""),
-        String[string(h) for h in get(d, "header", Any[])],
-        Vector{Any}[Any[c for c in row] for row in get(d, "rows", Any[])],
+        header,
+        rows,
         get(d, "code", ""),
         nothing,
+        get(d, "defined_at", ""),
     )
 end
 function _code_to_dict(c::CodeBlock)
@@ -1675,16 +2010,19 @@ function _code_to_dict(c::CodeBlock)
         "output" => c.output,
         "caption" => c.caption,
         "lang" => c.lang,
+        "defined_at" => c.defined_at,
     )
 end
-function _dict_to_code(d::AbstractDict)
+function _dict_to_code(d::AbstractDict, at)
+    id = Symbol(_dump_key(d, "id", at))
     return CodeBlock(
-        Symbol(d["id"]),
-        _anchor(Symbol(d["id"])),
-        d["source"],
+        id,
+        _anchor(id),
+        _dump_key(d, "source", at),
         get(d, "output", ""),
         get(d, "caption", ""),
         get(d, "lang", "julia"),
+        get(d, "defined_at", ""),
     )
 end
 
@@ -1692,56 +2030,168 @@ end
 # shards produces one clean numbering rather than N colliding ones.
 function _check_to_dict(c::Check)
     d = Dict{String,Any}(
-        "label" => c.label,
-        "got" => c.got,
-        "want" => c.want,
-        "delta" => c.delta,
-        "tol" => c.tol,
-        "kind" => String(c.kind),
-        "pass" => c.pass,
+        "label" => c.label, "kind" => String(c.kind), "outcome" => String(c.outcome)
     )
+    # an indicator has no numbers, and TOML has no NaN: they are absent
+    if c.kind !== :indicator
+        merge!(
+            d, Dict("got" => c.got, "want" => c.want, "delta" => c.delta, "tol" => c.tol)
+        )
+    end
     isempty(c.source) || (d["source"] = c.source)   # carry WHERE it failed across a shard dump
     # …and the REFERENCE to the code block that produced it (the block itself rides `n.codes`).
-    isempty(c.code_anchor) || (d["code_anchor"] = c.code_anchor)
+    c.code_id === nothing || (d["code_id"] = String(c.code_id))
     return d
 end
 
-function _dict_to_node(d::AbstractDict)
-    return TestNode(
-        d["description"];
+# A dump is outside data: it is checked here, where it is read, so a stale or edited one is an error
+# naming its entry rather than a KeyError or a BoundsError deep in the fold. `path` is the dump file;
+# `at` names the testset, and each entry is named `<at>, <key> <j>` (`…, check 2`).
+function _dict_to_node(d::AbstractDict, path::AbstractString="")
+    desc = _dump_key(d, "description", string("test dump ", path, ": a testset"))
+    at = string("test dump ", path, ", testset \"", desc, "\"")
+    n = TestNode(
+        desc;
         elapsed=get(d, "elapsed", NaN),
         ignore=get(d, "ignore", false),
         nbroken=get(d, "nbroken", 0),
-        nerror=get(d, "nerror", 0),
-        checks=Check[_dict_to_check(c) for c in get(d, "check", Any[])],
-        codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
-        tables=Table[_dict_to_table(t) for t in get(d, "table", Any[])],
-        panels=String[string(p) for p in get(d, "panel", Any[])],
-        desc=haskey(d, "desc") ? Desc(d["desc"]) : nothing,
-        # A `@figure` did not survive, so any `:figure` entry in the recorded order is dropped — the
-        # rest keeps its declared position (a legacy dump with no `content` falls back to checks-then-
-        # codes in `_emit_own_content!`).
-        content=Pair{Symbol,Int}[
-            Symbol(e["kind"]) => Int(e["i"]) for
-            e in get(d, "content", Any[]) if e["kind"] != "figure"
-        ],
-        children=TestNode[_dict_to_node(c) for c in get(d, "child", Any[])],
+        checks=_dump_entries(Check, d, "check", at, _dict_to_check),
+        codes=_dump_entries(CodeBlock, d, "code", at, _dict_to_code),
+        tables=_dump_entries(Table, d, "table", at, _dict_to_table),
+        raws=_dump_entries(RawBlock, d, "raw", at, _dict_to_raw),
+        texts=_dump_entries(Prose, d, "text", at, _dict_to_text),
+        children=TestNode[_dict_to_node(c, path) for c in get(d, "child", Any[])],
+        written=Set{Symbol}(Symbol(id) for id in get(d, "written", Any[])),
+        dropped=_dump_entries(Pair{String,String}, d, "dropped", at, _dict_to_dropped),
     )
+    # A `@figure` did not survive, so any `:figure` entry in the recorded order is dropped — the rest
+    # keeps its declared position.
+    for (j, e) in enumerate(get(d, "content", Any[]))
+        a = string(at, ", content entry ", j)
+        _dump_key(e, "kind", a) == "figure" || push!(n.content, _dump_entry(n, e, a))
+    end
+    _check_placed(n, haskey(d, "content"), at)
+    _check_code_refs(n, at)
+    return n
 end
 
-function _dict_to_check(d::AbstractDict)
-    return Check(
-        :t0,                        # renumbered on render
-        d["label"],
-        Float64(d["got"]),
-        Float64(d["want"]),
-        Float64(d["delta"]),
-        Float64(d["tol"]),
-        Symbol(d["kind"]),
-        d["pass"],
-        get(d, "source", ""),
-        get(d, "code_anchor", ""),
-    )
+# A key a dump entry must have, or an error naming the entry.
+function _dump_key(d::AbstractDict, key::AbstractString, at)
+    haskey(d, key) || error("Pinax: $(at) has no \"$(key)\"")
+    return d[key]
+end
+
+# Each entry under `key`, read by `f(entry, at)` into a `Vector{T}`; none when the key is absent.
+function _dump_entries(::Type{T}, d::AbstractDict, key, at, f) where {T}
+    return T[
+        f(e, string(at, ", ", key, " ", j)) for (j, e) in enumerate(get(d, key, Any[]))
+    ]
+end
+
+_dict_to_dropped(e::AbstractDict, at) = _dump_key(e, "id", at) => _dump_key(e, "why", at)
+
+# One `content` entry of a dumped node, checked against the node's own nodes.
+function _dump_entry(n::TestNode, e::AbstractDict, at)
+    bad(msg) = error("Pinax: $(at) $(msg)")
+    kind, i = _dump_key(e, "kind", at), _dump_key(e, "i", at)
+    k = Symbol(kind)
+    f = get(_CONTENT_FIELDS, k, nothing)
+    (f !== nothing && hasfield(TestNode, f)) || bad("has unknown kind \"$(kind)\"")
+    len = length(getfield(n, f))
+    (i isa Integer && 1 <= i <= len) ||
+        bad("points at $(kind) $(i), and the testset has $(len) of them")
+    return k => Int(i)
+end
+
+# Every node a dumped testset holds has exactly one place in its content order — the recorded one,
+# or, in a dump with none, its code blocks then its checks (`_content_order`) — so the fold neither
+# drops a node nor places one twice.
+function _check_placed(n::TestNode, has_content::Bool, at)
+    order = has_content ? n.content : _content_order(n)
+    for k in (:check, :code, :table, :raw, :text)
+        placed = sort!([i for (kk, i) in order if kk === k])
+        len = length(getfield(n, _content_field(n, k)))
+        placed == 1:len || error(
+            "Pinax: $(at) holds $(len) $(k)(s), and its content places $(k)s $(placed) — " *
+            "each exactly once",
+        )
+    end
+    return n
+end
+
+# A dumped check's code reference names a code block of its own testset, as a captured one does.
+function _check_code_refs(n::TestNode, at)
+    for (j, c) in enumerate(n.checks)
+        c.code_id === nothing ||
+            any(b -> b.id === c.code_id, n.codes) ||
+            error(
+                "Pinax: $(at), check $(j) points at code block $(c.code_id), which the testset " *
+                "does not hold",
+            )
+    end
+    return n
+end
+
+function _dict_to_check(d::AbstractDict, at::AbstractString="a dumped check")
+    kind = _dumped_kind(d, at)
+    num(k) = kind === :indicator ? NaN : Float64(_dump_key(d, k, at))
+    label = _dump_key(d, "label", at)
+    got, want, delta, tol = num.(("got", "want", "delta", "tol"))
+    outcome = _dumped_outcome(d, at)
+    try
+        # the id is renumbered on render
+        return Check(
+            :t0,
+            label,
+            got,
+            want,
+            delta,
+            tol,
+            kind,
+            outcome,
+            get(d, "source", ""),
+            _dumped_code_id(d),
+        )
+    catch err
+        # what `Check` refuses (a margin check with a non-finite number, …), named as the entry
+        err isa ErrorException || rethrow()
+        error("Pinax: $(at): ", err.msg)
+    end
+end
+
+# A dumped check's outcome, checked where it is read. An older dump wrote `pass` (and counted errors
+# apart, on the testset), so its errors read as fails.
+function _dumped_outcome(d::AbstractDict, at)
+    (haskey(d, "outcome") || !haskey(d, "pass")) &&
+        return _dumped_symbol(d, "outcome", _CHECK_OUTCOMES, at)
+    p = d["pass"]
+    p isa Bool || error("Pinax: $(at) has pass $(repr(p)) — true or false")
+    return _outcome(p)
+end
+
+# A dumped check's kind, checked where it is read. An older dump wrote an indicator as kind "abs"
+# with `indicator = true` beside made-up numbers, which are dropped.
+function _dumped_kind(d::AbstractDict, at)
+    get(d, "indicator", false) === true && return :indicator
+    return _dumped_symbol(d, "kind", _CHECK_KINDS, at)
+end
+
+# A dumped check's `key` — its kind or its outcome — as one of the symbols `allowed` (the `Check`'s own
+# vocabulary, so the dump reader never keeps a second copy of it).
+function _dumped_symbol(d::AbstractDict, key, allowed, at)
+    v = _dump_key(d, key, at)
+    s = v isa AbstractString ? Symbol(v) : nothing
+    s in allowed ||
+        error("Pinax: $(at) has $(key) $(repr(v)) — one of ", join(allowed, ", "))
+    return s
+end
+
+# A dumped check's code reference: `code_id`, or the anchor an older dump wrote (`code_anchor`,
+# which equals the id for every id it could hold), or nothing.
+function _dumped_code_id(d::AbstractDict)
+    haskey(d, "code_id") && return Symbol(d["code_id"])
+    a = get(d, "code_anchor", "")
+    return isempty(a) ? nothing : Symbol(a)
 end
 
 "Where a shard writes its tree instead of rendering (`PINAX_TEST_DUMP`); empty = render directly."

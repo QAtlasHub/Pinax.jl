@@ -22,7 +22,9 @@ using Test
         end
     end
     figs = Pinax.current_document().pages[1].sections[1].figures
-    figs[1].id === :s_fig1 || error("expected a positional id :s_fig1, got $(figs[1].id)")
+    # a generated id: the container's id plus a hash of the figure's code and params
+    startswith(string(figs[1].id), "s_fig_") || error("expected a generated id s_fig_…, got $(figs[1].id)")
+    figs[1].id != figs[2].id || error("different params must give different ids")
     html = read(Pinax.render(; out = joinpath(tmp, "out")), String)
     occursin("Fig. 1", html) || error("render produced no figure")
     # without the ParamIO extension, _facet_value is missing for every figure -> one (unset) group

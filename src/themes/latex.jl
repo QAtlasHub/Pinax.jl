@@ -81,7 +81,7 @@ end
 
 # Render a desc/caption markdown source to LaTeX, protecting math + cross-references from the
 # markdown pass (same token scheme as the gallery), then re-injecting their LaTeX forms.
-function _latex_render(source::AbstractString, ids, rdiag)
+function _latex_render(source::AbstractString, item, ids, rdiag)
     subs = String[]
     tok!(x) = (push!(subs, x); _tok(length(subs)))
     s = replace(source, _EQ_RE => m -> tok!(_latex_eq(m)))
@@ -89,17 +89,15 @@ function _latex_render(source::AbstractString, ids, rdiag)
     s = replace(s, _REF_RE => m -> tok!(_latex_ref(m, ids, rdiag)))
     s = replace(s, _CITE_RE => m -> tok!(_latex_cite(m)))
     s = replace(s, r"@label\(:\w+\)\s*" => "")
-    out = try
-        rstrip(Markdown.latex(Markdown.parse(s)))
-    catch e
-        e isa InterruptException && rethrow()
-        _texesc(s)
-    end
+    out = _render_markdown(_latex_markdown, _texesc, s, item, rdiag)
     for (k, frag) in enumerate(subs)
         out = replace(out, _tok(k) => frag)
     end
     return out
 end
+
+# Markdown -> LaTeX. A parse error propagates; `_render_markdown` turns it into a diagnostic.
+_latex_markdown(s) = rstrip(Markdown.latex(Markdown.parse(s)))
 
 # Per-render LaTeX state, threaded through the per-node contract methods on `LaTeXBase`
 # (emit_document/page/section/figure/text/comments). `ctx` is left UNTYPED on those methods on
@@ -117,7 +115,7 @@ end
 
 # `@desc`/`@caption` markdown → LaTeX (the latex theme's emit_text).
 function emit_text(::LaTeXBase, source, item, ctx; block=true)
-    return _latex_render(source, ctx.ids, ctx.rdiag)
+    return _latex_render(source, item, ctx.ids, ctx.rdiag)
 end
 
 # A node's co-located comments as a "Notes" itemize.
@@ -134,45 +132,66 @@ function emit_comments(theme::LaTeXBase, anchor, ctx)
     return nothing
 end
 
+# A node LaTeX cannot show is recorded in its diagnostics, never dropped silently (Conventions › Faces).
+function _latex_left_out!(ctx, anchor, why)
+    push!(
+        ctx.rdiag,
+        DiagEntry(WARNING, string(anchor), string(why, "; left out of the LaTeX output")),
+    )
+    return nothing
+end
+
 # One (already-materialized) figure → a \includegraphics figure.
 function emit_figure(theme::LaTeXBase, fig, ctx)
-    isempty(fig.assets) && return nothing
+    if isempty(fig.assets)
+        _latex_left_out!(ctx, fig.anchor, "figure has no asset to include")
+        return emit_comments(theme, fig.anchor, ctx)   # its comments stay, as in every face
+    end
     io = ctx.io
-    rel = replace(relpath(fig.assets[1], ctx.outdir), '\\' => '/')
+    rel = _rel_url(fig.assets[1], ctx.outdir)
     println(io, "\\begin{figure}[htbp]\\centering")
     println(io, "\\includegraphics[width=0.8\\linewidth]{", rel, "}")
     cap = isempty(fig.caption) ? "" : emit_text(theme, fig.caption, fig.anchor, ctx)
     isempty(cap) || println(io, "\\caption{", cap, "}")
     println(io, "\\label{", fig.anchor, "}\\end{figure}")
+    emit_comments(theme, fig.anchor, ctx)   # a figure's comments follow it, as in every face
     return nothing
 end
 
 # Materialize one figure to `assetdir`, then emit it.
 function _latex_emit_fig!(theme::LaTeXBase, fig, assetdir, ctx)
-    try
-        materialize!(fig, joinpath(assetdir, fig.anchor), figure_formats(theme), ctx.cache)
-    catch e
-        e isa InterruptException && rethrow()
-        push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
-        return nothing
-    end
+    base = joinpath(assetdir, fig.anchor)
+    _try_materialize!(fig, base, figure_formats(theme), ctx.cache, ctx.rdiag) ||
+        return emit_comments(theme, fig.anchor, ctx)   # a failed figure keeps its comments
     emit_figure(theme, fig, ctx)
     return nothing
 end
 
-# Emit a container's figures + tables in declaration order (@raw panels are HTML, skipped in LaTeX;
-# @expect checks are rendered by the benchmark report, not inline).
-function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx)
-    for (kind, item) in _content_items(c)
-        if kind === :figure
-            _latex_emit_fig!(theme, item, assetdir, ctx)
-        elseif kind === :table
-            emit_table(theme, item, ctx)
-        elseif kind === :code
-            emit_code(theme, item, ctx)
+# Emit a container's content in declaration order (a @raw block is HTML: left out, and said so;
+# checks are rendered by the container's check table, not inline).
+function _latex_emit_content!(theme::LaTeXBase, c, assetdir, ctx; page=nothing)
+    for (_, node) in _content_items(c)
+        if node isa Figure
+            _latex_emit_fig!(theme, node, assetdir, ctx)
+        elseif node isa Section   # a nested section, in declaration order
+            emit_section(theme, node, page, ctx)
+        elseif node isa Check
+            nothing   # in the container's check table, under its verdict band
+        else
+            emit_node(theme, node, ctx)
         end
     end
     return nothing
+end
+
+# The leaves of a LaTeX content walk.
+function emit_node(theme::LaTeXBase, p::Prose, ctx)
+    return println(ctx.io, emit_text(theme, p.source, p.anchor, ctx))
+end
+emit_node(theme::LaTeXBase, t::Table, ctx) = emit_table(theme, t, ctx)
+emit_node(theme::LaTeXBase, b::CodeBlock, ctx) = emit_code(theme, b, ctx)
+function emit_node(::LaTeXBase, r::RawBlock, ctx)
+    return _latex_left_out!(ctx, r.anchor, "a @raw block is HTML, which has no LaTeX form")
 end
 
 # A `@code` block → a verbatim listing of the source, then its captured output.
@@ -187,7 +206,10 @@ function emit_code(::LaTeXBase, blk, ctx)
     return nothing
 end
 
-# One @expect check -> a tabular row: id, label, got, want, Δ, tol, PASS/FAIL (cells escaped as text).
+# A check's number as a cell: empty for an indicator, which has no numbers.
+_latex_check_num(chk, x) = chk.kind === :indicator ? "" : _texesc(_cellstr(x))
+
+# One check -> a tabular row: id, label, got, want, Δ, tol, PASS/FAIL/ERROR (cells escaped as text).
 function emit_check(::LaTeXBase, chk, ctx)
     io = ctx.io
     println(
@@ -198,11 +220,11 @@ function emit_check(::LaTeXBase, chk, ctx)
                 _texesc(
                     isempty(chk.source) ? chk.label : string(chk.label, " @ ", chk.source)
                 ),
-                _texesc(_cellstr(chk.got)),
-                _texesc(_cellstr(chk.want)),
-                _texesc(_cellstr(chk.delta)),
-                _texesc(_cellstr(chk.tol)),
-                chk.pass ? "PASS" : "FAIL",
+                (
+                    _latex_check_num(chk, x) for
+                    x in (chk.got, chk.want, chk.delta, chk.tol)
+                )...,
+                uppercase(string(chk.outcome)),   # PASS / FAIL / ERROR
             ),
             " & ",
         ),
@@ -211,17 +233,13 @@ function emit_check(::LaTeXBase, chk, ctx)
     return nothing
 end
 
-# The test-report for a status=:benchmark page: a `tabular` of the checks + a verdict line.
-function _latex_benchmark!(theme::LaTeXBase, pg, ctx)
+# The checks of any container (#173): a `tabular` of the checks it owns, then a verdict line over its
+# whole subtree. Nothing when the subtree has none.
+function _latex_checks!(theme::LaTeXBase, c, ctx)
     io = ctx.io
-    checks = _benchmark_checks(pg)
-    v = _benchmark_verdict(checks)
-    println(io, "\\begin{tabular}{lllllll}\\hline")
-    println(io, "id & label & got & want & \$\\Delta\$ & tol & result \\\\\\hline")
-    for chk in checks
-        emit_check(theme, chk, ctx)
-    end
-    println(io, "\\hline\\end{tabular}")
+    v = verdict(c)
+    v === nothing && return nothing
+    # the verdict band over the subtree leads, then the container's own checks (Conventions › Faces)
     println(
         io,
         "\\par\\noindent\\textbf{Verdict: ",
@@ -232,6 +250,18 @@ function _latex_benchmark!(theme::LaTeXBase, pg, ctx)
         v.total,
         ")",
     )
+    isempty(c.checks) || _latex_check_table!(theme, c.checks, ctx)
+    return nothing
+end
+
+function _latex_check_table!(theme::LaTeXBase, checks, ctx)
+    io = ctx.io
+    println(io, "\\begin{tabular}{lllllll}\\hline")
+    println(io, "id & label & got & want & \$\\Delta\$ & tol & result \\\\\\hline")
+    for chk in checks
+        emit_check(theme, chk, ctx)
+    end
+    println(io, "\\hline\\end{tabular}")
     return nothing
 end
 
@@ -243,7 +273,7 @@ function emit_table(theme::LaTeXBase, tbl, ctx)
     else
         length(tbl.header)
     end
-    ncol == 0 && return nothing
+    ncol == 0 && return _latex_left_out!(ctx, tbl.anchor, "table has no columns")
     rowend = "\\\\"
     println(io, "\\begin{table}[htbp]\\centering")
     isempty(tbl.caption) ||
@@ -256,40 +286,53 @@ function emit_table(theme::LaTeXBase, tbl, ctx)
         println(io, join((_texesc(_cellstr(c)) for c in row), " & "), " ", rowend)
     end
     println(io, "\\hline\\end{tabular}")
-    return println(io, "\\end{table}")
+    println(io, "\\end{table}")
+    emit_comments(theme, tbl.anchor, ctx)   # a table's comments follow it, as a figure's do
+    return nothing
+end
+
+# The one place LaTeX turns depth into a heading, for parts (0), pages (1, `\\section`) and sections
+# (2…, a top-level one is `\\subsection`). Past `\\subparagraph` the level is kept as a bold run-in
+# heading, with a diagnostic (never flattened).
+const _LATEX_HEADINGS = (
+    "part", "section", "subsection", "subsubsection", "paragraph", "subparagraph"
+)
+function _latex_heading(depth::Int, title, anchor, ctx)
+    t = _texesc(title)
+    depth < length(_LATEX_HEADINGS) &&
+        return string("\\", _LATEX_HEADINGS[depth + 1], "{", t, "}\\label{", anchor, "}")
+    push!(
+        ctx.rdiag,
+        DiagEntry(
+            WARNING,
+            anchor,
+            "section at depth $(depth) is deeper than \\subparagraph; rendered as a bold run-in heading",
+        ),
+    )
+    return string("\\par\\noindent\\textbf{", t, "}\\label{", anchor, "}")
+end
+
+# A page's or section's body, after its heading: its checks lead (a tabular of its own checks under a
+# verdict line over its subtree), then its content in declaration order (nested sections included),
+# then its comments. Figures go under `figures/<page>[/<section>]`.
+function _latex_body!(theme::LaTeXBase, c, pg, assetdir, ctx)
+    _latex_checks!(theme, c, ctx)
+    _latex_emit_content!(theme, c, assetdir, ctx; page=pg)
+    emit_comments(theme, c.anchor, ctx)
+    return nothing
 end
 
 function emit_section(theme::LaTeXBase, sec, pg, ctx)
-    io = ctx.io
-    println(io, "\\subsection{", _texesc(sec.title), "}\\label{", sec.anchor, "}")
-    sec.desc === nothing || println(io, emit_text(theme, sec.desc.source, sec.anchor, ctx))
-    _latex_emit_content!(
-        theme, sec, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx
-    )
-    emit_comments(theme, sec.anchor, ctx)
-    return nothing
+    println(ctx.io, _latex_heading(sec.depth, sec.title, sec.anchor, ctx))
+    assetdir = _figure_dir(ctx.outdir, pg, sec; assets=false)
+    return _latex_body!(theme, sec, pg, assetdir, ctx)
 end
 
 function emit_page(theme::LaTeXBase, pg, ctx)
     io = ctx.io
-    # a page = one \section; its page-level (page-as-leaf) desc + figures, then its subsections
-    println(io, "\\section{", _texesc(pg.title), "}\\label{", pg.anchor, "}")
-    pg.desc === nothing || println(io, emit_text(theme, pg.desc.source, pg.anchor, ctx))
-    # a benchmark page leads with its test-report (tabular of checks + verdict line)
-    pg.status === :benchmark && _latex_benchmark!(theme, pg, ctx)
-    _latex_emit_content!(theme, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
-    emit_comments(theme, pg.anchor, ctx)
-    for sec in pg.sections
-        emit_section(theme, sec, pg, ctx)
-    end
-    return nothing
-end
-
-function _part_title(doc::Document, pid)
-    return (
-        i=findfirst(p -> first(p) === pid, doc.parts);
-        i === nothing ? string(pid) : last(doc.parts[i])
-    )
+    println(io, _latex_heading(1, pg.title, pg.anchor, ctx))   # a page = one \section
+    pg.status === :draft && println(io, "\\par\\noindent\\textit{Draft.}")   # its maturity, as every face shows it
+    return _latex_body!(theme, pg, pg, _figure_dir(ctx.outdir, pg; assets=false), ctx)
 end
 
 function emit_document(
@@ -304,7 +347,7 @@ function emit_document(
     ids = Dict{Symbol,String}(id => n.anchor for (id, n) in doc.refs)
     bib = _load_bib(doc.meta.bib_sources, rdiag)
     _, citeorder = _gallery_citations(doc, bib)
-    comments, _bm = read_comments(comments_file)
+    comments, _bm = _read_comments(doc, comments_file, rdiag)
     title = isempty(doc.meta.title) ? "Pinax gallery" : doc.meta.title
     ctx = LaTeXCtx(io, ids, comments, cache, rdiag, String(outdir))
 
@@ -322,7 +365,7 @@ function emit_document(
     prev_part = :__start__
     for pg in doc.pages
         if pg.part !== prev_part && pg.part !== nothing
-            println(io, "\\part{", _texesc(_part_title(doc, pg.part)), "}")
+            println(io, _latex_heading(0, _part_title(doc, pg.part), _anchor(pg.part), ctx))
         end
         prev_part = pg.part
         emit_page(theme, pg, ctx)
@@ -338,14 +381,18 @@ function emit_document(
 
     texpath = joinpath(outdir, "document.tex")
     write(texpath, String(take!(io)))
-    isempty(rdiag) || _write_latex_diagnostics(outdir, doc, rdiag)
-    return _latex_compile(texpath, outdir, rdiag)
+    result = _latex_compile(texpath, outdir, rdiag)
+    _write_latex_diagnostics(outdir, doc, rdiag)   # after compiling, so what it said is included
+    return result
 end
 
-# Diagnostics for non-gallery themes are a markdown sidecar (notes 09).
+# Diagnostics for non-gallery themes are a markdown sidecar (notes 09): the build's and this render's,
+# compiling included. With none, a sidecar left by an earlier render is removed.
 function _write_latex_diagnostics(outdir, doc, rdiag)
     es = vcat(doc.diag.entries, rdiag)
-    open(joinpath(outdir, "diagnostics.md"), "w") do io
+    f = joinpath(outdir, "diagnostics.md")
+    isempty(es) && return rm(f; force=true)
+    open(f, "w") do io
         println(io, "# Diagnostics")
         for e in es
             println(io, "- **", e.severity, "** `", e.item, "` — ", e.message)

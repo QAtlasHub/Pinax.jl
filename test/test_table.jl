@@ -24,7 +24,7 @@ end
         @test pg.tables[1].header == ["T", "M"]
         @test pg.tables[1].rows == [[1.0, 0.5], [2.0, 0.6]]   # columnar -> row-major
         @test pg.tables[1].caption == "m(t)"
-        @test pg.tables[1].id == :p_tbl1
+        @test startswith(string(pg.tables[1].id), "p_tbl_")   # container id + a hash of its code
         s = pg.sections[1]
         @test s.tables[1].header == ["a", "b"]                # matrix + explicit header
         @test s.tables[1].rows == [[1, 2], [3, 4]]
@@ -59,15 +59,11 @@ end
         @test occursin("T & M", lx)
     end
 
-    @testset "ragged columns -> missing cell (blank text / null json)" begin
-        tmp = mktempdir()
+    @testset "ragged columns are an error where the table is written, never padded" begin
         Pinax.reset!(; title="t")
-        @page :p "P" begin
-            @table (a=[1, 2], b=[10])   # b shorter -> 2nd row's b is missing
+        @test_throws "is ragged" @page :p "P" begin
+            @table (a=[1, 2], b=[10])
         end
-        Pinax.render(; out=joinpath(tmp, "a"), theme=:agent)
-        aj = read(joinpath(tmp, "a", "agent.json"), String)
-        @test occursin("[2,null]", aj)
     end
 
     @testset "unsupported input errors clearly" begin
@@ -112,11 +108,11 @@ end
         tmp = mktempdir()
         Pinax.reset!(; title="x")
         @page :p "P" begin
-            @table (a=[1, 2], b=[3, 4])
+            @table (a=[1, 2], b=[3, 4]) id = :p_tbl1
         end
         Pinax.render(; out=joinpath(tmp, "a"), theme=TableOverrideAgent())
         j = read(joinpath(tmp, "a", "agent.json"), String)
-        @test occursin("\"custom_tbl\":\"p_tbl1\"", j)   # override fired via _agent_tables! dispatch
+        @test occursin("\"custom_tbl\":\"p_tbl1\"", j)   # the emit_table override fired
         @test !occursin("\"header\"", j)                  # default emit_table did NOT run
     end
 
@@ -126,10 +122,10 @@ end
         write(svg, "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>")
         Pinax.reset!(; title="T")
         @page :p "P" begin
-            @figure svg
+            @figure svg id = :p_fig1
             @caption "FIGONE"
-            @table (a=[1], b=[2]) caption = "TBLONE"
-            @figure svg
+            @table (a=[1], b=[2]) caption = "TBLONE" id = :p_tbl1
+            @figure svg id = :p_fig2
             @caption "FIGTWO"
         end
         ord(s) =

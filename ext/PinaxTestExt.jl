@@ -1,25 +1,20 @@
 # PinaxTestExt — the `Test`-dependent half of the test bridge (the Test-free half is src/testset.jl).
 #
 # This module is deliberately small. Its job is to observe a running suite through Test's
-# `AbstractTestSet` interface and to BE the container: a `PinaxTestSet` holds Pinax's own structs
-# (`Figure`/`Table`/`Check`/`Desc` + content order) directly — there is one document model, held in
-# the task-local testset (safe under parallel tests exactly as `Test`'s own stack is). Summaries, the
-# margin figure, the fold to a `Document`, and the shard dump/merge are all plain Julia over that
-# duck-typed shape in Pinax proper — where they need no `Test`.
+# `AbstractTestSet` interface: a `PinaxTestSet` is a thin adapter over one `Pinax.TestNode`, the
+# Test-free tree that holds Pinax's own structs (`Figure`/`Table`/`Check`/`Desc` + content order) —
+# one model, held in the task-local testset (safe under parallel tests exactly as `Test`'s own stack
+# is). Summaries, the margin figure, the fold to a `Document`, and the shard dump/merge are all plain
+# Julia over that tree in Pinax proper — where they need no `Test`.
 #
 # A content macro (`@figure`/`@desc`/…) inside a test finds this container through the ONE seam
 # `Pinax._current_container()`: we register a probe at load so that seam, staying `Test`-free, can
-# route into the open `PinaxTestSet` (or no-op when the report is off — invariant V).
+# route into the open `PinaxTestSet`'s node (or no-op when the report is off — invariant V).
 module PinaxTestExt
 
 using Pinax
 using Pinax:
-    Check,
-    CodeBlock,
-    Figure,
-    Table,
-    Desc,
-    _anchor,
+    TestNode,
     _check_from,
     _looks_like_a_file,
     _nerror,
@@ -67,8 +62,115 @@ end
 function __init__()
     # Register the container probe (a `Ref` assignment, not a method override — no precompile clash).
     Pinax._TEST_CONTAINER_PROBE[] = _current_test_container
+    Pinax._SCOPE_HOOK[] = Pinax._ScopeHook(
+        _open_container, _container_pairs, _close_container
+    )
     return nothing
 end
+
+# ── a manuscript container AS the current testset (#173) ─────────────────────────────────────────
+#
+# While a `@page` / `@section` body runs, its container is the current testset, so `Test`'s own
+# `@test` is a check of that container and a nested `@testset` is a child section (`Test` builds a
+# nested set from the parent's TYPE). Every result is also handed to `outer`, the nearest ordinary
+# testset, so a suite counts it exactly as if the `@test` were written there. With none open (a
+# manuscript run on its own) the result is only recorded; `render` reports it.
+mutable struct PinaxContainerSet <: AbstractTestSet
+    description::String
+    node::Any                               # the Section or Page this testset IS
+    outer::Union{AbstractTestSet,Nothing}   # nearest non-container testset, or nothing
+    owns::Bool                              # created by a nested @testset: closes its own section
+end
+
+_enclosing_testset() = Test.get_testset_depth() == 0 ? nothing : Test.get_testset()
+_outer_of(ts::PinaxContainerSet) = ts.outer
+_outer_of(ts) = ts
+
+function _open_container(c)
+    ts = PinaxContainerSet(c.title, c, _outer_of(_enclosing_testset()), false)
+    TESTSET_STACK && Test.push_testset(ts)       # Julia ≤ 1.12: the stack is task-local storage
+    return ts
+end
+_close_container(ts) = (TESTSET_STACK && Test.pop_testset(); nothing)
+
+@static if isdefined(Test, :CURRENT_TESTSET)
+    function _container_pairs(ts)
+        return (
+            Test.CURRENT_TESTSET => ts, Test.TESTSET_DEPTH => Test.get_testset_depth() + 1
+        )
+    end
+else
+    _container_pairs(ts) = (Pinax._NO_SCOPE => nothing, Pinax._NO_SCOPE => nothing)
+end
+
+# A `@testset "desc"` nested in a container: `Test` constructs it from the parent's type, so this is
+# where a testset becomes a child section of whatever container is open.
+function PinaxContainerSet(desc::AbstractString; kw...)
+    parent = _enclosing_testset()
+    sec = Pinax._enter_section!(_section_id(_slug(desc)), String(desc))
+    return PinaxContainerSet(String(desc), sec, _outer_of(parent), true)
+end
+
+# A testset's section id is generated, not written by the author: the container's id plus the
+# description, so it is unique in the document, and a repeat (the same `@testset "conv"` in a loop)
+# becomes `-2`, `-3` — as any generated id does — rather than raising (Conventions › Identity).
+function _section_id(slug::Symbol)
+    c = something(Pinax.CTX.section, Pinax.CTX.page)
+    return Pinax._free_id(Symbol(c.id, "_", slug))
+end
+
+function Test.finish(ts::PinaxContainerSet)
+    ts.owns && Pinax._exit_section!()
+    return ts
+end
+
+# The section tree is built as sections open; a finished child needs no recording.
+Test.record(::PinaxContainerSet, child::PinaxContainerSet) = child
+# Any other testset nested here (an explicit `@testset DefaultTestSet`) still reaches the suite.
+function Test.record(ts::PinaxContainerSet, child::AbstractTestSet)
+    ts.outer === nothing || Test.record(ts.outer, child)
+    return child
+end
+function Test.record(ts::PinaxContainerSet, res::Test.Result)
+    if res isa Test.Broken
+        Pinax._record_no_check!(ts.node, _source_str(res))
+    else
+        chk = _push_container_check!(ts.node, res)
+        chk.reported = ts.outer !== nothing   # the suite counts it; `render` will not repeat it
+    end
+    ts.outer === nothing || Test.record(ts.outer, res)
+    return res
+end
+
+# The one place a Pass / Fail / Error enters the model as a `Check`, for a manuscript container and a
+# test node alike (#173).
+function _push_container_check!(c, res)
+    chk = _check_from(_result_data_expr(res), _label(res), _outcome_of(res), 0)
+    # a test node's ids are its own until the fold places them; a page's or section's are the document's
+    chk.id = if c isa TestNode
+        Pinax._check_id(c, chk.label)
+    else
+        Pinax._claim_check_id!(c, chk.label)
+    end
+    chk.source = _source_str(res)            # WHERE it was asserted (issue #69 I)
+    # By DEFAULT, the code that produced this check — captured as the same `@code` artifact a
+    # manuscript would build, pushed BEFORE the check so it reads code-then-result. One block per
+    # source region: a `@testset for`'s N samples all point at the one snippet they share.
+    blk = _code_block_for(res)
+    blk === nothing || (chk.code_id = Pinax._push_auto_code!(c, blk))
+    Pinax._add_node!(c, :check, chk)
+    return chk
+end
+
+# What Test recorded, as a check's outcome.
+_outcome_of(res) =
+    if res isa Test.Pass
+        :pass
+    elseif res isa Test.Error
+        :error
+    else
+        :fail
+    end
 
 # The probe `Pinax._current_container()` consults. Returns the innermost open Pinax test container,
 # `:inert` (inside a test whose set is NOT ours — the report is off, so content macros no-op), or
@@ -76,30 +178,17 @@ end
 function _current_test_container()
     Test.get_testset_depth() == 0 && return :none
     ts = Test.get_testset()
-    return ts isa PinaxTestSet ? ts : :inert
+    return ts isa PinaxTestSet ? ts.node : :inert
 end
 
-# The testset IS a Pinax container: the same fields a `Section`/`Page` carries, so the content macros
-# push into it duck-typed through the seam, and the fold moves the real structs with no second model.
+# A testset as Test sees it, over the tree node it fills (#173). Everything the document needs lives
+# in `node`; the adapter adds only what a running testset has and a node does not. `children` mirrors
+# `node.children` as testsets because TestShards keys `evidence!` on the testset OBJECT.
 mutable struct PinaxTestSet <: AbstractTestSet
     description::String
-    # --- Pinax container payload (one model, held task-local) ---
-    id::Symbol
-    anchor::String
-    figures::Vector{Figure}
-    tables::Vector{Table}
-    checks::Vector{Check}
-    codes::Vector{CodeBlock}
-    panels::Vector{String}
-    desc::Union{Desc,Nothing}
-    content::Vector{Pair{Symbol,Int}}   # declaration order of figures/tables/panels/checks/codes
+    node::TestNode
     children::Vector{PinaxTestSet}
-    nbroken::Int                        # @test_broken / skipped: counted, never a Check
-    nerror::Int                         # failing checks that were ERRORS rather than plain fails
-    # --- testset bookkeeping ---
     t0::Float64
-    elapsed::Float64
-    ignore::Bool                        # @pinaxignore: run + count, but keep out of the document
     # --- root-only options (a nested set is built by Test as T(desc), with none of these) ---
     out::String
     dump::String
@@ -118,24 +207,11 @@ function PinaxTestSet(
     page_when::Function=_looks_like_a_file,
     title::AbstractString="Test report",
 )
-    id = _slug(description)
     return PinaxTestSet(
         String(description),
-        id,
-        _anchor(id),
-        Figure[],
-        Table[],
-        Check[],
-        CodeBlock[],
-        String[],
-        nothing,
-        Pair{Symbol,Int}[],
+        TestNode(description),
         PinaxTestSet[],
-        0,
-        0,
         time(),
-        NaN,
-        false,
         String(out),
         String(dump),
         page_when,
@@ -148,7 +224,7 @@ end
 function Pinax._ignore_current_testset!()
     Test.get_testset_depth() == 0 && return nothing
     ts = Test.get_testset()
-    ts isa PinaxTestSet && (ts.ignore = true)
+    ts isa PinaxTestSet && (ts.node.ignore = true)
     return nothing
 end
 
@@ -156,37 +232,38 @@ end
 # tagged into content order at its emission site; a Broken is counted (see `finish`). Doing the
 # conversion HERE (not lazily at finish) is what keeps the tree one model with no `.results` shadow.
 function Test.record(ts::PinaxTestSet, res)
+    n = ts.node
     if res isa PinaxTestSet
         push!(ts.children, res)                       # nest
+        push!(n.children, res.node)
     elseif res isa Test.Broken
         # A broken/skipped test is deliberately NOT a Check: it did not pass, but the runner is happy
-        # about it, and `pass=false` would paint the page red and flip the verdict to FAIL. Counted.
-        ts.nbroken += 1
+        # about it, and a `:fail` check would paint the page red and flip the verdict to FAIL. Counted.
+        n.nbroken += 1
+        # …and its position is marked, as in a page, so a `@caption` right after it names nothing
+        # rather than the check before it. No diagnostic: the summary line counts it, and a document
+        # built while the suite runs is not this node's.
+        Pinax._mark_no_check!(n)
     elseif res isa Test.Result                        # Pass / Fail / Error
-        res isa Test.Error && (ts.nerror += 1)
-        chk = _check_from(_result_data_expr(res), _label(res), res isa Test.Pass, 0)
-        chk.source = _source_str(res)                 # WHERE it failed (issue #69 I)
-        # By DEFAULT, the code that produced this check — captured as the same `@code` artifact a
-        # manuscript would build, pushed BEFORE the check so it reads code-then-result. One block per
-        # source region: a `@testset for`'s N samples all point at the one snippet they share.
-        blk = _code_block_for(res)
-        if blk !== nothing
-            Pinax._push_auto_code!(ts, blk)
-            chk.code_anchor = blk.anchor
-        end
-        push!(ts.checks, chk)
-        push!(ts.content, :check => length(ts.checks))
+        _push_container_check!(n, res)
     end
     return res
 end
 
-# "file:line" from a Test result's `source::LineNumberNode`, or "" — duck-typed via `hasproperty` since
-# a `Pass` may carry no source across Julia versions, and only a FAILING check really needs it.
+# Where a Test result was written, `path:line` relative to its project (`Pinax._defined_at`), from its
+# `source::LineNumberNode`, or "" — duck-typed via `hasproperty` since a `Pass` may carry no source
+# across Julia versions.
 function _source_str(res)
-    hasproperty(res, :source) || return ""
+    loc = _source_loc(res)
+    return loc === nothing ? "" : Pinax._defined_at(loc)
+end
+
+# `(file, line)` from a result's `source::LineNumberNode`, or `nothing` when it carries none.
+function _source_loc(res)
+    hasproperty(res, :source) || return nothing
     s = getproperty(res, :source)
-    (s isa LineNumberNode && s.file !== nothing) || return ""
-    return string(basename(String(s.file)), ":", s.line)
+    (s isa LineNumberNode && s.file !== nothing) || return nothing
+    return (String(s.file), s.line)
 end
 
 # The `@code` artifact for a test result — the code that produced it, read from the file at record
@@ -194,41 +271,46 @@ end
 # `LineNumberNode`. The extraction itself is core and `Test`-free (`Pinax._test_code_block`); the only
 # part that needs `Test` is getting the file and line out of a `Test.Result`.
 function _code_block_for(res)
-    hasproperty(res, :source) || return nothing
-    s = getproperty(res, :source)
-    (s isa LineNumberNode && s.file !== nothing) || return nothing
-    return Pinax._test_code_block(String(s.file), s.line)
+    loc = _source_loc(res)
+    return loc === nothing ? nothing : Pinax._test_code_block(loc...)
 end
 
 function Test.finish(ts::PinaxTestSet)
-    ts.elapsed = time() - ts.t0
+    n = ts.node
+    n.elapsed = time() - ts.t0
     if Test.get_testset_depth() > 0
         Test.record(Test.get_testset(), ts)           # nest into the parent
         return ts
     end
     # ── ROOT ─────────────────────────────────────────────────────────
-    if ts.ignore
-        nothing
-    elseif !isempty(ts.dump)
-        # A CI shard: dump the tree, render NOTHING. One later job merges every shard's tree into the
-        # single gallery the design implies — one page per test FILE, not one gallery per shard.
-        dump_test_report(ts, ts.dump)
-        println("\nPinax test report: ", _summary_line(ts), "\n  dumped → ", ts.dump)
-    else
-        render_test_report(ts; out=ts.out, title=ts.title, page_when=ts.page_when)
-        println(
-            "\nPinax test report: ",
-            _summary_line(ts),
-            "\n  rendered → $(ts.out)_html/  $(ts.out)_agent/",
-        )
-    end
+    _emit_root(ts)
     # Stay a well-behaved testset: a failing suite must still fail the process (invariant IV — a
-    # report never turns a red suite green). Counted from the folded checks, duck-typed.
-    nfail, nerr = _nfail(ts), _nerror(ts)
+    # report never turns a red suite green). Counted from the captured checks.
+    nfail, nerr = _nfail(n), _nerror(n)
     if nfail + nerr > 0
         error("PinaxTestSet: $(nfail) failed, $(nerr) errored")
     end
     return ts
+end
+
+# What a finished root leaves behind: nothing when it is ignored; under a CI shard, a dump and NO
+# render (one later job merges every shard's tree into the single gallery the design implies — one
+# page per test FILE, not one gallery per shard); otherwise the rendered report. Then a line saying so.
+function _emit_root(ts::PinaxTestSet)
+    n = ts.node
+    n.ignore && return nothing
+    if !isempty(ts.dump)
+        dump_test_report(n, ts.dump)
+        println("\nPinax test report: ", _summary_line(n), "\n  dumped → ", ts.dump)
+    else
+        render_test_report(n; out=ts.out, title=ts.title, page_when=ts.page_when)
+        println(
+            "\nPinax test report: ",
+            _summary_line(n),
+            "\n  rendered → $(joinpath(ts.out, "html"))/  $(joinpath(ts.out, "agent"))/",
+        )
+    end
+    return nothing
 end
 
 # The interface `Pinax.test` (docstring in src/testset.jl). In the EXTENSION, `PinaxTestSet` is an
@@ -248,10 +330,19 @@ function Pinax.test(
     Core.eval(m, :(include(p) = $(Base.include)($m, p)))
     Core.eval(m, :(eval(x) = $(Core.eval)($m, x)))
     empty!(Pinax._FILE_AST)
-    withenv("PINAX_TEST_OUT" => String(out), "PINAX_TEST_TITLE" => String(title)) do
-        Test.@testset PinaxTestSet "$(title)" begin
-            Base.include(m, file)
+    # This call is the process's capture while it runs: the suite it includes sees PINAX_TEST_OUT, so
+    # a `runtests.jl` carrying `install_test_capture!()` asks for one, and must find it open and
+    # decline — a second root would take every assertion and outlive the call.
+    installed = Pinax._CAPTURE_INSTALLED[]
+    Pinax._CAPTURE_INSTALLED[] = true
+    try
+        withenv("PINAX_TEST_OUT" => String(out), "PINAX_TEST_TITLE" => String(title)) do
+            Test.@testset PinaxTestSet "$(title)" begin
+                Base.include(m, file)
+            end
         end
+    finally
+        Pinax._CAPTURE_INSTALLED[] = installed
     end
     return nothing
 end
@@ -294,22 +385,22 @@ function _finalize_test_capture!(root::PinaxTestSet)
     # A `-L` preamble runs in EVERY `Pkg.test` subprocess — the cache-flags probe and precompile, not
     # just the test run — and those capture nothing. An empty root therefore means "not the test run":
     # do nothing (no render, no print, no exit) so their stdout stays clean for `Pkg` to parse.
-    (isempty(root.children) && isempty(root.checks)) && return nothing
-    if root.ignore
-        nothing
-    elseif !isempty(root.dump)
-        dump_test_report(root, root.dump)
-        println("\nPinax test report: ", _summary_line(root), "\n  dumped → ", root.dump)
-    else
-        render_test_report(root; out=root.out, title=root.title, page_when=root.page_when)
-        println(
-            "\nPinax test report: ",
-            _summary_line(root),
-            "\n  rendered → $(root.out)_html/  $(root.out)_agent/",
+    n = root.node
+    (isempty(n.children) && isempty(n.checks)) && return nothing
+    # Counted BEFORE the render: a red suite exits nonzero even when its report cannot be written
+    # (finish's throw can't fire in atexit, and an error raised in an atexit hook leaves the code 0).
+    red = _nfail(n) + _nerror(n) > 0
+    try
+        _emit_root(root)
+    catch err
+        red || rethrow()
+        # the exit below would discard the error: say it first
+        @error "Pinax: the test report could not be written" exception = (
+            err, catch_backtrace()
         )
+    finally
+        red && exit(1)
     end
-    nfail, nerr = _nfail(root), _nerror(root)
-    (nfail + nerr > 0) && exit(1)   # red suite → nonzero exit (finish's throw can't fire in atexit)
     return nothing
 end
 
@@ -335,9 +426,8 @@ _result_data_expr(::Any) = nothing
 
 function _label(r::Test.Result)
     e = hasproperty(r, :orig_expr) ? getproperty(r, :orig_expr) : nothing
-    s = e === nothing ? string(typeof(r)) : string(e)
-    length(s) > 110 && (s = s[1:107] * "…")
-    return s
+    s = e === nothing ? string(typeof(r)) : Pinax._expr_str(e)
+    return Pinax._trunc(s, 110)   # at most 110 characters, cut at a character
 end
 
 end # module

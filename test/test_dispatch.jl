@@ -18,7 +18,7 @@ end
     Pinax.reset!(; title="dispatch")
     @page :p "P" begin
         @section :s "S" begin
-            @figure svg
+            @figure svg id = :s_fig1
             @caption "cap"
         end
     end
@@ -32,6 +32,28 @@ end
     @test !occursin("<figcaption>", b)        # …replacing the default figure entirely
     @test occursin("<title>dispatch", b)      # but emit_document (the shell) is inherited
     @test occursin("class=\"section\"", b)    # …and emit_section too
+end
+
+# `emit_page` is the page's body in every gallery file: a one-page document (a single index.html)
+# calls it like each file of a multi-page one, so a variant's override applies to both (#168).
+struct PageGallery <: Pinax.GalleryBase end
+Pinax.emit_page(::PageGallery, pg, ctx) = println(ctx.io, "<p>PAGE_BODY:", pg.id, "</p>")
+
+@testset "gallery: emit_page renders one-page and multi-page documents alike" begin
+    tmp = mktempdir()
+    Pinax.reset!(; title="one")
+    @page :p "P" begin
+        @desc "DEFAULT_BODY"
+    end
+    one = read(Pinax.render(; out=joinpath(tmp, "one"), theme=PageGallery()), String)
+    @test occursin("PAGE_BODY:p", one) && !occursin("DEFAULT_BODY", one)
+    @test occursin("<section class=\"page\" id=\"p\"><h1>P</h1>", one)
+
+    Pinax.reset!(; title="two")
+    @page :p "P" begin end
+    @page :q "Q" begin end
+    Pinax.render(; out=joinpath(tmp, "two"), theme=PageGallery())
+    @test occursin("PAGE_BODY:q", read(joinpath(tmp, "two", "q.html"), String))
 end
 
 # The points that used to be internal `_*` helpers (emit_text/emit_comments/emit_page/emit_index) are
@@ -77,7 +99,7 @@ end
     @page :p "P" begin
         @section :s "S" begin
             @desc md"d"
-            @figure svg
+            @figure svg id = :s_fig1
             @caption "c"
         end
     end
@@ -98,4 +120,56 @@ end
     j = read(joinpath(tmp, "agent", "agent.json"), String)
     @test occursin("\"tagged\":true", j)      # the override fired
     @test occursin("\"sections\":[", j)       # emit_section(::AgentBase) emitted the sections array
+end
+
+# A content kind no backend knows is an error in every face, naming it — never printed verbatim or
+# dropped (#168). `_content_items` is the one registry of kinds every backend walks.
+@testset "an unknown content kind fails loudly in every theme" begin
+    for theme in (:gallery, :agent, :latex)
+        Pinax.reset!(; title="unknown")
+        @page :p "P" begin
+            @section :s "S" begin
+                @raw "<b>x</b>"
+            end
+        end
+        push!(Pinax.current_document().pages[1].sections[1].content, :hologram => 1)
+        @test_throws "hologram" Pinax.render(; out=mktempdir(), theme=theme)
+    end
+end
+
+# Leaf content — prose, tables, code blocks, @raw — is emitted through one generic, `emit_node`, so a
+# theme overrides one node type and inherits the rest (#168). A node type a theme has no method for
+# is an error naming the theme and the type, in every face.
+struct TableTagGallery <: Pinax.GalleryBase end
+function Pinax.emit_node(::TableTagGallery, t::Pinax.Table, ctx)
+    return println(ctx.io, "<p>TBL:", t.id, "</p>")
+end
+struct TableTagTeX <: Pinax.LaTeXBase end
+Pinax.emit_node(::TableTagTeX, t::Pinax.Table, ctx) = println(ctx.io, "%% TBL:", t.id)
+struct Hologram end
+
+@testset "emit_node: one node type overridden, the rest inherited" begin
+    tmp = mktempdir()
+    Pinax.reset!(; title="nodes")
+    @page :p "P" begin
+        @desc "PROSE"
+        @table (a=[1],) id = :t caption = "TBLCAP"
+        @code id = :c X_VAL = 1
+        @raw "<b>RAWBLOCK</b>"
+    end
+    g = read(Pinax.render(; out=joinpath(tmp, "g"), theme=TableTagGallery()), String)
+    @test occursin("<p>TBL:t</p>", g) && !occursin("TBLCAP", g)
+    @test occursin("PROSE", g) && occursin("X_VAL", g) && occursin("RAWBLOCK", g)
+    lx = read(Pinax.render(; out=joinpath(tmp, "l"), theme=TableTagTeX()), String)
+    @test occursin("%% TBL:t", lx) && !occursin("TBLCAP", lx)
+    @test occursin("PROSE", lx) && occursin("X_VAL", lx)
+
+    for theme in (Pinax.GalleryTheme(), Pinax.LaTeXTheme(), Pinax.AgentTheme())
+        @test_throws r"has no form for a Hologram" Pinax.emit_node(
+            theme, Hologram(), nothing
+        )
+    end
+    @test_throws r"agent.md has no form for a Hologram" Pinax._agent_md_node(
+        IOBuffer(), Hologram(), nothing
+    )
 end

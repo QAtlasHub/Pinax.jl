@@ -14,7 +14,7 @@ using ParamIO
     @part :thermal "Thermal" desc = md"prior-work reproduction" begin
         @page :energy "Energy" summary = "Control: N, g" begin
             @desc md"energy vs T"
-            @figure svg params = (N=24, g=0.5)
+            @figure svg params = (N=24, g=0.5) id = :energy_fig1
             @caption "E/N"
         end
     end
@@ -40,7 +40,7 @@ using ParamIO
     md = read(joinpath(tmp, "agent", "agent.md"), String)
     @test occursin("[id: energy]", md)
     @test occursin("[fig: energy_fig1]", md)
-    @test occursin("data: N=24, g=0.5", md)
+    @test occursin("params: N=24, g=0.5", md)
 
     # the agent backend is registered like any other (self-hosting: no privileged core)
     @test Pinax._resolve_theme(:agent) isa Pinax.AgentTheme

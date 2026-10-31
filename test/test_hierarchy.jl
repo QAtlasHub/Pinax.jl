@@ -113,7 +113,7 @@ using Test
         Pinax.reset!()
         @page :bm "BM" begin
             @figure svg                 # first figure (raster) — the default thumbnail…
-            @figure pdf                 # …but this one is bookmarked, so it should win
+            @figure pdf id = :bm_fig2   # …but this one is bookmarked, so it should win
         end
         @page :other "Other" begin
             @figure svg
@@ -169,25 +169,25 @@ using Test
             @figure svg
         end
         pg = Pinax.current_document().pages[1]
-        @test pg.desc !== nothing && occursin("page level desc", pg.desc.source)
-        @test pg.panels == ["<div class=\"banner\">hi</div>"]
+        @test occursin("page level desc", only(pg.texts).source)
+        @test only(pg.raws).html == "<div class=\"banner\">hi</div>"
         html = read(Pinax.render(; out=sitedir("leaf")), String)   # single page → one index.html
         @test occursin("page level desc", html)
         @test occursin("<div class=\"banner\">hi</div>", html)
     end
 end
 
-# `status` tags a page's maturity (`:final` shaped result vs `:trial` raw experiment attempt). Pages
+# `status` tags a page's maturity (`:final` published version vs `:draft` manuscript). Pages
 # inherit the enclosing `@part`'s status default unless they override it; the agent backend exposes
 # it as `"status"` (RAG/registry filtering) and the gallery badges non-`:final` pages.
-@testset "page status: trial vs final" begin
+@testset "page status: draft vs final" begin
     tmp = mktempdir()
     Pinax.reset!(; title="status")
-    @part :proc "Trials" status=:trial begin
+    @part :proc "Drafts" status=:draft begin
         @page :log "Log" begin
             @desc md"raw"
         end
-        @page :keep "Keep" status=:final begin   # explicit override inside a trial part
+        @page :keep "Keep" status=:final begin   # explicit override inside a draft part
             @desc md"override"
         end
     end
@@ -195,20 +195,68 @@ end
         @desc md"curated"
     end
     pages = Dict(p.id => p for p in Pinax.current_document().pages)
-    @test pages[:log].status == :trial       # inherited from the part
+    @test pages[:log].status == :draft       # inherited from the part
     @test pages[:keep].status == :final      # explicit override wins
     @test pages[:res].status == :final       # default outside any part
 
     ap = Pinax.render(; out=joinpath(tmp, "agent"), theme=:agent)
     j = read(ap, String)
-    @test occursin("\"status\":\"trial\"", j)
+    @test occursin("\"status\":\"draft\"", j)
     @test occursin("\"status\":\"final\"", j)
     md = read(joinpath(tmp, "agent", "agent.md"), String)
-    @test occursin("[status: trial]", md)         # trial page marked
+    @test occursin("[status: draft]", md)         # draft page marked
     @test !occursin("[status: final]", md)        # default not noised up
 
     idx = read(
         joinpath(Pinax.render(; out=joinpath(tmp, "site")) |> dirname, "index.html"), String
     )
-    @test occursin("card-status", idx)            # gallery badges the trial page
+    @test occursin("pinax-status", idx)           # gallery badges the draft page
+end
+
+# A page is named on the index cards, in the :toc index, in a one-page file's Contents and in its own
+# heading; one helper writes its badges (a :draft status, then the verdict over its subtree) in every
+# one of those places (#168). LaTeX marks a draft page under its heading.
+@testset "one page badge, wherever a page is named" begin
+    tmp = mktempdir()
+    draft = "<span class=\"pinax-status\">draft</span>"
+    pass = "<span class=\"pinax-vbadge pinax-vbadge-pass\">PASS 1/1</span>"
+    two!(; index=:cards) = begin
+        Pinax.reset!(; title="badges", index=index)
+        @page :d "Draft" status = :draft begin
+            @test true
+        end
+        @page :f "Final" begin end
+    end
+
+    two!()
+    Pinax.render(; out=joinpath(tmp, "cards"))
+    idx = read(joinpath(tmp, "cards", "index.html"), String)
+    @test occursin(draft, idx) && occursin(pass, idx)
+    @test count("pinax-status", idx) == 1   # the draft card only (the CSS is in style.css)
+    d = read(joinpath(tmp, "cards", "d.html"), String)
+    @test occursin(string("Draft ", draft, " ", pass, "</h1>"), d)
+
+    two!(; index=:toc)
+    Pinax.render(; out=joinpath(tmp, "toc"))
+    toc = read(joinpath(tmp, "toc", "index.html"), String)
+    @test occursin(string("Draft</a> ", draft, " ", pass), toc)
+
+    Pinax.reset!(; title="one")
+    @page :d "Draft" status = :draft begin
+        @test true
+    end
+    one = read(Pinax.render(; out=joinpath(tmp, "one")), String)
+    @test occursin(string("Draft ", draft, " ", pass, "</h1>"), one)   # its heading
+    @test occursin(string("Draft ", draft, " ", pass, "</a>"), one)    # the Contents entry
+
+    lx = read(Pinax.render(; out=joinpath(tmp, "l"), theme=:latex), String)
+    @test occursin("\\section{Draft}\\label{d}\n\\par\\noindent\\textit{Draft.}", lx)
+
+    # a failing subtree badges FAIL (checked on the helper: a failing check would fail this suite)
+    Pinax.reset!()
+    @page :x "X" begin end
+    pg = only(Pinax.current_document().pages)
+    push!(pg.checks, Pinax.Check(:c, "c", 1.0, 2.0, 1.0, 0.5, :abs, false))
+    @test Pinax._page_badges(pg) ==
+        " <span class=\"pinax-vbadge pinax-vbadge-fail\">FAIL 0/1</span>"
 end

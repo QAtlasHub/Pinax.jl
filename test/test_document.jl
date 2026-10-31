@@ -29,8 +29,7 @@ const SIDE = Ref(0)   # for checking @figure deferral
         @test length(pg.sections[1].figures) == 2
         @test length(pg.sections[2].figures) == 1
         @test pg.sections[2].facet == "system.g"
-        @test pg.sections[1].desc isa Pinax.Desc
-        @test occursin("langle", pg.sections[1].desc.source)
+        @test occursin("langle", only(pg.sections[1].texts).source)   # @desc: a prose block
     end
 
     @testset "@figure is deferred" begin
@@ -60,8 +59,8 @@ const SIDE = Ref(0)   # for checking @figure deferral
             end
         end
         figs = Pinax.current_document().pages[1].sections[1].figures
-        @test figs[1].id === :s_fig1
-        @test figs[1].anchor == "s_fig1"
+        @test startswith(string(figs[1].id), "s_fig_")   # container id + a hash of its code
+        @test figs[1].anchor == string(figs[1].id)        # the id is the anchor
         @test figs[2].id === :custom
     end
 
@@ -76,63 +75,69 @@ const SIDE = Ref(0)   # for checking @figure deferral
         @test fig.params == (N=8, g=0.5)
     end
 
-    @testset "caption: @caption, precedence, diagnostics" begin
+    @testset "caption: one per node, from caption= or @caption" begin
         Pinax.reset!()
         @page :p "P" begin
             @section :s "S" begin
-                @figure 1 caption = "kw"
-                @caption md"override"      # wins
-                @figure 2 caption = "only" # no @caption -> caption= stays
+                @figure 1
+                @caption md"from the macro"
+                @figure 2 caption = "from the keyword"
             end
         end
         figs = Pinax.current_document().pages[1].sections[1].figures
-        @test figs[1].caption == "override"
-        @test figs[2].caption == "only"
+        @test figs[1].caption == "from the macro"
+        @test figs[2].caption == "from the keyword"
+        Pinax.reset!()
+        @test_throws "already has a caption" @page :p "P" begin
+            @figure 1 caption = "kw"
+            @caption md"a second caption"
+        end
 
-        # @caption in a section with no figure is non-fatal -> WARNING
+        # @caption names the node IMMEDIATELY before it — never an earlier figure (#159)
         Pinax.reset!()
         @page :p "P" begin
+            @section :s "S" begin
+                @figure 1
+                @caption "fig a"
+                @table (x=[1], y=[2])
+                @caption "the table"
+                @code E = 1.0 + 1.0
+                @caption "the energy"
+            end
+        end
+        sec = Pinax.current_document().pages[1].sections[1]
+        @test sec.figures[1].caption == "fig a"      # not overwritten by the table's caption
+        @test sec.tables[1].caption == "the table"
+        @test sec.codes[1].caption == "the energy"
+
+        # nothing before it, or a node that carries no caption, is an error where it is written
+        Pinax.reset!()
+        @test_throws "nothing before it" @page :p "P" begin
             @section :s "S" begin
                 @caption md"orphan"
             end
         end
-        diag = Pinax.current_document().diag.entries
-        @test any(e -> e.severity == Pinax.WARNING && occursin("caption", e.message), diag)
-    end
-
-    @testset "thumbnail resolution (explicit > marker > top > none)" begin
         Pinax.reset!()
-        @page :a "A" begin
-            @thumbnail :picked
+        @test_throws "carries no caption" @page :p "P" begin
+            @figure 1
+            @raw "<b>x</b>"
+            @caption "meant for the figure"
+        end
+        Pinax.reset!()
+        @test_throws "carries no caption" @page :p "P" begin
+            @figure 1
+            @section :s "S" begin end
+            @caption "never reaches back past the section to the figure"
+        end
+        @test Pinax.current_document().pages[1].figures[1].caption == ""
+        Pinax.reset!()
+        @test_throws "carries no caption" @page :p "P" begin
             @section :s "S" begin
                 @figure 1
+                @section :t "T" begin end
+                @caption "nor past a nested one"
             end
         end
-        @page :b "B" begin
-            @section :s "S" begin
-                @figure 1
-                @figure 2 thumbnail = true
-            end
-        end
-        @page :c "C" begin
-            @section :s "S" begin
-                @figure 1
-                @figure 2
-            end
-        end
-        @page :d "D" begin
-            @no_thumbnail
-            @section :s "S" begin
-                @figure 1
-            end
-        end
-        pgs = Pinax.current_document().pages
-        @test Pinax.resolved_thumbnail(pgs[1]) == Pinax.FigRef(:picked)      # explicit
-        @test Pinax.resolved_thumbnail(pgs[2]) ==
-            Pinax.FigRef(pgs[2].sections[1].figures[2].id)  # marker
-        @test Pinax.resolved_thumbnail(pgs[3]) ==
-            Pinax.FigRef(pgs[3].sections[1].figures[1].id)  # top
-        @test Pinax.resolved_thumbnail(pgs[4]) === nothing                    # @no_thumbnail
     end
 
     @testset "section kwargs: summary, layout" begin
@@ -147,7 +152,7 @@ const SIDE = Ref(0)   # for checking @figure deferral
         @test sec.layout === :wide
     end
 
-    @testset "preamble: @pinaxsetup / @debug_mode / @bibliography / @newcommand" begin
+    @testset "preamble: @pinaxsetup / @bibliography / @newcommand" begin
         Pinax.reset!()
         @pinaxsetup theme = :gallery debug = true numbering = :page index = :rich
         m = Pinax.current_document().meta
@@ -159,10 +164,6 @@ const SIDE = Ref(0)   # for checking @figure deferral
         # theme-specific kw (css/js/features) are ignored in the structure layer (not an error)
         @pinaxsetup theme = :gallery css = ["x.css"] js = ["y.js"] features = (:comments,)
         @test Pinax.current_document().meta.theme === :gallery
-
-        Pinax.reset!()
-        @debug_mode true
-        @test Pinax.current_document().meta.debug
 
         Pinax.reset!()
         @bibliography "a.bib" "b.bib"

@@ -12,26 +12,31 @@ export const Params = z.union([z.null(), z.string(), z.record(z.string(), ParamS
 
 export const CommentZ = z.object({ author: z.string(), text: z.string() }).passthrough();
 
-// A content-order reference — {kind: "figure"|"table"|..., id} in declaration order.
-export const ContentRefZ = z.object({ kind: z.string(), id: z.string() }).passthrough();
+// A content-order reference — {kind, id} in declaration order; a kind is one the emitter writes.
+export const ContentKindZ = z.enum(["text", "figure", "table", "code", "check", "raw", "section"]);
+export const ContentRefZ = z.object({ kind: ContentKindZ, id: z.string() }).passthrough();
 
 // A @table node — first-class tabular data, id-addressable like a figure.
 export const TableNodeZ = z
   .object({
     id: z.string(),
     caption: z.string(),
+    defined_at: z.string().optional(), // where the @table was written, "path:line", or ""
     code: z.string(),
     header: z.array(z.string()),
     rows: z.array(z.array(z.unknown())),
+    comments: z.array(CommentZ).optional(), // the table's own thread, as a figure carries one
   })
   .passthrough();
 
-// A figure's inline data table (figure_as_table) — a downsampled preview of the plotted data.
-export const FigureTableZ = z
+// A figure's data file, described exactly: the path, its columns (the series label, then the x and y
+// axes named by the plot's axis labels) and each series with its point count. The file holds every
+// plotted point; nothing of it is inlined (Conventions › The agent face).
+export const FigureDataZ = z
   .object({
-    header: z.array(z.string()),
-    rows: z.array(z.array(z.unknown())),
-    total: z.number(),
+    path: z.string(),
+    columns: z.array(z.string()),
+    series: z.array(z.object({ label: z.string(), points: z.number() }).passthrough()),
   })
   .passthrough();
 
@@ -39,37 +44,132 @@ export const FigureZ = z
   .object({
     id: z.string(),
     caption: z.string(),
+    defined_at: z.string().optional(), // where the @figure was written, "path:line", or ""
     code: z.string(),
     params: Params,
     assets: z.array(z.string()),
-    data: z.string().nullable().optional(), // path to the full plotted-data CSV
-    table: FigureTableZ.nullable().optional(), // inline data-table preview (figure_as_table)
+    data: FigureDataZ.nullable().optional(), // null when the figure has no data form
     comments: z.array(CommentZ),
   })
   .passthrough();
 
-export const SectionZ = z
+// A `@code` block (or the code a `@test` was captured from): what ran, and what it printed.
+export const CodeZ = z
   .object({
     id: z.string(),
-    title: z.string(),
-    desc: z.string().nullable(),
-    figures: z.array(FigureZ),
-    tables: z.array(TableNodeZ).optional(),
-    content: z.array(ContentRefZ).optional(),
+    caption: z.string().optional(),
+    defined_at: z.string().optional(), // where the block was written, "path:line", or ""
+    lang: z.string(),
+    source: z.string(),
+    output: z.string(),
   })
   .passthrough();
 
-export const PageZ = z
+// A prose block (`@desc`): markdown and math, placed in content order like any other node.
+export const TextZ = z
+  .object({ id: z.string(), text: z.string(), defined_at: z.string().optional() })
+  .passthrough();
+
+// A `@raw` block: author-written HTML, as written (what the gallery shows verbatim).
+export const RawZ = z
+  .object({ id: z.string(), html: z.string(), defined_at: z.string().optional() })
+  .passthrough();
+
+// A number, or the string a non-finite value is written as ("NaN", "Inf").
+const NumZ = z.union([z.number(), z.string()]);
+
+// One check — a `Test` `@test` recorded into a container, with what it compared and its margin.
+// `kind` is "abs" or "rel" for a check with numbers, or "indicator" for one with none (`@test x == 1`,
+// a non-finite value, a zero tolerance): its got / want / delta / tol are null and it has no margin.
+export const CheckKindZ = z.enum(["abs", "rel", "indicator"]);
+// What `Test` recorded: it passed, it failed, or it threw (an error, always an indicator). `pass` is
+// derived from it (true exactly when the outcome is "pass").
+export const CheckOutcomeZ = z.enum(["pass", "fail", "error"]);
+const CheckFieldsZ = z
   .object({
     id: z.string(),
-    title: z.string(),
+    label: z.string(),
+    got: NumZ.nullable(),
+    want: NumZ.nullable(),
+    delta: NumZ.nullable(),
+    tol: NumZ.nullable(),
+    kind: CheckKindZ,
+    outcome: CheckOutcomeZ.optional(), // absent from an agent.json written before it: read from `pass`
+    pass: z.boolean(),
+    defined_at: z.string().optional(), // where the @test was written, "path:line"
+    code_id: z.string().nullable().optional(), // the code block it was captured from, by id
+  })
+  .passthrough();
+
+// How a check's fields disagree, or null when they agree: `pass` is derived from `outcome`, an
+// indicator has no numbers, and an abs / rel check has all four.
+function checkMismatch(c: z.infer<typeof CheckFieldsZ>): string | null {
+  if (c.outcome !== undefined && c.pass !== (c.outcome === "pass"))
+    return `pass ${c.pass} contradicts outcome "${c.outcome}"`;
+  const numbers = [c.got, c.want, c.delta, c.tol].filter((n) => n !== null).length;
+  if (c.kind === "indicator") return numbers ? "an indicator check has null got, want, delta and tol" : null;
+  return numbers < 4 ? `a "${c.kind}" check needs got, want, delta and tol` : null;
+}
+
+export const CheckZ = CheckFieldsZ.superRefine((c, ctx) => {
+  const mismatch = checkMismatch(c);
+  if (mismatch) ctx.addIssue({ code: "custom", message: mismatch });
+}).transform((c) => ({ ...c, outcome: c.outcome ?? (c.pass ? "pass" : "fail") }));
+
+// A container's verdict over its whole subtree; `null` when the subtree holds no checks.
+export const VerdictZ = z
+  .object({
+    verdict: z.enum(["PASS", "FAIL"]),
+    passed: z.number(),
+    total: z.number(),
+    failed: z.array(z.string()),
+  })
+  .passthrough();
+
+// The keys a page and a section share (Pinax writes one container shape for both).
+const containerShape = {
+  id: z.string(),
+  title: z.string(),
+  depth: z.number().optional(),
+  verdict: VerdictZ.nullable().optional(),
+  texts: z.array(TextZ).optional(),
+  figures: z.array(FigureZ),
+  tables: z.array(TableNodeZ).optional(),
+  codes: z.array(CodeZ).optional(),
+  raws: z.array(RawZ).optional(),
+  checks: z.array(CheckZ).optional(),
+  content: z.array(ContentRefZ).optional(),
+  comments: z.array(CommentZ).optional(), // the container's own thread, as a figure carries one
+};
+
+// Sections nest to any depth: `depth` counts from the part (a page is 1, a top-level section 2).
+// The recursive type is written out only for what `containerShape` cannot say: the nesting.
+type ContainerT = z.infer<z.ZodObject<typeof containerShape>>;
+export interface SectionT extends ContainerT {
+  summary?: string;
+  sections?: SectionT[];
+  [k: string]: unknown;
+}
+export const SectionZ: z.ZodType<SectionT> = z.lazy(() =>
+  z
+    .object({
+      ...containerShape,
+      summary: z.string().optional(),
+      sections: z.array(SectionZ).optional(),
+    })
+    .passthrough(),
+);
+
+// A page's maturity: "draft" (a manuscript) or "final" (the published version). A 0.1 document
+// wrote "trial" for "draft"; it reads as "draft".
+export const StatusZ = z.preprocess((s) => (s === "trial" ? "draft" : s), z.enum(["draft", "final"]));
+
+export const PageZ = z
+  .object({
+    ...containerShape,
     part: z.string().nullable(),
-    status: z.string().optional(), // maturity tag: "final" (shaped/curated) vs "trial" (experiment attempt)
+    status: StatusZ.optional(),
     summary: z.string().nullable().optional(),
-    desc: z.string().nullable(),
-    figures: z.array(FigureZ),
-    tables: z.array(TableNodeZ).optional(),
-    content: z.array(ContentRefZ).optional(),
     sections: z.array(SectionZ),
   })
   .passthrough();
@@ -79,7 +179,13 @@ export const PartZ = z
     id: z.string(),
     title: z.string(),
     desc: z.string().nullable(),
+    status: z.string().nullable().optional(), // the default status of its pages, or null
   })
+  .passthrough();
+
+// What the build and the render recorded: a node a face left out, a figure that failed, …
+export const DiagnosticZ = z
+  .object({ severity: z.enum(["ERROR", "WARNING", "INFO"]), item: z.string(), message: z.string() })
   .passthrough();
 
 export const AgentDocZ = z
@@ -87,13 +193,20 @@ export const AgentDocZ = z
     title: z.string(),
     parts: z.array(PartZ),
     pages: z.array(PageZ),
+    diagnostics: z.array(DiagnosticZ).optional(),
   })
   .passthrough();
 
 export type Figure = z.infer<typeof FigureZ>;
+export type Text = z.infer<typeof TextZ>;
+export type Code = z.infer<typeof CodeZ>;
+export type Check = z.infer<typeof CheckZ>;
+export type Verdict = z.infer<typeof VerdictZ>;
 export type TableNode = z.infer<typeof TableNodeZ>;
+export type ContentKind = z.infer<typeof ContentKindZ>;
 export type ContentRef = z.infer<typeof ContentRefZ>;
-export type Section = z.infer<typeof SectionZ>;
+export type Section = SectionT;
 export type Page = z.infer<typeof PageZ>;
 export type Part = z.infer<typeof PartZ>;
+export type Diagnostic = z.infer<typeof DiagnosticZ>;
 export type AgentDoc = z.infer<typeof AgentDocZ>;

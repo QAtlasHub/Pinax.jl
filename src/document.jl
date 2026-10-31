@@ -19,7 +19,11 @@ end
 "Diagnostic severity (notes 09)."
 @enum Severity ERROR WARNING INFO
 
-"One diagnostic. `item` is the anchor of the related page/section/figure."
+"""
+One diagnostic. `item` says what it is about, as text: a node's id or anchor; a name for a part of
+the render that is no node (`"overview"`, `"sweep"`, `"preamble"`, `"bibliography"`, `"latex"`); or
+a file name (a comment store). It is a label for the reader, not something to look a node up by.
+"""
 struct DiagEntry
     severity::Severity
     item::String
@@ -80,21 +84,54 @@ function DocMeta(;
     assets=:default,
     appearance=:system,
 )
+    # Every choice is checked here, where the value enters, so no path builds a DocMeta that
+    # `@pinaxsetup` would have refused.
     return DocMeta(
         title,
         theme,
         bib_sources,
         debug,
-        index,
-        numbering,
+        _setting(:index, index, (nothing, :toc, :cards, :rich)),
+        _setting(:numbering, numbering, (:global, :page, :part)),
         numberer,
-        collect(Symbol, features),
+        _features(features),
         collect(String, css),
         collect(String, js),
-        katex,
-        assets,
-        appearance,
+        _setting(:katex, katex, (:cdn, :local)),
+        _setting(:assets, assets, (:default, :inline)),
+        # `theme=` is which theme renders the page; `appearance=` is which of that theme's two
+        # palettes a reader sees before choosing. `:system` — the default, and what every page did
+        # before this setting existed — leaves the choice to the reader's operating system.
+        _setting(
+            :appearance,
+            appearance,
+            (:system, :light, :dark),
+            " It is the colour scheme, not the theme — `theme=` selects the theme.",
+        ),
     )
+end
+
+# A setting that takes one of `allowed` (`nothing` in it means "unset" and is not listed).
+function _setting(key::Symbol, value, allowed, note="")
+    any(a -> a === value, allowed) && return value
+    names = [repr(a) for a in allowed if a !== nothing]
+    list = length(names) == 2 ? join(names, " or ") : join(names, ", ", ", or ")
+    return error("Pinax: @pinaxsetup $(key)= must be $(list) (got $(repr(value))).$(note)")
+end
+
+# The gallery's interactive layers. A name outside these would switch nothing on, silently.
+const _FEATURES = (:comments, :bookmarks, :export)
+function _features(features)
+    fs = collect(Symbol, features)
+    unknown = setdiff(fs, _FEATURES)
+    isempty(unknown) || error(
+        "Pinax: @pinaxsetup features= names unknown feature(s) " *
+        join(repr.(unknown), ", ") *
+        " — the features are " *
+        join(repr.(_FEATURES), ", ") *
+        ".",
+    )
+    return fs
 end
 
 "A single figure (placeholder). `gen` is deferred; `code` is the expression source for change detection (notes 10)."
@@ -107,9 +144,14 @@ mutable struct Figure
     code::String          # @figure expression source
     thumbnail::Bool       # thumbnail=true marker
     assets::Vector{String}
-    data::Any             # eager plotted-data (`@figure … data=(; x, y[, series])`) | nothing.
-    # When set, the agent backend emits the figure's data table from THIS — no `gen()`, hence no
-    # plotting backend — so the LLM artifact (agent.json) is producible Plots/Makie-free.
+    data::Any             # eager plotted data, parsed where `@figure … data=` is written: the data
+    # table `(; xlabel, ylabel, series=[(; label, x, y)])` with its points copied, or nothing. When
+    # set, the agent backend writes the figure's data file from THIS — no `gen()`, hence no plotting
+    # backend — so the LLM artifact (agent.json) is producible Plots/Makie-free.
+    defined_at::String    # where the `@figure` was written, `path:line` (see `_defined_at`), or ""
+end
+function Figure(id, anchor, caption, params, gen, code, thumbnail, assets, data)
+    return Figure(id, anchor, caption, params, gen, code, thumbnail, assets, data, "")
 end
 
 """
@@ -124,39 +166,148 @@ mutable struct Table
     rows::Vector{Vector{Any}}
     code::String          # @table data-expression source (provenance)
     params::Any
+    defined_at::String    # where the `@table` was written, `path:line`, or ""
+end
+function Table(id, anchor, caption, header, rows, code, params)
+    return Table(id, anchor, caption, header, rows, code, params, "")
 end
 
 # A table cell as display text (HTML/LaTeX backends; the agent backend keeps native JSON types).
 _cellstr(x) = x === missing ? "" : string(x)
 
 """
-A single PASS/FAIL check (a `@expect`) — one assertion of a computed value against a reference, the
-atom of a `@benchmark` test set. `delta` is the resolved deviation (relative or absolute per `kind`),
-`pass` is `delta <= tol`. Renders to a row of the gallery's fixed test-report, a LaTeX tabular row,
-and a native-typed JSON object in `agent.json` (the machine-readable verdict).
+A single PASS/FAIL check (a `Test` `@test` recorded into a container) — one assertion of a computed
+value against a reference. `kind` says what the numbers are:
+
+- `:abs` — `delta` is `|got - want|`;
+- `:rel` — `delta` is `|got - want| / max(|got|, |want|)`, as `isapprox` defines it;
+- `:indicator` — the assertion has no recoverable numbers (`@test x == 1`, a non-finite value or
+  tolerance, a zero tolerance): `got`, `want`, `delta` and `tol` are `NaN`, it has no margin, and it still counts in
+  every verdict.
+
+`outcome` is what `Test` recorded for the assertion — `:pass`, `:fail`, or `:error` (it threw, so it
+has no numbers and is an indicator) — and is never recomputed from `delta` and `tol` (`isapprox`
+combines `atol` and `rtol` in a way one `kind` cannot reproduce); read it with `Pinax.passed(c)`.
+The constructor refuses any other kind or outcome, an indicator with numbers, an `:abs` / `:rel`
+check without them, and an error with numbers. Renders to a
+row of the container's check table, a LaTeX tabular row, and a native-typed JSON object in
+`agent.json` (the machine-readable verdict).
 """
 mutable struct Check
     id::Symbol
     label::String
-    got::Float64
-    want::Float64
-    delta::Float64     # resolved (rel or abs) deviation
-    tol::Float64
-    kind::Symbol       # :rel or :abs (resolved; never :auto in the struct)
-    pass::Bool
-    source::String     # "file:line" of the assertion (issue #69 I) — carried for a failing @test so the
-    # report says WHERE, not just what; "" when unknown (a passing @test / a manuscript @expect).
-    code_anchor::String   # anchor of the `CodeBlock` holding the code that produced this check — the
-    # code itself is ONE artifact in the document (a `@code` block), and this is the reference to it,
-    # never a second copy of the source; "" when there is none.
+    const got::Float64
+    const want::Float64
+    const delta::Float64     # resolved (rel or abs) deviation
+    const tol::Float64
+    const kind::Symbol       # :abs, :rel or :indicator (never :auto)
+    const outcome::Symbol    # :pass, :fail or :error, as Test recorded it
+    source::String     # "file:line" of the assertion (issue #69 I), for every recorded @test, so the
+    # report says WHERE, not just what; "" when Test gives no location.
+    code_id::Union{Symbol,Nothing}   # id of the `CodeBlock` holding the code that produced this
+    # check — the code itself is ONE artifact in the document (a `@code` block), and this is the
+    # reference to it, never a second copy of the source; nothing when there is none.
+    reported::Bool        # already handed to an enclosing ordinary testset (#173): a failing check is
+    # reported exactly once, by that suite when there is one, else by `render`.
+    # `outcome` may be given as a Bool (true = :pass, false = :fail), the form a test result has
+    function Check(
+        id, label, got, want, delta, tol, kind, outcome, source, code_id, reported
+    )
+        o = _outcome(outcome)
+        _check_kind(kind, o, (got, want, delta, tol))
+        # a margin is finite: an infinite number has none, and would reach agent.json as "Inf"
+        kind === :indicator ||
+            all(isfinite, (got, want, delta, tol)) ||
+            error(
+                "Pinax: a $(repr(kind)) check needs finite got, want, delta and tol; one is infinite",
+            )
+        return new(id, label, got, want, delta, tol, kind, o, source, code_id, reported)
+    end
 end
-# Keep the 8-/9-arg positional forms working (source/code_anchor default to "") — every existing
-# construction is unchanged, and only the `Test` bridge, which has the `LineNumberNode`, fills them in.
-function Check(id, label, got, want, delta, tol, kind, pass)
-    return Check(id, label, got, want, delta, tol, kind, pass, "", "")
+# The shorter positional forms: source defaults to "", code_id to nothing, reported to false.
+function Check(id, label, got, want, delta, tol, kind, outcome, source="", code_id=nothing)
+    return Check(id, label, got, want, delta, tol, kind, outcome, source, code_id, false)
 end
-function Check(id, label, got, want, delta, tol, kind, pass, source)
-    return Check(id, label, got, want, delta, tol, kind, pass, source, "")
+
+"""
+    passed(c::Check) -> Bool
+
+Whether the check passed: its `outcome` is `:pass` (not `:fail`, not `:error`).
+"""
+passed(c::Check) = c.outcome === :pass
+
+const _CHECK_OUTCOMES = (:pass, :fail, :error)
+
+_outcome(pass::Bool) = pass ? :pass : :fail
+function _outcome(o::Symbol)
+    o in _CHECK_OUTCOMES || error(
+        "Pinax: check outcome $(repr(o)) is not one of ",
+        join(repr.(_CHECK_OUTCOMES), ", "),
+    )
+    return o
+end
+
+const _CHECK_KINDS = (:abs, :rel, :indicator)
+
+# A check's kind, and whether its numbers fit it and its outcome: an indicator has none (all NaN), a
+# margin check has all four, and an error — the assertion threw — has none.
+function _check_kind(kind, outcome, nums)
+    outcome === :error &&
+        kind !== :indicator &&
+        error("Pinax: an :error check has no numbers — its kind is :indicator")
+    kind in _CHECK_KINDS || error(
+        "Pinax: check kind $(repr(kind)) is not one of ",
+        join(repr.(_CHECK_KINDS), ", "),
+    )
+    if kind === :indicator
+        all(isnan, nums) || error(
+            "Pinax: an :indicator check has no numbers — got, want, delta and tol are NaN",
+        )
+    elseif any(isnan, nums)
+        error("Pinax: a $(repr(kind)) check needs got, want, delta and tol; one is NaN")
+    end
+    return kind
+end
+
+# A canonical string for a figure's parsed `data=` (`_table_of_data`), hashed into its generated id, so
+# two `data=` figures with the same code are told apart by their data, not their position. Values are
+# printed (shortest round-trip form), never `repr`ed, so the id is the same on every Julia version.
+# Empty without `data=`, so every other figure's id is unchanged.
+_data_key(::Nothing) = ""
+function _data_key(tbl)
+    series = (string(s.label, "=", join(s.x, ","), ";", join(s.y, ",")) for s in tbl.series)
+    return join(("|data", tbl.xlabel, tbl.ylabel, series...), "|")
+end
+
+# How much of its tolerance a check spent (`delta / tol`), or nothing for an indicator, which has no
+# numbers. Every margin view — the page's margin figure, a sweep's figures, the per-file worst
+# margin — reads it through here, so none of them draws an indicator.
+_margin(c::Check) = c.kind === :indicator ? nothing : (c.tol > 0 ? c.delta / c.tol : 0.0)
+
+# FNV-1a (32-bit) in base 36: the same on every machine and Julia version (unlike `Base.hash`), so the
+# ids built from it are stable across runs (#123).
+function _stable_hash(s::AbstractString)
+    h = 0x811c9dc5
+    for b in codeunits(s)
+        h = (h ⊻ b) * 0x01000193
+    end
+    return string(h; base=36, pad=7)
+end
+
+# A check's id: its container's anchor plus the stable hash of its source text, so adding or
+# reordering other checks never renumbers it (#123). An id another node holds is stepped past in
+# order: `…-2`, `…-3`. In a page or section that is any id in the document (the caller claims the
+# result); in a test node, which the fold places later, only its own checks.
+function _check_id(c, key::AbstractString)
+    base = Symbol(_anchor(Symbol(c.anchor)), "_t", _stable_hash(key))
+    c isa Union{Page,Section} && return _free_id(base)
+    return _free_id(base, id -> any(ch -> ch.id === id, c.checks))
+end
+
+# A copy of `c` with some fields replaced — so a fold can renumber or tag a check it does not own
+# without mutating the caller's object (#130).
+function _copy_check(c::Check; kw...)
+    return Check((get(kw, f, getfield(c, f)) for f in fieldnames(Check))...)
 end
 
 """
@@ -173,24 +324,85 @@ mutable struct CodeBlock
     output::String        # captured value / printed output, or "" (show-only, or no result)
     caption::String
     lang::String          # syntax hint for the highlighter, e.g. "julia"
+    defined_at::String    # where the block was written, `path:line`, or ""
+end
+function CodeBlock(id, anchor, source, output, caption, lang)
+    return CodeBlock(id, anchor, source, output, caption, lang, "")
 end
 
-"A section (a group of figures + a description)."
+# Where a node was written, as `path:line` — the pointer an agent follows to revise it. The path is
+# relative to the project that holds the file (the nearest enclosing directory with a Project.toml),
+# so it names the same file wherever Julia was started; outside any project it is relative to the
+# working directory, or absolute. "" where there is no file to point at (a REPL).
+function _defined_at(at)
+    at === nothing && return ""
+    file, line = at
+    (isempty(file) || file == "none" || startswith(file, "REPL")) && return ""
+    p = abspath(file)
+    root = _project_root(dirname(p))
+    rel = relpath(p, something(root, pwd()))
+    path = root === nothing && startswith(rel, "..") ? p : rel
+    return string(replace(path, '\\' => '/'), ":", line)
+end
+
+# The nearest directory at or above `dir` that holds a Project.toml (or JuliaProject.toml), or nothing.
+function _project_root(dir)
+    while true
+        any(f -> isfile(joinpath(dir, f)), ("Project.toml", "JuliaProject.toml")) &&
+            return dir
+        up = dirname(dir)
+        up == dir && return nothing
+        dir = up
+    end
+end
+
+"""
+A prose block — markdown and math written with `@desc`, placed in content order like any other node
+(Conventions › Content). A container holds any number of them.
+"""
+mutable struct Prose
+    id::Symbol
+    anchor::String
+    source::String
+    defined_at::String    # where the `@desc` was written, `path:line`, or ""
+end
+Prose(id, anchor, source) = Prose(id, anchor, source, "")
+
+"""
+A `@raw` block: author-written HTML, kept verbatim. Like every node it has an id (written with `id=`,
+or generated from its HTML), which is its gallery anchor and its `agent.json` address; `agent.json`
+carries the HTML itself (Conventions › Faces).
+"""
+struct RawBlock
+    id::Symbol
+    anchor::String
+    html::String
+    defined_at::String    # where the `@raw` was written, `path:line`, or ""
+end
+RawBlock(id, anchor, html) = RawBlock(id, anchor, html, "")
+
+"A section: a container of prose, figures, tables, code, checks and child sections, in order."
 mutable struct Section
     id::Symbol
     title::String
     anchor::String
-    facet::Any                       # by= param axis (String|Tuple|Nothing)
-    desc::Union{Desc,Nothing}
+    facet::Union{String,Nothing}     # by= param axis the gallery facets figures on, or nothing
+    texts::Vector{Prose}             # @desc prose blocks, in the order written
     summary::Union{String,Nothing}   # for index :rich
     thumbnail::Union{FigRef,Nothing} # section-level main figure
     layout::Union{Symbol,Nothing}    # :wide|:grid|:single (theme hint)
     figures::Vector{Figure}
-    panels::Vector{String}           # @raw HTML blocks (project-specific UI escape hatch, notes 06 §6)
+    raws::Vector{RawBlock}           # @raw HTML blocks (project-specific UI escape hatch, notes 06 §6)
     tables::Vector{Table}            # @table artifacts
-    checks::Vector{Check}            # @expect PASS/FAIL checks (a @benchmark test set)
+    checks::Vector{Check}            # PASS/FAIL checks (Test's @test written in the section body)
     codes::Vector{CodeBlock}         # @code snippet+output blocks
-    content::Vector{Pair{Symbol,Int}}  # declaration order: (:figure|:table|:panel|:check|:code) => index into the list above
+    content::Vector{Pair{Symbol,Int}}  # declaration order: (:text|:figure|:table|:raw|:check|:code|:section) => index into the list above
+    # The section tree (#170): a `@section` nests to any depth. `depth` counts from the part (a page is
+    # 1, a top-level section 2), `parent` is the enclosing section (`nothing` at the top level), and
+    # `sections` holds the children, which also appear in `content` as `:section => index`.
+    depth::Int
+    parent::Union{Section,Nothing}
+    sections::Vector{Section}
 end
 
 """
@@ -207,31 +419,66 @@ mutable struct Page
     no_thumbnail::Bool
     sections::Vector{Section}
     part::Union{Symbol,Nothing}      # the @part this page belongs to (navigation grouping), or nothing
-    desc::Union{Desc,Nothing}        # page-level description (page-as-leaf: @desc directly under @page)
+    texts::Vector{Prose}             # @desc prose blocks written directly in the page, in order
     figures::Vector{Figure}          # page-level figures (page-as-leaf: @figure with no enclosing @section)
-    panels::Vector{String}           # page-level @raw blocks
+    raws::Vector{RawBlock}           # page-level @raw blocks
     layout::Union{Symbol,Nothing}    # :grid|:single|:wide hint for the page-level figure grid
     tables::Vector{Table}            # page-level @table artifacts (page-as-leaf)
-    checks::Vector{Check}            # page-level @expect checks (a @benchmark test set)
+    checks::Vector{Check}            # page-level checks (Test's @test written in the page body)
     codes::Vector{CodeBlock}         # page-level @code snippet+output blocks
-    content::Vector{Pair{Symbol,Int}}  # declaration order of figures/tables/panels/checks/codes
-    status::Symbol                   # maturity tag a backend/registry interprets: :final (default, the
-    # shaped/curated page) vs :trial (a raw experiment attempt) vs :benchmark (a `@benchmark` test set,
-    # which each backend dispatches on to render a verdict / fixed test-report). Pinax only carries it.
+    content::Vector{Pair{Symbol,Int}}  # declaration order of texts/figures/tables/raws/checks/codes/sections
+    status::Symbol                   # maturity: :draft (a manuscript) or :final (default, the published
+    # version). Validated by `_status`; what kind of page it is never lives here.
 end
 
-# All checks on a benchmark page in declaration order: page-level @expect PLUS any inside a @section.
-_benchmark_checks(pg::Page) = vcat(pg.checks, (s.checks for s in pg.sections)...)
+# Every check in a container's subtree: its own, then each nested section's, depth first in
+# declaration order.
+function _subtree_checks(c::Union{Page,Section})
+    return vcat(c.checks, (s.checks for s in _all_sections(c))...)
+end
+
+"""
+    verdict(container) -> (; passed, total, verdict, failed) | nothing
+
+The verdict of a `@page` or `@section` over every check in its subtree, derived on demand and never
+stored. `nothing` when the subtree holds no checks, so an empty container cannot read as PASS.
+"""
+function verdict(c::Union{Page,Section})
+    checks = _subtree_checks(c)
+    return isempty(checks) ? nothing : _verdict_of(checks)
+end
+
+"""
+    ChecksFailed(failed)
+
+Thrown by `render` after it has written every output, when the document holds failing checks that
+no enclosing testset was told about. `failed` lists their ids; `path` is the entry file written.
+"""
+struct ChecksFailed <: Exception
+    failed::Vector{String}
+    path::String   # the entry file render wrote, where the failures are shown
+end
+function Base.showerror(io::IO, e::ChecksFailed)
+    return print(
+        io,
+        "ChecksFailed: ",
+        length(e.failed),
+        " failing check(s), rendered and shown as FAIL in ",
+        e.path,
+        ": ",
+        join(e.failed, ", "),
+    )
+end
 
 # Single source of the verdict invariant — used by every backend so PASS/FAIL can never diverge.
-function _benchmark_verdict(checks)
-    passed = count(c -> c.pass, checks)
+function _verdict_of(checks)
+    npass = count(passed, checks)
     total = length(checks)
     return (
-        passed=passed,
+        passed=npass,
         total=total,
-        verdict=(passed == total ? "PASS" : "FAIL"),
-        failed=[string(c.id) for c in checks if !c.pass],
+        verdict=(npass == total ? "PASS" : "FAIL"),
+        failed=[string(c.id) for c in checks if !passed(c)],
     )
 end
 
@@ -241,11 +488,15 @@ mutable struct Document
     pages::Vector{Page}
     parts::Vector{Pair{Symbol,String}}   # ordered @part registry: id => title (navigation groups)
     part_descs::Dict{Symbol,Desc}        # @part id => overview description (markdown), shown on the index
-    part_status::Dict{Symbol,Symbol}     # @part id => default status its pages inherit (e.g. :trial)
+    part_status::Dict{Symbol,Symbol}     # @part id => default status its pages inherit (:draft/:final)
     refs::Dict{Symbol,Any}        # label -> node (filled in by resolve)
     bib::Dict{Symbol,Any}         # @cite resolution table (later)
     diag::Diagnostics
     newcommands::Dict{String,String}
+    ids::Dict{Symbol,String}      # every id written so far => what holds it (Conventions › Identity)
+    written::Set{Symbol}          # the ids the author wrote; every other id was generated by Pinax
+    # the test-report fold: (container id, a captured code block's id) => its id in the document
+    fold_codes::Dict{Tuple{Symbol,Symbol},Symbol}
 end
 function Document(meta::DocMeta=DocMeta())
     return Document(
@@ -258,6 +509,9 @@ function Document(meta::DocMeta=DocMeta())
         Dict{Symbol,Any}(),
         Diagnostics(),
         Dict{String,String}(),
+        Dict{Symbol,String}(),
+        Set{Symbol}(),
+        Dict{Tuple{Symbol,Symbol},Symbol}(),
     )
 end
 
@@ -269,8 +523,11 @@ mutable struct BuildContext
     part::Union{Symbol,Nothing}      # the @part currently open (pages inherit it), or nothing
     page::Union{Page,Nothing}
     section::Union{Section,Nothing}
+    captioned::Any                   # the node the latest `@caption` named (a node takes one caption)
+    nonode::Any                      # (container, content length) where a result that records no
+    # check (`@test_broken`, `@test_skip`) was written: a `@caption` right after it names nothing
 end
-const CTX = BuildContext(nothing, nothing, nothing, nothing)
+const CTX = BuildContext(nothing, nothing, nothing, nothing, nothing, nothing)
 
 current_document() = CTX.document
 current_page() = CTX.page
@@ -284,7 +541,39 @@ current_section() = CTX.section
 const _TEST_CONTAINER_PROBE = Base.RefValue{Any}(nothing)
 _probe_test_container() = (p=_TEST_CONTAINER_PROBE[]; p === nothing ? :none : p())
 
-"Reset the implicit document (fresh, empty). The preamble `@pinaxsetup` calls this."
+# The container scope (#173). With `Test` loaded, an open `@page` / `@section` is the current testset
+# for its body, so `Test`'s own `@test` is a check of that container and a nested `@testset` is a child
+# section. Core stays `Test`-free: `PinaxTestExt` registers the hook at load, and without it the
+# expansion below enters a scope that changes nothing. `@with` adds no closure, so the body's scoping
+# is exactly what it was.
+struct _ScopeHook
+    open::Function    # container -> testset handle (or nothing)
+    pairs::Function   # handle -> the two ScopedValue pairs that make it current
+    close::Function   # handle -> nothing
+end
+const _SCOPE_HOOK = Base.RefValue{Union{_ScopeHook,Nothing}}(nothing)
+const _NO_SCOPE = Base.ScopedValues.ScopedValue{Any}(nothing)
+_open_scope(c) = (h=_SCOPE_HOOK[]; h === nothing ? nothing : h.open(c))
+function _scope_pair(ts, i)
+    h = _SCOPE_HOOK[]
+    return (h === nothing || ts === nothing) ? (_NO_SCOPE => nothing) : h.pairs(ts)[i]
+end
+function _close_scope(ts)
+    return (h=_SCOPE_HOOK[]; (h === nothing || ts === nothing) ? nothing : h.close(ts))
+end
+
+# `body` run with container `c` as the current testset (see above), for the @page / @section macros.
+function _scoped_body(c, body)
+    return quote
+        local ts = Pinax._open_scope($c)
+        try
+            Base.ScopedValues.@with Pinax._scope_pair(ts, 1) Pinax._scope_pair(ts, 2) $body
+        finally
+            Pinax._close_scope(ts)
+        end
+    end
+end
+
 # Every setting `reset!` reads. A keyword outside this set is refused rather than dropped: the
 # alternative is that `@pinaxsetup katx=:local` configures nothing and says nothing.
 const _SETUP_KEYS = (
@@ -302,63 +591,27 @@ const _SETUP_KEYS = (
     :appearance,
 )
 
+"Reset the implicit document (fresh, empty). The preamble `@pinaxsetup` calls this."
 function reset!(; kwargs...)
-    kw = Dict{Symbol,Any}(kwargs)
-    for k in sort!(collect(keys(kw)))
-        k in _SETUP_KEYS && continue
-        k === :format && error(
-            "Pinax: @pinaxsetup format= is not a setting — a theme decides which figure formats " *
-            "it requests, through `figure_formats(::Theme)`. Select a theme with `theme=`.",
-        )
-        error(
-            "Pinax: @pinaxsetup has no $(k)= setting. Known: " *
-            join(_SETUP_KEYS, ", ") *
-            ". Bibliography files are declared with `@bibliography`.",
-        )
-    end
-    idx = get(kw, :index, nothing)
-    idx === nothing ||
-        idx in (:toc, :cards, :rich) ||
-        error(
-            "Pinax: @pinaxsetup index= must be :toc, :cards, or :rich (got $(repr(idx)))."
-        )
-    num = get(kw, :numbering, :global)
-    num in (:global, :page, :part) || error(
-        "Pinax: @pinaxsetup numbering= must be :global, :page, or :part (got $(repr(num))).",
-    )
-    ktx = get(kw, :katex, :cdn)
-    ktx in (:cdn, :local) ||
-        error("Pinax: @pinaxsetup katex= must be :cdn or :local (got $(repr(ktx))).")
-    ast = get(kw, :assets, :default)
-    ast in (:default, :inline) ||
-        error("Pinax: @pinaxsetup assets= must be :default or :inline (got $(repr(ast))).")
-    # `theme=` is which theme renders the page; `appearance=` is which of that theme's two palettes
-    # a reader sees before choosing. `:system` — the default, and what every page did before this
-    # setting existed — leaves the choice to the reader's operating system.
-    app = get(kw, :appearance, :system)
-    app in (:system, :light, :dark) || error(
-        "Pinax: @pinaxsetup appearance= must be :system, :light, or :dark (got $(repr(app))). " *
-        "It is the colour scheme, not the theme — `theme=` selects the theme.",
-    )
-    meta = DocMeta(;
-        title=get(kw, :title, ""),
-        theme=get(kw, :theme, :gallery),
-        debug=get(kw, :debug, false),
-        index=idx,
-        numbering=num,
-        numberer=get(kw, :numberer, _default_numberer),
-        features=get(kw, :features, Symbol[:comments, :bookmarks, :export]),
-        css=get(kw, :css, String[]),
-        js=get(kw, :js, String[]),
-        katex=ktx,
-        assets=ast,
-        appearance=app,
-    )
-    CTX.document = Document(meta)
+    foreach(_setup_key, sort!(collect(keys(kwargs))))
+    CTX.document = Document(DocMeta(; kwargs...))   # DocMeta checks each value
     CTX.part = nothing
     CTX.page = nothing
     CTX.section = nothing
     return CTX.document
+end
+
+function _setup_key(k::Symbol)
+    k in _SETUP_KEYS && return k
+    k === :format && error(
+        "Pinax: @pinaxsetup format= is not a setting — a theme decides which figure formats " *
+        "it requests, through `figure_formats(::Theme)`. Select a theme with `theme=`.",
+    )
+    return error(
+        "Pinax: @pinaxsetup has no $(k)= setting. Known: " *
+        join(_SETUP_KEYS, ", ") *
+        ". Bibliography files are declared with `@bibliography`.",
+    )
 end
 
 _ensure_document!() = (CTX.document === nothing && reset!(); CTX.document)
@@ -382,21 +635,119 @@ end
 
 # ============================================================ helpers
 
-# Anchor used both in HTML attributes and as a filesystem path component, so restrict it to a safe charset.
-_anchor(id::Symbol) = replace(string(id), r"[^A-Za-z0-9_-]" => "_")
-# Container = a Section or a page-as-leaf Page; both have `.id` and `.figures`.
-_auto_fig_id(c) = Symbol(string(c.id), "_fig", length(c.figures) + 1)
-_auto_table_id(c) = Symbol(string(c.id), "_tbl", length(c.tables) + 1)
-_auto_code_id(c) = Symbol(string(c.id), "_code", length(c.codes) + 1)
+# A node's anchor — its HTML id, the name of its files, its cache entry — so no two ids share one. An
+# id of safe characters (`[A-Za-z0-9_-]`, the common case) is its own anchor; any other id keeps a
+# readable form (unsafe characters as `_`) followed by a short hash of the whole id.
+function _anchor(id::Symbol)
+    s = string(id)
+    occursin(r"^[A-Za-z0-9_-]+$", s) && return s
+    return string(replace(s, r"[^A-Za-z0-9_-]" => "_"), "-", _stable_hash(s))
+end
+# ── identity (Conventions › Identity) ───────────────────────────────
+#
+# Every id is unique in the whole document and is the node's only name: its anchor, comment key and
+# agent.json address. An id the AUTHOR writes is claimed as written and a collision is an error where
+# the second node is written. An id Pinax GENERATES is the container's id plus a short stable hash of
+# the node's own content, so inserting a node renames nothing; a repeat of the same content gets
+# `-2`, `-3`, and never errors.
 
-# Stringify the @figure expression for change detection, stripping source line numbers so that
-# moving a figure to a different line does not spuriously invalidate its cache entry (notes 10).
-_code_str(expr) = string(expr isa Expr ? Base.remove_linenums!(deepcopy(expr)) : expr)
+function _symbol_id(id, what)
+    id isa Symbol && return id
+    return error("Pinax: the id of a $(what) is a Symbol — write `:$(id)`, not $(repr(id))")
+end
 
-# A filesystem-safe, param-derived tag for a figure id, or `nothing`. The PinaxParamIOExt extension
-# specializes this on a ParamIO.DataKey (so a sweep keeps each figure's id across reordering); the
-# core has no param scheme and returns `nothing`.
+# Claim an id the author wrote, in the document-wide registry.
+function _claim!(id::Symbol, what::AbstractString)
+    doc = _ensure_document!()
+    prev = get(doc.ids, id, nothing)
+    prev === nothing || error(
+        "Pinax: duplicate id :$(id) — this $(what) reuses the id of the $(prev) written earlier. Ids " *
+        "are unique in the whole document and never renamed: give one of them another id.",
+    )
+    doc.ids[id] = what
+    return id
+end
+
+# The first of `base`, `base-2`, `base-3`, … that `taken` does not hold.
+function _free_id(base::Symbol, taken)
+    taken(base) || return base
+    k = 2
+    while taken(Symbol(base, "-", k))
+        k += 1
+    end
+    return Symbol(base, "-", k)
+end
+_free_id(base::Symbol) = _free_id(base, id -> haskey(_ensure_document!().ids, id))
+
+# The id of a content node in container `c`: the author's, claimed, or one generated from `base`. A
+# test node is folded into a document only after the run, so inside one the ids are kept unique
+# among its own nodes; the fold places them.
+function _node_id!(c, id, base::Symbol, what::AbstractString)
+    where = string(what, " in \"", c.anchor, "\"")
+    if c isa Union{Page,Section}
+        id === nothing && return _claim!(_free_id(base), where)
+        sid = _claim!(_symbol_id(id, what), where)
+        push!(_ensure_document!().written, sid)
+        return sid
+    end
+    taken(x) = any(
+        n -> n.id === x,
+        Iterators.flatten((c.texts, c.figures, c.tables, c.codes, c.raws)),
+    )
+    id === nothing && return _free_id(base, taken)
+    sid = _symbol_id(id, what)
+    taken(sid) && error(
+        "Pinax: duplicate id :$(sid) — this $(where) reuses an id already written there. Ids are " *
+        "never renamed: give one of them another id.",
+    )
+    push!(c.written, sid)   # a test node: the fold carries it into the document
+    return sid
+end
+
+"""
+    node_ids(doc) -> Vector{@NamedTuple{id::Symbol, kind::Symbol, generated::Bool}}
+
+Every node of `doc` in reading order — parts, then each page and its content, sections at any depth
+included — with its kind (`:part`, `:page`, `:section`, `:text`, `:figure`, `:table`, `:code`, `:raw`,
+`:check`) and whether Pinax generated its id rather than the author writing it. A generated id
+follows its node's content (Conventions › Identity), so a tool that keeps a reference across
+revisions — a comment's anchor, say — can tell the ids it may rely on.
+"""
+function node_ids(doc::Document)
+    out = @NamedTuple{id::Symbol, kind::Symbol, generated::Bool}[]
+    add(id, kind) = push!(out, (; id, kind, generated=(!(id in doc.written))))
+    foreach(((pid, _),) -> add(pid, :part), doc.parts)
+    function visit(c, kind)
+        add(c.id, kind)
+        for (k, node) in _content_items(c)
+            node isa Section ? visit(node, :section) : add(node.id, k)
+        end
+    end
+    foreach(pg -> visit(pg, :page), doc.pages)
+    return out
+end
+
+# An expression as source text. Julia 1.13 prints the symbols `end` / `begin` (in an index) as
+# `var"end"` / `var"begin"`; here they read as written, so a label, a code string and every id hashed
+# from them are the same on every Julia version.
+_expr_str(ex) = replace(string(ex), "var\"end\"" => "end", "var\"begin\"" => "begin")
+# A node's code as text, without line numbers, so moving a figure, table or code block to another
+# line changes neither its cache entry nor its generated id (notes 10).
+_code_str(expr) = _expr_str(expr isa Expr ? Base.remove_linenums!(deepcopy(expr)) : expr)
+
+# A canonical string for a figure's `params`, hashed into its generated id. The PinaxParamIOExt
+# extension specializes this on a ParamIO.DataKey (its canonical key); anything else uses its repr.
 _param_tag(params) = nothing
+_params_key(params) = (
+    t=_param_tag(params);
+    if t !== nothing
+        t
+    elseif params === nothing
+        ""
+    else
+        repr(params)
+    end
+)
 
 # Structured description of a figure's `params` binding — an ordered `Vector{Pair{String,Any}}` of
 # axis => value — for the agent backend's data-reconciliation view (an LLM sees the bound axes, not a
@@ -407,15 +758,6 @@ _params_describe(params) = nothing
 _params_describe(nt::NamedTuple) = Pair{String,Any}[string(k) => v for (k, v) in pairs(nt)]
 function _params_describe(d::AbstractDict)
     return Pair{String,Any}[string(k) => d[k] for k in sort!(collect(keys(d)); by=string)]
-end
-
-# Figure id: an explicit `id` wins; else a param-derived tag (via the extension); else positional.
-# `c` is the enclosing container (a Section, or a page-as-leaf Page).
-function _fig_id(c, id, params)
-    id === nothing || return id
-    tag = _param_tag(params)
-    tag === nothing && return _auto_fig_id(c)
-    return Symbol(string(c.id), "_", tag)
 end
 
 function _diag!(sev::Severity, item, msg)
@@ -450,19 +792,44 @@ function _call(f, posargs, kwspecs)
     end
 end
 
+# A structure macro's `args` (`:id "title" [key = value …] body`) as the call that opens the block and
+# the escaped body. The id and title are escaped and `written = true`: an id written in the macro is
+# the author's.
+function _enter_call(enter!, what, args)
+    length(args) >= 3 || error("$(what) needs :id, \"title\", and a begin…end body")
+    kws = vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :written, true))
+    return _call(enter!, (esc(args[1]), esc(args[2])), kws), esc(args[end])
+end
+
 # ============================================================ preamble macros
 
 "Document settings + reset of the implicit document. `@pinaxsetup theme=… index=… numbering=… debug=…`"
 macro pinaxsetup(args...)
-    return _call(:reset!, (), _kwspecs(args))
+    return _call(:_pinaxsetup!, (), _kwspecs(args))
+end
+# `@pinaxsetup` starts a new document, so it cannot be written inside an open part, page or section.
+function _pinaxsetup!(; kwargs...)
+    (CTX.part === nothing && CTX.page === nothing && CTX.section === nothing) || error(
+        "@pinaxsetup inside an open @part/@page/@section — it starts a new document, so it is " *
+        "written before any of them",
+    )
+    return reset!(; kwargs...)
 end
 
-"Diagnostics mode. `@debug_mode true`"
+"""
+`@debug_mode true` is deprecated during 0.2 and is removed afterwards: a setting is written in the
+`@pinaxsetup` that starts the document (`@pinaxsetup debug = true`). Until then it still switches
+debug on the open document without starting a new one, and warns once.
+"""
 macro debug_mode(x)
-    return quote
-        _ensure_document!().meta.debug = $(esc(x))
-        nothing
-    end
+    return :(_debug_mode!($(esc(x))))
+end
+function _debug_mode!(on)
+    @warn "Pinax: `@debug_mode` is deprecated — add `debug = true` to the `@pinaxsetup` that " *
+        "starts the document. `@pinaxsetup` starts a new document, so writing it in place of " *
+        "`@debug_mode` would discard everything written above it." maxlog = 1
+    _ensure_document!().meta.debug = on
+    return nothing
 end
 
 "Declare the .bib source(s) used to resolve `@cite`. `@bibliography \"refs/a.bib\" …`"
@@ -487,20 +854,17 @@ end
 """
 A page. `@page :id "Title" [summary=…] [layout=…] [status=…] begin … end`
 
-`status` tags the page's maturity so a backend or registry can treat trial and result differently:
-`:final` (default — the shaped/curated page) vs `:trial` (a raw experiment attempt). Pinax only carries
-the tag (any `Symbol` is accepted, e.g. `:experimental`/`:draft`); the agent backend exposes it as
-`"status"` for RAG/Archeion filtering and the gallery badges non-`:final` pages. A page inherits its
-enclosing `@part`'s status default unless it sets its own.
+`status` is the page's maturity: `:draft` (a manuscript, work in progress) or `:final` (the default,
+the published version); anything else is an error. Pinax only carries it: the agent backend exposes
+it as `"status"` and the gallery badges a `:draft` page. A page inherits its enclosing `@part`'s
+status default unless it sets its own. A page is written at the top level or directly in a `@part`.
 """
 macro page(args...)
-    length(args) >= 3 || error("@page needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    enter = _call(:_enter_page!, (esc(id), esc(title)), _kwspecs(args[3:(end - 1)]))
+    enter, body = _enter_call(:_enter_page!, "@page", args)
     return quote
-        $enter
+        local pg = $enter
         try
-            $(esc(body))
+            $(_scoped_body(:pg, body))
         finally
             _exit_page!()
         end
@@ -508,28 +872,52 @@ macro page(args...)
     end
 end
 
-function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing, status=nothing)
-    layout === nothing ||
-        layout in (:grid, :single, :wide) ||
-        error(
-            "Pinax: @page layout= must be :grid, :single, or :wide (got $(repr(layout)))."
-        )
+# A page's maturity: `:draft` (a manuscript) or `:final` (the published version), nothing else.
+# `:trial` is the 0.1 spelling of `:draft`, accepted with a warning during 0.2.
+function _status(s)
+    st = Symbol(s)
+    st in (:draft, :final) && return st
+    if st === :trial
+        @warn "Pinax: status=:trial is deprecated; use status=:draft (the same meaning)." maxlog =
+            1
+        return :draft
+    end
+    return error("Pinax: status must be :draft or :final (got $(repr(st))).")
+end
+
+# `written` is set by the `@page` / `@part` / `@section` macros: an id the author wrote. A container
+# the test-report fold or a `@testset` opens has a generated id.
+function _enter_page!(
+    id, title; summary=nothing, layout=nothing, status=nothing, written=false
+)
+    id = _symbol_id(id, "page")
+    CTX.section === nothing || error(
+        "@page :$(id) inside @section :$(CTX.section.id) — a page is written at the top level " *
+        "or directly inside a @part",
+    )
+    CTX.page === nothing || error(
+        "@page :$(id) inside @page :$(CTX.page.id) — a page is written at the top level or " *
+        "directly inside a @part",
+    )
+    _layout(layout, "@page")
     doc = _ensure_document!()
     # status resolution: explicit @page status= wins; else inherit the open @part's
     # default status; else :final (the ordinary shaped/curated page).
-    st = status === nothing ? get(doc.part_status, CTX.part, :final) : Symbol(status)
+    st = status === nothing ? get(doc.part_status, CTX.part, :final) : _status(status)
+    _claim!(id, "page")   # every argument is valid: only now is the id taken
+    written && push!(doc.written, id)
     pg = Page(
         id,
         string(title),
-        summary === nothing ? nothing : string(summary),
+        _optstring(summary),
         _anchor(id),
         nothing,
         false,
         Section[],
         CTX.part,          # inherit the open @part, if any
-        nothing,
+        Prose[],
         Figure[],
-        String[],
+        RawBlock[],
         layout,
         Table[],
         Check[],
@@ -544,50 +932,44 @@ function _enter_page!(id::Symbol, title; summary=nothing, layout=nothing, status
 end
 _exit_page!() = (CTX.page=nothing; CTX.section=nothing)
 
+# A page's or section's `layout=` hint: `nothing` or one of the three the themes know.
+function _layout(layout, what)
+    layout === nothing ||
+        layout in (:grid, :single, :wide) ||
+        error(
+            "Pinax: $(what) layout= must be :grid, :single, or :wide (got $(repr(layout)))."
+        )
+    return layout
+end
+_optstring(x) = x === nothing ? nothing : string(x)
+
 """
-A benchmark / test-set page. `@benchmark :id "Title" [summary=…] [layout=…] begin … end` — a `@page`
-whose `status` is fixed to `:benchmark`, holding `@expect` checks (plus any `@page` content:
-`@desc`/`@figure`/`@table`/`@section` — a `@section`'s `@expect`s count toward the verdict too).
-Each backend dispatches on the `:benchmark` status to render a verdict: a machine-readable `benchmark`
-block in `agent.json`, a fixed-layout test-report in the gallery, and a tabular + verdict line in
-LaTeX. Mirrors `@page` (it IS a page); `@expect` populates the page's `checks`.
+`@benchmark` was removed in 0.2 (#173). Checks go in any `@section` (or a `@testset` inside one), and
+every container whose subtree holds checks shows its verdict and its check table in every face.
+Using `@benchmark` raises an error that says so.
 """
 macro benchmark(args...)
-    length(args) >= 3 || error("@benchmark needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    # a @benchmark is a @page pinned to status=:benchmark — append it to whatever kwargs were given
-    enter = _call(
-        :_enter_page!,
-        (esc(id), esc(title)),
-        vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :status, QuoteNode(:benchmark))),
-    )
-    return quote
-        $enter
-        try
-            $(esc(body))
-        finally
-            _exit_page!()
-        end
-        nothing
-    end
+    return :(error(
+        "Pinax: `@benchmark` was removed in 0.2 — put the `@test` checks in a @section (or a " *
+        "@testset inside one); every container with checks shows its verdict (#173).",
+    ))
 end
 
 """
 A navigation group of pages (LaTeX `\\part`). `@part :id \"Title\" [desc=md\"…\"] begin … end` — the
 pages declared inside belong to this part and are grouped (collapsibly) under it in the index and nav.
 `desc=` is an overview shown beneath the part heading on the index (what this whole group covers).
-A part is NOT a file; each `@page` (or top-level `@section`) inside it is still its own HTML page.
-`status=` sets a default maturity (e.g. `:trial`) that the part's pages inherit — so a whole
-"Trials / experiment log" group is declared once, the shaped result living in a separate part.
+A part is NOT a file; each `@page` inside it is still its own HTML page.
+`status=` sets a default maturity (`:draft` or `:final`) that the part's pages inherit — so a whole
+group of drafts is declared once, the published result living in a separate part. A part is written
+at the top level.
 """
 macro part(args...)
-    length(args) >= 3 || error("@part needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    enter = _call(:_enter_part!, (esc(id), esc(title)), _kwspecs(args[3:(end - 1)]))
+    enter, body = _enter_call(:_enter_part!, "@part", args)
     return quote
         $enter
         try
-            $(esc(body))
+            $body
         finally
             _exit_part!()
         end
@@ -595,12 +977,26 @@ macro part(args...)
     end
 end
 
-function _enter_part!(id::Symbol, title; desc=nothing, status=nothing)
+function _enter_part!(id, title; desc=nothing, status=nothing, written=false)
+    id = _symbol_id(id, "part")
+    open = if CTX.section !== nothing
+        "@section :$(CTX.section.id)"
+    elseif CTX.page !== nothing
+        "@page :$(CTX.page.id)"
+    elseif CTX.part !== nothing
+        "@part :$(CTX.part)"
+    else
+        nothing
+    end
+    open === nothing ||
+        error("@part :$(id) inside $(open) — a part is written at the top level")
+    st = status === nothing ? nothing : _status(status)   # the default status its pages inherit
     doc = _ensure_document!()
-    # register (id => title) once, in declaration order, for the grouped navigation
-    any(p -> first(p) === id, doc.parts) || push!(doc.parts, id => string(title))
+    _claim!(id, "part")   # every argument is valid: only now is the id taken
+    written && push!(doc.written, id)
+    push!(doc.parts, id => string(title))   # declaration order, for the grouped navigation
     desc === nothing || (doc.part_descs[id] = Desc(string(desc)))
-    status === nothing || (doc.part_status[id] = Symbol(status))   # default status its pages inherit
+    st === nothing || (doc.part_status[id] = st)
     CTX.part = id
     CTX.page = nothing
     CTX.section = nothing
@@ -610,13 +1006,11 @@ _exit_part!() = (CTX.part=nothing; CTX.page=nothing; CTX.section=nothing)
 
 "A section. `@section :id \"Title\" [by=…] [summary=…] [layout=…] begin … end`"
 macro section(args...)
-    length(args) >= 3 || error("@section needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    enter = _call(:_enter_section!, (esc(id), esc(title)), _kwspecs(args[3:(end - 1)]))
+    enter, body = _enter_call(:_enter_section!, "@section", args)
     return quote
-        $enter
+        local sec = $enter
         try
-            $(esc(body))
+            $(_scoped_body(:sec, body))
         finally
             _exit_section!()
         end
@@ -624,57 +1018,91 @@ macro section(args...)
     end
 end
 
-function _enter_section!(id::Symbol, title; by=nothing, summary=nothing, layout=nothing)
-    pg = CTX.page
-    pg === nothing && error("@section outside of a @page")
-    layout === nothing ||
-        layout in (:grid, :single, :wide) ||
-        error(
-            "Pinax: @section layout= must be :grid, :single, or :wide (got $(repr(layout))).",
-        )
+function _enter_section!(
+    id, title; by=nothing, summary=nothing, layout=nothing, written=false
+)
+    id = _symbol_id(id, "section")
+    (by === nothing || by isa AbstractString) ||
+        error("Pinax: @section by= names one param axis, a String (got $(repr(by)))")
+    _layout(layout, "@section")
+    CTX.page === nothing && error("@section outside of a @page")
+    parent = CTX.section
+    # a page and a section are the same kind of container: a child sits in its content order
+    owner = something(parent, CTX.page)
+    _claim!(id, string("section in \"", owner.anchor, "\""))   # only now is the id taken
+    written && push!(_ensure_document!().written, id)
     sec = Section(
         id,
         string(title),
-        _anchor(id),
-        by,
-        nothing,
-        summary === nothing ? nothing : string(summary),
+        _anchor(id),   # the id is the anchor: ids are unique in the whole document
+        _optstring(by),
+        Prose[],
+        _optstring(summary),
         nothing,
         layout,
         Figure[],
-        String[],
+        RawBlock[],
         Table[],
         Check[],
         CodeBlock[],
         Pair{Symbol,Int}[],
+        _depth(owner) + 1,
+        parent,
+        Section[],
     )
-    push!(pg.sections, sec)
+    _add_node!(owner, :section, sec)
     CTX.section = sec
     return sec
 end
-_exit_section!() = (CTX.section = nothing)
+_depth(::Page) = 1
+_depth(s::Section) = s.depth
+# Leaving a section returns to the one that encloses it (or to the page at the top level).
+_exit_section!() = (CTX.section = CTX.section === nothing ? nothing : CTX.section.parent)
 
-"Register a plot; the expression is DEFERRED. `@figure expr [params=…] [caption=…] [id=…] [thumbnail=…]` / `@figure [kw] begin … end`"
-macro figure(args...)
-    isempty(args) && error("@figure needs a plot expression")
+# Every section under a page or section, depth first in declaration order: the one walk for anything
+# that must see the whole tree (id resolution, figure counts, thumbnails, checks), so no caller can
+# stop at the top level.
+function _all_sections(c)
+    out = Section[]
+    walk(s) = (push!(out, s); foreach(walk, s.sections))
+    foreach(walk, c.sections)
+    return out
+end
+
+# A content macro's arguments split into its one expression and its keywords. A `key = value`
+# argument is a keyword only when `key` is one of `reserved`; any other assignment is the expression
+# itself (`@code E = compute(x)`, the common case), so a variable named like a keyword cannot be it.
+function _macro_args(args, reserved, what, noun)
     expr = nothing
     kws = Expr[]
     for a in args
-        if a isa Expr &&
-            a.head === :(=) &&
-            a.args[1] isa Symbol &&
-            a.args[1] in (:params, :caption, :id, :thumbnail, :data)
+        if a isa Expr && a.head === :(=) && a.args[1] isa Symbol && a.args[1] in reserved
             push!(kws, a)
         elseif expr === nothing
             expr = a
         else
-            error("@figure takes a single plot expression (plus kwargs)")
+            error("$(what) takes a single $(noun) (plus kwargs)")
         end
     end
-    expr === nothing && error("@figure needs a plot expression")
+    expr === nothing &&
+        error("$(what) needs $(first(noun) in "aeiou" ? "an" : "a") $(noun)")
+    return expr, kws
+end
+
+"""
+Register a plot; the expression is DEFERRED. `@figure expr [params=…] [caption=…] [id=…] [thumbnail=…]
+[data=…]` / `@figure [kw] begin … end`. `data=(; x, y[, label])` or `(; series=[(; label, x, y)])`, each
+optionally with `xlabel` / `ylabel`, is the plotted data given eagerly: the agent face writes the
+figure's data file from it without building the plot.
+"""
+macro figure(args...)
+    expr, kws = _macro_args(
+        args, (:params, :caption, :id, :thumbnail, :data), "@figure", "plot expression"
+    )
     allk = vcat(
         Expr(:kw, :gen, Expr(:(->), Expr(:tuple), esc(expr))),
         Expr(:kw, :code, _code_str(expr)),
+        Expr(:kw, :at, (String(string(__source__.file)), __source__.line)),
         _kwspecs(kws),
     )
     return _call(:_push_figure!, (), allk)
@@ -701,18 +1129,47 @@ function _current_container()
     return tc === :inert ? :inert : nothing
 end
 
-function _push_figure!(;
-    gen, code, params=nothing, caption="", id=nothing, thumbnail=false, data=nothing
-)
+# The container a content macro (`what`) writes into, or `nothing` inside a test with the report off,
+# where the caller writes nothing (invariant V). Nothing open at all is an error.
+function _open_container(what::AbstractString)
     c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@figure outside of a @section or @page")
-    fid = _fig_id(c, id, params)
+    c === nothing && error("$(what) outside of a @section or @page")
+    return c === :inert ? nothing : c
+end
+
+# `gen_id` is a base for an id Pinax generates itself (a test report's own figures): it steps aside
+# with `-2` on a collision and is never author-written, unlike `id`.
+function _push_figure!(;
+    gen,
+    code,
+    at=nothing,
+    params=nothing,
+    caption="",
+    id=nothing,
+    gen_id=nothing,
+    thumbnail=false,
+    data=nothing,
+)
+    c = _open_container("@figure")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
+    # parsed and copied once, here: a bad `data=` is an error where written, and the readers use this
+    tbl = data === nothing ? nothing : _table_of_data(data)
+    key = string(code, "|", _params_key(params), _data_key(tbl))
+    base = something(gen_id, Symbol(c.id, "_fig_", _stable_hash(key)))
+    fid = _node_id!(c, id, base, "figure")
     fig = Figure(
-        fid, _anchor(fid), string(caption), params, gen, code, thumbnail, String[], data
+        fid,
+        _anchor(fid),
+        string(caption),
+        params,
+        gen,
+        code,
+        thumbnail,
+        String[],
+        tbl,
+        _defined_at(at),
     )
-    push!(c.figures, fig)
-    push!(c.content, :figure => length(c.figures))
+    _add_node!(c, :figure, fig)
     return fig
 end
 
@@ -722,33 +1179,32 @@ NamedTuple of columns `(T=…, M=…)`, a `Matrix` (with `header=`), a `Vector` 
 `Vector` of row-vectors/tuples (with `header=`). `@table data [caption=…] [id=…] [header=…] [params=…]`.
 """
 macro table(args...)
-    isempty(args) && error("@table needs a data expression")
-    data = nothing
-    kws = Expr[]
-    for a in args
-        if a isa Expr &&
-            a.head === :(=) &&
-            a.args[1] isa Symbol &&
-            a.args[1] in (:caption, :id, :header, :params)
-            push!(kws, a)
-        elseif data === nothing
-            data = a
-        else
-            error("@table takes a single data expression (plus kwargs)")
-        end
-    end
-    data === nothing && error("@table needs a data expression")
+    data, kws = _macro_args(
+        args, (:caption, :id, :header, :params), "@table", "data expression"
+    )
     allk = vcat(
-        Expr(:kw, :data, esc(data)), Expr(:kw, :code, _code_str(data)), _kwspecs(kws)
+        Expr(:kw, :data, esc(data)),
+        Expr(:kw, :code, _code_str(data)),
+        Expr(:kw, :at, (String(string(__source__.file)), __source__.line)),
+        _kwspecs(kws),
     )
     return _call(:_push_table!, (), allk)
 end
 
-function _push_table!(; data, code, caption="", id=nothing, header=nothing, params=nothing)
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@table outside of a @section or @page")
-    hdr, rows = _normalize_table(data, header)
+function _push_table!(;
+    data,
+    code,
+    at=nothing,
+    caption="",
+    id=nothing,
+    gen_id=nothing,
+    header=nothing,
+    params=nothing,
+)
+    c = _open_container("@table")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
+    name = string("@table ", id === nothing ? code : ":$(id)", " in \"", c.anchor, "\"")
+    hdr, rows = _normalize_table(data, header, name)
     if !isempty(hdr)   # every row must be header-wide (catches a wrong-length header= or ragged rows)
         bad = findfirst(r -> length(r) != length(hdr), rows)
         bad === nothing || error(
@@ -756,80 +1212,27 @@ function _push_table!(; data, code, caption="", id=nothing, header=nothing, para
             "$(length(hdr)) columns — check `header=` length or ragged rows",
         )
     end
-    tid = id === nothing ? _auto_table_id(c) : id
-    tbl = Table(tid, _anchor(tid), string(caption), hdr, rows, code, params)
-    push!(c.tables, tbl)
-    push!(c.content, :table => length(c.tables))
+    base = something(gen_id, Symbol(c.id, "_tbl_", _stable_hash(string(code))))
+    tid = _node_id!(c, id, base, "table")
+    tbl = Table(
+        tid, _anchor(tid), string(caption), hdr, rows, code, params, _defined_at(at)
+    )
+    _add_node!(c, :table, tbl)
     return tbl
 end
 
 """
-Register one PASS/FAIL check — a `@expect` (the atom of a `@benchmark` test set). The first two macro
-arguments (id, label) are the check id (a `Symbol`, or a `String` coerced to one) and a human label;
-then `got=` (required) is the computed value, `want=` (default `0.0`) the reference, `tol=` (required)
-the tolerance, and `kind=` (default `:auto`) selects the deviation: `:rel` (relative) when there is a
-nonzero reference, `:abs` (a residual against `want=0`). `@expect "E1" "energy density e" got=e want=e_ref tol=1e-2`.
-
-The tolerance is relative by default with a nonzero `want`, absolute for a residual (`want=0`);
-`kind=:rel` with `want=0` is an error, and a non-finite `got`/`want` or a non-positive `tol` is an
-error — a check is a trust gate, so an ill-posed assertion fails loudly rather than mis-reporting.
-
-`@expect` is **manuscript** vocabulary (a `@page`/`@benchmark`/`@section`). Inside a **test suite** the
-assertion is `@test` — Pinax recovers its `got`/`want`/`tol` and shows the same margin — so `@expect`
-used directly in a `@testset` is an error, not a silently-unenforced check (issue #69 F).
+`@expect` was removed in 0.2 (#173). A check is `Test`'s own `@test`: with `using Test`, a `@test`
+written in a `@page` / `@section` is recorded as a check of that container, with the numbers it
+compared and its margin. Using `@expect` raises an error that says so.
 """
 macro expect(args...)
-    length(args) >= 2 || error("@expect needs an id and a \"label\" (plus kwargs)")
-    id, label = args[1], args[2]
-    return _call(
-        :_push_check!,
-        (),
-        vcat(Expr(:kw, :id, esc(id)), Expr(:kw, :label, esc(label)), _kwspecs(args[3:end])),
-    )
+    return :(error(
+        "Pinax: `@expect` was removed in 0.2 — write `@test` (with `using Test`) inside the " *
+        "@page/@section; Pinax records it as a check of that container (#173).",
+    ))
 end
 
-function _push_check!(; id, label, got, want=0.0, tol, kind=:auto)
-    # `@expect` is MANUSCRIPT vocabulary. Inside a test suite the assertion is `@test` — whose margin
-    # the report already recovers and shows — so `@expect` used directly in a `@testset` is a mistake:
-    # it records a check the test runner does not enforce, i.e. a GREEN run for a failing check when the
-    # report is off (issue #69 F). Forbid it loudly (and keep the report's on/off state from ever
-    # deciding the verdict, invariant IV). A manuscript built *inside* a test — an open `CTX` page /
-    # section, as Pinax's own tests do — is real manuscript content, so `_ctx_container()` is non-nothing
-    # there and this passes straight through.
-    c = _ctx_container()
-    if c === nothing
-        _probe_test_container() === :none &&
-            error("@expect $(id): outside of a @benchmark/@section/@page")
-        error(
-            "@expect $(id): `@expect` is a manuscript check, not a suite assertion — inside a " *
-            "`@testset` write `@test` (Pinax already recovers and shows its margin in the report).",
-        )
-    end
-    g = Float64(got)
-    w = Float64(want)
-    t = Float64(tol)
-    # a check is a TRUST gate — refuse an ill-posed assertion rather than benchmark a bad value.
-    isfinite(g) || error(
-        "@expect $(id): got= is not finite ($(g)) — fix the upstream computation; do not benchmark a non-finite value",
-    )
-    isfinite(w) || error("@expect $(id): want= is not finite ($(w))")
-    t > 0 || error("@expect $(id): tol= must be positive (got $(t))")
-    # rel DEFAULT when there's a nonzero reference; a residual (want=0) is abs.
-    k = kind === :auto ? (abs(w) > 0 ? :rel : :abs) : kind
-    k in (:rel, :abs) || error("@expect kind= must be :rel or :abs")
-    k === :rel &&
-        abs(w) == 0 &&
-        error(
-            "@expect $(id): kind=:rel needs a nonzero want= (got 0) — use kind=:abs for a residual against zero",
-        )
-    d = k === :rel ? abs(g - w) / abs(w) : abs(g - w)
-    chk = Check(Symbol(id), string(label), g, w, d, t, k, d <= t)
-    push!(c.checks, chk)
-    push!(c.content, :check => length(c.checks))
-    return chk
-end
-
-# The container's content (figures / tables / @raw panels / @expect checks) in declaration order, as (kind, item) pairs.
 """
     @code [caption=…] [id=…] [lang="julia"] [run=true] expr
     @code [kw…] begin … end
@@ -850,79 +1253,42 @@ Content, not structure (law II): it needs `using Pinax`, is purely additive, and
 verdict — a Documenter `@example`-like block, rendered as code + output by every backend.
 """
 macro code(args...)
-    isempty(args) && error("@code needs an expression")
-    expr = nothing
-    kws = Expr[]
-    run = true
-    # A `key = value` arg is a KEYWORD only for the reserved names — anything else with `head === :(=)`
-    # is the expression itself (an assignment like `E = compute(x)`, the common case). So `@code caption`
-    # is reserved; a variable literally named `caption` cannot be the shown assignment (as in `@table`).
-    for a in args
-        if a isa Expr &&
-            a.head === :(=) &&
-            a.args[1] isa Symbol &&
-            a.args[1] in (:caption, :id, :lang, :run)
-            a.args[1] === :run ? (run = a.args[2] === true) : push!(kws, a)
-        elseif expr === nothing
-            expr = a
-        else
-            error("@code takes a single expression (plus kwargs)")
-        end
-    end
-    expr === nothing && error("@code needs an expression")
-    src = _code_str(expr)
-    _kw(k, v) = Expr(:kw, k, v)
+    expr, kws = _macro_args(args, (:caption, :id, :lang, :run), "@code", "expression")
+    run = all(k -> k.args[1] !== :run || k.args[2] === true, kws)
+    filter!(k -> k.args[1] !== :run, kws)
+    pre, output, result = _code_plan(expr, run)
     # `source` is the deparsed normal form; `at`/`ast` let `_push_code!` recover what was actually
     # WRITTEN at that line (see `_verbatim_code`) and fall back to the deparse when it cannot.
-    ksrc = [
-        _kw(:source, src),
-        _kw(:at, (String(string(__source__.file)), __source__.line)),
-        _kw(:ast, QuoteNode(expr)),
-    ]
-    isassign = expr isa Expr && expr.head === :(=) && expr.args[1] isa Symbol
-    isdefn =
-        expr isa Expr && (
-            expr.head in _CODE_STMT_HEADS ||
-            (expr.head === :(=) && !(expr.args[1] isa Symbol))
-        )
-    if !run
-        # show-only — do not evaluate at all
-        return Expr(
-            :block,
-            Expr(
-                :call,
-                _push_code!,
-                Expr(:parameters, ksrc..., _kw(:output, ""), _kwspecs(kws)...),
-            ),
-            nothing,
-        )
-    elseif isassign
+    params = Expr(
+        :parameters,
+        Expr(:kw, :source, _code_str(expr)),
+        Expr(:kw, :at, (String(string(__source__.file)), __source__.line)),
+        Expr(:kw, :ast, QuoteNode(expr)),
+        Expr(:kw, :output, output),
+        _kwspecs(kws)...,
+    )
+    return Expr(:block, pre..., Expr(:call, _push_code!, params), result)
+end
+
+# How `@code` runs `expr`: the statements before the block is recorded, the shown output, and the
+# value the macro returns.
+function _code_plan(expr, run::Bool)
+    run || return Any[], "", nothing   # show-only: not evaluated at all
+    if expr isa Expr && expr.head === :(=) && expr.args[1] isa Symbol
         # a simple `sym = rhs`: run it BARE (so `sym` leaks to the caller exactly as without @code),
         # then read the value back off `sym` — capturing output without a wrapper that would relocalise.
-        sym = expr.args[1]
-        params = Expr(
-            :parameters,
-            ksrc...,
-            _kw(:output, Expr(:call, _repr_output, esc(sym))),
-            _kwspecs(kws)...,
-        )
-        return Expr(:block, esc(expr), Expr(:call, _push_code!, params), esc(sym))
-    elseif isdefn
-        # a function/other definition or a compound statement: run BARE (its scoping must be identical
-        # to writing it without @code — a value wrapper would relocalise the definition); no output.
-        params = Expr(:parameters, ksrc..., _kw(:output, ""), _kwspecs(kws)...)
-        return Expr(:block, esc(expr), Expr(:call, _push_code!, params), nothing)
-    else
-        # a pure expression (leaks nothing): wrap it to capture its value as the output.
-        v = gensym(:codeval)
-        params = Expr(
-            :parameters,
-            ksrc...,
-            _kw(:output, Expr(:call, _repr_output, v)),
-            _kwspecs(kws)...,
-        )
-        return Expr(:block, Expr(:(=), v, esc(expr)), Expr(:call, _push_code!, params), v)
+        sym = esc(expr.args[1])
+        return Any[esc(expr)], Expr(:call, _repr_output, sym), sym
     end
+    # a definition (any other assignment is a method definition) or a compound statement: run BARE
+    # (its scoping must be identical to writing it without @code — a value wrapper would relocalise
+    # the definition); no output.
+    expr isa Expr &&
+        (expr.head in _CODE_STMT_HEADS || expr.head === :(=)) &&
+        return Any[esc(expr)], "", nothing
+    # a pure expression (leaks nothing): wrap it to capture its value as the output.
+    v = gensym(:codeval)
+    return Any[Expr(:(=), v, esc(expr))], Expr(:call, _repr_output, v), v
 end
 
 # Heads that must run BARE under `@code` (a value-capturing wrapper would change their scoping): a
@@ -967,10 +1333,8 @@ end
 function _push_code!(;
     source, output="", caption="", id=nothing, lang="julia", at=nothing, ast=nothing
 )
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@code outside of a @section or @page")
-    cid = id === nothing ? _auto_code_id(c) : Symbol(id)
+    c = _open_container("@code")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     # Prefer the source as WRITTEN over the deparsed normal form (`_verbatim_code`, which returns
     # `nothing` when the file is not readable — a REPL, a Documenter `@example`).
     src = string(source)
@@ -978,125 +1342,215 @@ function _push_code!(;
         v = _verbatim_code(at[1], at[2], ast)
         v === nothing || (src = v)
     end
-    blk = CodeBlock(cid, _anchor(cid), src, string(output), string(caption), string(lang))
-    push!(c.codes, blk)
-    push!(c.content, :code => length(c.codes))
+    cid = _node_id!(c, id, Symbol(c.id, "_code_", _stable_hash(src)), "code block")
+    blk = CodeBlock(
+        cid,
+        _anchor(cid),
+        src,
+        string(output),
+        string(caption),
+        string(lang),
+        _defined_at(at),
+    )
+    _add_node!(c, :code, blk)
     return blk
 end
 
-function _content_items(c)
-    return [(
-        k,
-        if k === :figure
-            c.figures[i]
-        elseif k === :table
-            c.tables[i]
-        elseif k === :check
-            c.checks[i]
-        elseif k === :code
-            c.codes[i]
-        else
-            c.panels[i]
-        end,
-    ) for (k, i) in c.content]
+# A container's content as `(kind, item)` in declaration order — the ONE registry of node kinds every
+# backend walks. A kind not listed here is an error, never misread as another kind's index (#168).
+# Where each content kind's nodes live in a container: `content` holds `kind => index into that field`.
+const _CONTENT_FIELDS = (;
+    text=:texts,
+    figure=:figures,
+    table=:tables,
+    check=:checks,
+    code=:codes,
+    section=:sections,
+    raw=:raws,
+)
+function _content_field(c, k::Symbol)
+    haskey(_CONTENT_FIELDS, k) ||
+        error("Pinax: unknown content kind :$(k) in \"$(c.anchor)\"")
+    return _CONTENT_FIELDS[k]
+end
+
+# Append `node` to `c` as content kind `k`: into its field, and at the end of its content order — the
+# one place a node joins a container.
+function _add_node!(c, k::Symbol, node)
+    nodes = getfield(c, _content_field(c, k))
+    push!(nodes, node)
+    push!(c.content, k => length(nodes))
+    return node
+end
+
+# One content entry `kind => index` of `c` as `(kind, node)`.
+_content_item(c, (k, i)) = (k, getfield(c, _content_field(c, k))[i])
+_content_items(c) = [_content_item(c, ki) for ki in c.content]
+
+# A node (or content kind) a face has no form for: every content walk ends in this, so a node type
+# added to `_content_items` fails loudly in each face until that face handles it — never printed
+# verbatim or silently dropped (#168).
+function _unhandled_node(face, node)
+    name = face isa AbstractString ? face : string(nameof(typeof(face)), " theme")
+    what = node isa Symbol ? ":$(node) node" : string(nameof(typeof(node)))
+    return error(
+        "Pinax: the $(name) has no form for a $(what) — every node kind needs one in every face",
+    )
 end
 
 # Normalize the accepted @table inputs into (header::Vector{String}, rows::Vector{Vector{Any}}).
-function _normalize_table(data, header)
-    if data isa NamedTuple                          # columnar: (a=[…], b=[…])
-        cols = collect(values(data))
-        hdr = header === nothing ? collect(string.(keys(data))) : collect(string.(header))
-        n = isempty(cols) ? 0 : maximum(length, cols)
-        rows = [Any[i <= length(c) ? c[i] : missing for c in cols] for i in 1:n]
-        return hdr, rows
-    elseif data isa AbstractMatrix
-        nc = size(data, 2)
-        hdr = header === nothing ? [string(j) for j in 1:nc] : collect(string.(header))
-        rows = [Any[data[i, j] for j in 1:nc] for i in 1:size(data, 1)]
-        return hdr, rows
-    elseif data isa AbstractVector
-        if !isempty(data) && first(data) isa NamedTuple   # row records: [(a=…,b=…), …]
-            ks = keys(first(data))
-            hdr = header === nothing ? collect(string.(ks)) : collect(string.(header))
-            rows = [Any[getfield(r, k) for k in ks] for r in data]
-            return hdr, rows
-        else                                              # vector of row-vectors/tuples
-            rows = [Any[x for x in r] for r in data]
-            width = isempty(rows) ? 0 : length(rows[1])
-            hdr =
-                header === nothing ? [string(j) for j in 1:width] : collect(string.(header))
-            return hdr, rows
-        end
-    end
+# `name` says which table in an error. A ragged input — columns of different lengths, records with
+# different keys — is an error, never padded with `missing` or cut to the first record's keys.
+function _normalize_table(data, header, name="the table")
     return error(
         "Pinax: @table data must be a NamedTuple of columns, a Matrix, or a Vector of " *
         "NamedTuple/Vector rows (got $(typeof(data)))",
     )
 end
+_table_header(header, default) = collect(string.(header === nothing ? default : header))
+
+function _normalize_table(data::NamedTuple, header, name="the table")   # columns: (a=[…], b=[…])
+    ks = keys(data)
+    for k in ks
+        length(data[k]) == length(data[1]) || error(
+            "Pinax: $(name) is ragged — column $(k) has $(length(data[k])) rows but column " *
+            "$(ks[1]) has $(length(data[1])). Every column has the same length.",
+        )
+    end
+    n = isempty(data) ? 0 : length(data[1])
+    return _table_header(header, ks), [Any[c[i] for c in data] for i in 1:n]
+end
+
+function _normalize_table(data::AbstractMatrix, header, name="the table")
+    rows = [Any[data[i, j] for j in axes(data, 2)] for i in axes(data, 1)]
+    return _table_header(header, 1:size(data, 2)), rows
+end
+
+function _normalize_table(data::AbstractVector, header, name="the table")
+    isempty(data) ||
+        !(first(data) isa NamedTuple) ||
+        return _record_rows(data, header, name)
+    rows = [Any[x for x in r] for r in data]   # row-vectors/tuples; widths are checked against the header
+    return _table_header(header, 1:(isempty(rows) ? 0 : length(rows[1]))), rows
+end
+
+# Row records `[(a=…, b=…), …]`: every record holds the first one's keys, in any order.
+function _record_rows(data, header, name)
+    ks = keys(first(data))
+    keystr(r) = r isa NamedTuple ? string("(", join(keys(r), ", "), ")") : repr(typeof(r))
+    for (i, r) in enumerate(data)
+        r isa NamedTuple && issetequal(keys(r), ks) && continue
+        error(
+            "Pinax: $(name) is ragged — row $(i) has keys $(keystr(r)) but row 1 has " *
+            "$(keystr(first(data))). Every record has the same keys.",
+        )
+    end
+    return _table_header(header, ks), [Any[getfield(r, k) for k in ks] for r in data]
+end
 
 """
-Name the **preceding** item (like `\\caption`), overwriting any caption/label set before it:
+Name the node written **immediately before** it (like `\\caption`), replacing that node's caption:
 
-  - after a `@figure` → the figure's caption;
-  - after a `@test` / `@expect` → the **check's quantity name** (its label). This is how a swept
+  - after a `@figure`, `@table` or `@code` → its caption (the same as passing `caption=`);
+  - after a `@test` → the **check's quantity name** (its label). This is how a swept
     `@testset for` names the quantity a convergence figure plots — `@test isapprox(E, oracle; rtol=…)`
     followed by `@caption "energy"` titles the check (and its convergence figure) `energy` instead of
     the raw expression (issue #69 C). Grouping is by this label, so every iteration's `@caption` folds
     the sweep into one named quantity.
+
+It never reaches back past another node to an earlier one (#159): with nothing before it, or after a
+node that carries no caption (`@raw`, a child `@section`), it is an error where it is written.
 """
 macro caption(x)
     return quote
         _set_caption!($(esc(x)))
     end
 end
-function _set_caption!(s)
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    if c !== nothing && !isempty(c.content) && c.content[end][1] === :check
-        c.checks[c.content[end][2]].label = string(s)   # name the check's quantity
-    elseif c !== nothing && !isempty(c.figures)
-        c.figures[end].caption = string(s)
-    else
-        _diag!(
-            WARNING,
-            c === nothing ? "?" : c.anchor,
-            "@caption with no preceding @figure or @test",
-        )
-    end
+# Mark where a result that records no check was written in container `c` (a page, a section or a test
+# node), so a `@caption` right after it names nothing rather than the node before it.
+_mark_no_check!(c) = (CTX.nonode=(c, length(c.content)); nothing)
+
+# A `@test_broken` / `@test_skip` written at `where` in container `c`: it records no check (only the
+# suite counts it), so the document says so, and a `@caption` right after it names nothing.
+function _record_no_check!(c, where::AbstractString)
+    _mark_no_check!(c)
+    at = isempty(where) ? "" : " at $(where)"
+    _diag!(
+        INFO,
+        c.anchor,
+        "a @test_broken / @test_skip$(at) records no check: only the suite counts it",
+    )
     return nothing
 end
 
-"Section description (markdown + LaTeX source). `@desc md\"…\"`"
+function _set_caption!(s)
+    c = _open_container("@caption")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
+    isempty(c.content) && error(
+        "Pinax: @caption in \"$(c.anchor)\" has nothing before it to name — write it directly " *
+        "after a @figure, @table, @code or @test, or pass `caption=` to that node",
+    )
+    CTX.nonode == (c, length(c.content)) && error(
+        "Pinax: @caption in \"$(c.anchor)\" follows a @test_broken / @test_skip, which records no " *
+        "check — @caption names only the node written immediately before it",
+    )
+    kind, node = _content_item(c, c.content[end])
+    kind in (:check, :figure, :table, :code) || error(
+        "Pinax: @caption in \"$(c.anchor)\" follows a $(kind), which carries no caption — " *
+        "@caption names only the node written immediately before it",
+    )
+    # one caption per node: `caption=` and then `@caption`, or two `@caption`s, is an error
+    (node === CTX.captioned || (kind !== :check && !isempty(node.caption))) && error(
+        "Pinax: @caption in \"$(c.anchor)\" names a $(kind) that already has a caption — a node " *
+        "takes one caption, from `caption=` or from one `@caption`",
+    )
+    kind === :check ? (node.label = string(s)) : (node.caption = string(s))   # a check: its quantity
+    CTX.captioned = node
+    return nothing
+end
+
+"""
+    @desc md"…"
+
+A prose block (markdown + math), placed in content order like any other node. A container holds any
+number of them, interleaved with figures, tables and code (Conventions › Content).
+"""
 macro desc(x)
+    at = (String(string(__source__.file)), __source__.line)
     return quote
-        _set_desc!($(esc(x)))
+        _set_desc!($(esc(x)); at=($(at)))
     end
 end
-function _set_desc!(s)
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@desc outside of a @section or @page")
-    c.desc = Desc(string(s))
+function _set_desc!(s; at=nothing)
+    c = _open_container("@desc")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
+    src = string(s)
+    tid = _node_id!(c, nothing, Symbol(c.id, "_txt_", _stable_hash(src)), "prose block")
+    _add_node!(c, :text, Prose(tid, _anchor(tid), src, _defined_at(at)))
     return nothing
 end
 
 """
 Inject a raw block into the current section — the escape hatch for project-specific UI that markdown
-can't express (coverage tables, broken-data banners; notes 06 §6). `@raw x` evaluates `x` to a
-string and the theme emits it verbatim (the gallery as raw HTML; trusted author content):
-`@raw raw\"<table class=cov>…</table>\"`. Use `@desc` for prose; `@raw` for hand-built markup.
+can't express (coverage tables, broken-data banners; notes 06 §6). `@raw x [id=:name]` evaluates `x`
+to a string: the gallery emits it verbatim (trusted author content) under its id, `agent.json` and
+`agent.md` carry the HTML itself, and LaTeX leaves it out with a diagnostic. Without `id=` the id is
+generated from the HTML. `@raw raw\"<table class=cov>…</table>\"`. Use `@desc` for prose; `@raw` for
+hand-built markup.
 """
-macro raw(x)
-    return quote
-        _push_panel!($(esc(x)))
-    end
+macro raw(args...)
+    html, kws = _macro_args(args, (:id,), "@raw", "raw HTML expression")
+    allk = vcat(
+        Expr(:kw, :at, (String(string(__source__.file)), __source__.line)), _kwspecs(kws)
+    )
+    return _call(:_push_raw!, (esc(html),), allk)
 end
-function _push_panel!(s)
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@raw outside of a @section or @page")
-    push!(c.panels, string(s))
-    push!(c.content, :panel => length(c.panels))
+function _push_raw!(s; id=nothing, at=nothing)
+    c = _open_container("@raw")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
+    html = string(s)
+    rid = _node_id!(c, id, Symbol(c.id, "_raw_", _stable_hash(html)), "raw block")
+    _add_node!(c, :raw, RawBlock(rid, _anchor(rid), html, _defined_at(at)))
     return nothing
 end
 
@@ -1112,15 +1566,11 @@ function _set_thumbnail!(x)
         _probe_test_container() === :none || return nothing   # inside a test, no @page → no-op
         error("@thumbnail outside of a @page")
     end
-    if x isa Symbol
-        pg.thumbnail = FigRef(x)
-    else
-        _diag!(
-            WARNING,
-            pg.anchor,
-            "@thumbnail expects a figure id (:sym); inline plots are not supported",
-        )
-    end
+    x isa Symbol || error(
+        "Pinax: @thumbnail takes the id of a figure on its page, a Symbol (got $(repr(x))); " *
+        "to make an inline plot the main figure, give it `thumbnail = true`",
+    )
+    pg.thumbnail = FigRef(x)   # checked against the page's figures when the document is resolved
     return nothing
 end
 
@@ -1143,27 +1593,6 @@ end
 "Raw string (preserves `\$…\$`). Used by `@desc md\"…\"` etc."
 macro md_str(s)
     return s
-end
-
-# ============================================================ resolve (minimal: thumbnail)
-
-"Resolve a page's main figure: explicit `@thumbnail` > `thumbnail=true` marker > top (first) figure (notes 02)."
-function resolved_thumbnail(pg::Page)
-    pg.no_thumbnail && return nothing
-    pg.thumbnail === nothing || return pg.thumbnail
-    # a thumbnail=true marker anywhere (page-level figures first, then sections)
-    for f in pg.figures
-        f.thumbnail && return FigRef(f.id)
-    end
-    for sec in pg.sections, f in sec.figures
-        f.thumbnail && return FigRef(f.id)
-    end
-    # else the first figure (page-level, then the first section's)
-    isempty(pg.figures) || return FigRef(pg.figures[1].id)
-    for sec in pg.sections
-        isempty(sec.figures) || return FigRef(sec.figures[1].id)
-    end
-    return nothing
 end
 
 # ============================================================ show (ergonomics)

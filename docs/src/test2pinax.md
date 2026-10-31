@@ -47,7 +47,7 @@ still fails the process.
 
 ## What you get
 
-Each test *file* (a `.jl`-named `@testset`) becomes a `status = :benchmark` page, each nested
+Each test *file* (a `.jl`-named `@testset`) becomes a page, each nested
 `@testset` a section, and each `@test` a `Check` carrying its real `got` / `want` / `tol`. From those,
 a **convergence** figure and a **margin** figure are derivable with no figure code, and the whole thing
 renders to three backends from one document: `:gallery` (human), `:agent` (`agent.json`, for a
@@ -136,7 +136,7 @@ end
 
 - [PASS] t1 — isapprox(1.0, 1.0098; rtol = 0.01): got 1.0, want 1.0098 (Δ 0.0097 vs tol 0.01 rel)
 
-_What this test established (`evidence!`)._  [table: unit_a_jl_tight_tbl1]
+_What this test established (`evidence!`)._  [table: unit_a_jl_tight_evidence]
 | established | value |
 | --- | --- |
 | achieved | 0.0097 |
@@ -170,8 +170,8 @@ Pinax.render_test_report(
 )
 ```
 
-A `@desc` appears above the fixed provenance and per-file tables — a page's description is not
-content-ordered — which is where a verdict wants to be; tables follow them. Everything goes to every
+The hook runs first, so its content — in the order written — leads the overview page, above the fixed
+provenance and per-file tables, which is where a verdict wants to be. Everything goes to every
 backend, so the verdict is **data** in `agent.json` and not only pixels in the gallery.
 
 If the hook throws, that is a diagnostic in the report and the report still renders: the same rule as
