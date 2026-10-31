@@ -945,7 +945,7 @@ end
 # Render a swept level: a convergence + margin figure per quantity, then every sample check placed flat
 # (binding-tagged) so the page's pass/fail counts and `agent.json` verdict stay exactly what they were —
 # the sweep changes only how the checks are DRAWN, never the verdict.
-function _emit_sweep!(n, page_when::Function, acc::Vector{Check})
+function _emit_sweep!(n, page_when::Function, acc::Vector{Check}, id_prefix="")
     c = _ctx_container()
     samples = _sweep_samples!(
         Tuple{Vector{Pair{Symbol,String}},Check}[], n, Pair{Symbol,String}[], page_when
@@ -961,7 +961,7 @@ function _emit_sweep!(n, page_when::Function, acc::Vector{Check})
     # header + the assertion), so it must survive the fold: lift it to the section, deduplicated, ahead
     # of the figures it explains.
     for blk in _swept_codes(n)
-        _place_code!(c, blk, n.written)
+        _place_code!(c, blk, n.written; id_prefix)
     end
     qi = Ref(0)
     for (label, pts) in _group_quantities(samples)
@@ -1310,13 +1310,13 @@ function _emit_node!(
         # overview counts it
         _emit_page_node!(n, n, page_when, seen, acc; id_prefix, recurse=false)
     else
-        _emit_own_content!(n, acc)
+        _emit_own_content!(n, acc, id_prefix)
     end
     # A level whose children are all canonical `@testset for` samples is a SWEEP, not a stack of
     # sections: fold it into convergence + margin figures (issue #69 C). Only inside an open container
     # (a page/section) — never at the root, where children are files and the grouping-flatten runs.
     if _ctx_container() !== nothing && _is_swept(n, page_when)
-        _emit_sweep!(n, page_when, acc)
+        _emit_sweep!(n, page_when, acc, id_prefix)
         return acc
     end
     # Nested testsets become pages (a file) or sections (a group). @pinaxignore'd ones are skipped
@@ -1381,17 +1381,19 @@ end
 # Move THIS node's own captured content (texts + figures/tables/raws + checks) into the CTX
 # container just entered, preserving declaration order. A captured node carries the full interleaved
 # `content`; one without it (a legacy dump, or a node built by hand) falls back to its checks. Uses
-# `_ctx_container()` (never the probe) — the fold builds the doc in `CTX`.
-function _emit_own_content!(n::TestNode, acc::Vector{Check})
+# `_ctx_container()` (never the probe) — the fold builds the doc in `CTX`. `id_prefix` qualifies every
+# id it places (a matrix cell's, see `_cell_keys`).
+function _emit_own_content!(n::TestNode, acc::Vector{Check}, id_prefix="")
     c = _ctx_container()
     c === nothing && return acc
-    union!(_ensure_document!().written, n.written)   # the ids its author wrote stay written
+    # the ids its author wrote stay written, as they are placed
+    union!(_ensure_document!().written, (Symbol(id_prefix, id) for id in n.written))
     # No interleaved `content` (a legacy dump, a hand-built node) — place checks then codes directly,
     # so a dumped `@code` still shows.
     if isempty(n.content) && (!isempty(n.checks) || !isempty(n.codes))
         placed = [_place_check!(c, chk, acc) for chk in n.checks]
         for blk in n.codes
-            _place_code!(c, blk, n.written)
+            _place_code!(c, blk, n.written; id_prefix)
         end
         foreach(chk -> _repoint_code!(c, chk), placed)   # its code block was placed after it
         return acc
@@ -1401,9 +1403,10 @@ function _emit_own_content!(n::TestNode, acc::Vector{Check})
         if kind === :check
             _place_check!(c, node, acc)
         elseif kind === :code
-            _place_code!(c, node, n.written)
+            _place_code!(c, node, n.written; id_prefix)
         else
-            _add_node!(c, kind, _place_captured(c, node, n.written, _KIND_NAME[kind]))
+            what = _KIND_NAME[kind]
+            _add_node!(c, kind, _place_captured(c, node, n.written, what; id_prefix))
         end
     end
     return acc
@@ -1415,9 +1418,11 @@ const _KIND_NAME = (; figure="figure", table="table", raw="raw block", text="pro
 # A node captured in a test, placed in the document: its id is claimed in the whole document
 # (Conventions › Identity), since it was named inside its test node only. An id the author wrote is
 # claimed as is — a repeat is an error, as everywhere — and a generated one steps aside with `-2`.
-function _place_captured(c, node, written, what)
+# `id_prefix` qualifies either (a matrix cell's, see `_cell_keys`).
+function _place_captured(c, node, written, what; id_prefix="")
     where = string(what, " in \"", c.anchor, "\"")
-    id = node.id in written ? _claim!(node.id, where) : _claim!(_free_id(node.id), where)
+    base = Symbol(id_prefix, node.id)
+    id = node.id in written ? _claim!(base, where) : _claim!(_free_id(base), where)
     return id === node.id ? node : _with_id(node, id)
 end
 
@@ -1438,10 +1443,10 @@ end
 # carry the same snippet under one id, and it shows once. Its id in the document is remembered, so
 # the checks that point at it keep pointing at it. The same snippet in another container is a node
 # of its own, under a free id.
-function _place_code!(c, blk, written)
+function _place_code!(c, blk, written; id_prefix="")
     key = (c.id, blk.id)
     haskey(_ensure_document!().fold_codes, key) && return nothing
-    placed = _place_captured(c, blk, written, "code block")
+    placed = _place_captured(c, blk, written, "code block"; id_prefix)
     _ensure_document!().fold_codes[key] = placed.id
     _add_node!(c, :code, placed)
     return placed
@@ -1471,7 +1476,7 @@ function _emit_page_node!(
         if recurse
             _emit_node!(n, page_when, seen, page_checks; id_prefix=id_prefix)
         else
-            _emit_own_content!(n, page_checks)
+            _emit_own_content!(n, page_checks, id_prefix)
         end
         append!(acc, page_checks)
         # Back at page level (every section closed), so the figure lands on the page.
@@ -1764,9 +1769,9 @@ function _append_content!(m::TestNode, r::TestNode)
 end
 
 # A CI matrix merge (issue #69 K): each cell is a `@part` holding that cell's file pages (ids qualified
-# by the cell so the same file across cells does not collide). One overview across all cells, then the
-# cells; nothing is merged away and the file structure is preserved. The `julia/os/commit` provenance
-# of a merge job is not the cells', so the cell label carries that instead.
+# by the cell, see `_cell_keys`). One overview across all cells, then the cells; nothing is merged away
+# and the file structure is preserved. The `julia/os/commit` provenance of a merge job is not the
+# cells', so the cell label carries that instead.
 function _render_matrix(
     roots,
     cells;
@@ -1808,10 +1813,10 @@ function _render_matrix(
             caption="Per-cell, per-file result profile. `worst margin` is the largest `delta/tol` in that (cell, file).",
         )
     end
-    for (r, c) in pairs
-        _enter_part!(Symbol("cell_", _slug(c)), c)
+    for ((r, c), key) in zip(pairs, _cell_keys(order))
+        _enter_part!(Symbol("cell_", key), c)
         try
-            _emit_node!(r, page_when, seen; id_prefix=string(_slug(c), "_"))
+            _emit_node!(r, page_when, seen; id_prefix=string(key, "_"))
         finally
             _exit_part!()
         end
@@ -1819,6 +1824,19 @@ function _render_matrix(
     doc = current_document()
     gallery, agent = _render_report_doc(doc, out)
     return (; gallery, agent)
+end
+
+# Within a matrix report the cell is part of every node's identity: every cell ran the same files,
+# so one node of the source is a node per cell here, and only its cell tells them apart. Each cell
+# gets a key — the slug of its label, generated, so two labels that slug alike are `-2`, `-3` rather
+# than an error — and every id the fold places from that cell carries it: the part is `cell_<key>`,
+# and every page, section, check, figure, table, code block, prose and `@raw` block is `<key>_<id>`,
+# an id its author wrote included. The author's id is qualified, never otherwise changed: written
+# twice within one cell, it is still an error.
+function _cell_keys(cells)
+    keys = Symbol[]
+    foreach(c -> push!(keys, _free_id(_slug(c), in(keys))), cells)
+    return keys
 end
 
 # ── the dump (how a sharded run gets merged) ─────────────────────────
