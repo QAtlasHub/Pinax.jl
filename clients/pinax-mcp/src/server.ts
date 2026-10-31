@@ -150,7 +150,7 @@ export function createServer(atlas: Atlas, opts: ServerOptions = {}): Server {
       {
         name: "outline",
         description:
-          "Token-lean text outline of the whole document (parts -> pages -> sections -> figures & tables in declaration order, each with its id).",
+          "Token-lean text outline of the whole document (parts -> pages -> sections -> every node, in reading order, each with its id).",
         inputSchema: { type: "object", properties: {}, additionalProperties: false },
       },
       {

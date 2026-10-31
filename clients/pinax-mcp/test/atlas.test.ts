@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { loadAtlas } from "../src/atlas.js";
 
 // compiled to dist/test/, so the source fixture is two levels up at <pkg>/test/fixtures
@@ -50,6 +52,20 @@ test("outline interleaves figures and tables in declaration order", () => {
   assert.ok(fi >= 0 && ti >= 0 && fi < ti);
   assert.match(o, /\[section s1\]/);
   assert.match(o, /\[table p2_tbl1\] a small table/);
+});
+
+test("outline puts a section where it stands in its container's content", () => {
+  // a section written between two blocks is outlined between them, as every face reads it
+  const doc = JSON.parse(readFileSync(resolve(fixture, "agent.json"), "utf8"));
+  const p1 = doc.pages.find((p: { id: string }) => p.id === "p1");
+  p1.content = [p1.content[0], { kind: "section", id: "s1" }, ...p1.content.slice(1)];
+  const dir = mkdtempSync(join(tmpdir(), "outline-"));
+  writeFileSync(join(dir, "agent.json"), JSON.stringify(doc));
+  const o = loadAtlas(dir).outline();
+  const at = (s: string) => o.indexOf(s);
+  assert.ok(at("[text p1_txt1]") < at("[section s1]"));
+  assert.ok(at("[section s2]") < at("[figure p1_fig1]")); // s1's subtree, then the rest of p1
+  assert.equal(o.split("[section s1]").length, 2); // once
 });
 
 test("search matches caption, code, comment, and table cells", () => {

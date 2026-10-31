@@ -2,8 +2,9 @@
 // load), so it is usable as a plain library: `loadAtlas(path).search("...")`. The MCP server in
 // server.ts is just one frontend over this.
 //
-// Every unit (part / page / section / figure) is addressable by its id — Pinax ids are globally
-// unique within a document (they key the comment store), so a single id -> unit map is the index.
+// Every unit (part, page, section, and every node in one: prose, figure, table, code, check, raw) is
+// addressable by its id — Pinax ids are globally unique within a document (they key the comment
+// store), so a single id -> unit map is the index.
 import { readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { AgentDocZ, type AgentDoc, type Part } from "./schema.js";
@@ -117,19 +118,34 @@ export class Atlas {
     return kind ? us.filter((u) => u.kind === kind) : us;
   }
 
-  /** A token-lean text outline of the whole document, figures and tables in declaration order. */
+  /** A token-lean text outline of the whole document: every node, in reading order, with its id. */
   outline(): string {
     const out: string[] = [`# ${this.doc.title}`];
     // a container's verdict over its subtree ("" when it holds no checks — never a vacuous PASS)
     const verdictOf = (node: any): string =>
       node.verdict ? `  [${node.verdict.verdict} ${node.verdict.passed}/${node.verdict.total}]` : "";
     const partOf = new Map<string, Part>(this.doc.parts.map((p) => [p.id, p]));
-    // walk a page/section's `content` (declaration order); fall back to figures-then-tables.
-    const emitContent = (node: any): void => {
+    // a section's heading one level deeper per depth (a top-level section is ####), then its content
+    const emitSection = (sec: any, level: number): void => {
+      out.push(`${"#".repeat(level)} [section ${sec.id}] ${sec.title}${verdictOf(sec)}`);
+      emitContent(sec, level + 1);
+    };
+    // walk a page/section's `content` in declaration order, a nested section where it stands; a
+    // section the content does not list follows (an older agent.json); with no content at all, fall
+    // back to figures-then-tables.
+    const emitContent = (node: any, level: number): void => {
       const content = node.content as { kind: string; id: string }[] | undefined;
+      const sections: any[] = node.sections ?? [];
+      const listed = new Set((content ?? []).filter((r) => r.kind === "section").map((r) => r.id));
       if (content && content.length) {
         for (const { kind, id } of content) {
-          if (kind === "section") continue; // a nested section gets its own heading, below
+          if (kind === "section") {
+            const sec = sections.find((s) => s.id === id);
+            if (sec) {
+              emitSection(sec, level);
+              continue;
+            }
+          }
           const u = this.unit(id);
           // a check leads with its result, so a reader sees PASS/FAIL before the expression
           const label = !u ? "(missing)" : u.kind === "check" ? `${u.node.pass ? "PASS" : "FAIL"} ${u.label}` : u.label;
@@ -140,6 +156,7 @@ export class Atlas {
         for (const f of node.figures ?? []) out.push(`- [figure ${f.id}] ${f.caption}`);
         for (const t of node.tables ?? []) out.push(`- [table ${t.id}] ${t.caption || t.id}`);
       }
+      for (const sec of sections) if (!listed.has(sec.id)) emitSection(sec, level);
     };
     let lastPart: string | null | undefined;
     for (const page of this.doc.pages) {
@@ -151,14 +168,7 @@ export class Atlas {
       const summary = page.summary ? ` — ${page.summary}` : "";
       const status = page.status && page.status !== "final" ? ` [status: ${page.status}]` : "";
       out.push(`\n### [page ${page.id}] ${page.title}${status}${summary}${verdictOf(page)}`);
-      emitContent(page);
-      // nested sections one heading level deeper per depth (a top-level section is ####)
-      const emitSection = (sec: any, level: number): void => {
-        out.push(`${"#".repeat(level)} [section ${sec.id}] ${sec.title}${verdictOf(sec)}`);
-        emitContent(sec);
-        for (const child of sec.sections ?? []) emitSection(child, level + 1);
-      };
-      for (const sec of page.sections) emitSection(sec, 4);
+      emitContent(page, 4);
     }
     // what the build and the render recorded (a node a face left out, a failed figure), so a reader
     // sees the gaps rather than inferring them
