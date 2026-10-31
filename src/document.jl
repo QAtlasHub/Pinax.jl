@@ -1064,6 +1064,14 @@ function _current_container()
     return tc === :inert ? :inert : nothing
 end
 
+# The container a content macro (`what`) writes into, or `nothing` inside a test with the report off,
+# where the caller writes nothing (invariant V). Nothing open at all is an error.
+function _open_container(what::AbstractString)
+    c = _current_container()
+    c === nothing && error("$(what) outside of a @section or @page")
+    return c === :inert ? nothing : c
+end
+
 # `gen_id` is a base for an id Pinax generates itself (a test report's own figures): it steps aside
 # with `-2` on a collision and is never author-written, unlike `id`.
 function _push_figure!(;
@@ -1077,9 +1085,8 @@ function _push_figure!(;
     thumbnail=false,
     data=nothing,
 )
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@figure outside of a @section or @page")
+    c = _open_container("@figure")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     data === nothing || _check_series_lengths(_series_of(data))   # eager: an error where written
     base = something(
         gen_id, Symbol(c.id, "_fig_", _stable_hash(string(code, "|", _params_key(params))))
@@ -1143,9 +1150,8 @@ function _push_table!(;
     header=nothing,
     params=nothing,
 )
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@table outside of a @section or @page")
+    c = _open_container("@table")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     name = string("@table ", id === nothing ? code : ":$(id)", " in \"", c.anchor, "\"")
     hdr, rows = _normalize_table(data, header, name)
     if !isempty(hdr)   # every row must be header-wide (catches a wrong-length header= or ragged rows)
@@ -1315,9 +1321,8 @@ end
 function _push_code!(;
     source, output="", caption="", id=nothing, lang="julia", at=nothing, ast=nothing
 )
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@code outside of a @section or @page")
+    c = _open_container("@code")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     # Prefer the source as WRITTEN over the deparsed normal form (`_verbatim_code`, which returns
     # `nothing` when the file is not readable — a REPL, a Documenter `@example`).
     src = string(source)
@@ -1455,9 +1460,8 @@ function _record_no_check!(c, where::AbstractString)
 end
 
 function _set_caption!(s)
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@caption outside of a @section or @page")
+    c = _open_container("@caption")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     isempty(c.content) && error(
         "Pinax: @caption in \"$(c.anchor)\" has nothing before it to name — write it directly " *
         "after a @figure, @table, @code or @test, or pass `caption=` to that node",
@@ -1495,9 +1499,8 @@ macro desc(x)
     end
 end
 function _set_desc!(s; at=nothing)
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@desc outside of a @section or @page")
+    c = _open_container("@desc")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     src = string(s)
     tid = _node_id!(c, nothing, Symbol(c.id, "_txt_", _stable_hash(src)), "prose block")
     push!(c.texts, Prose(tid, _anchor(tid), src, _defined_at(at)))
@@ -1530,9 +1533,8 @@ macro raw(args...)
     return :(_push_raw!($(esc(html)); id=($(esc(id))), at=($(at))))
 end
 function _push_raw!(s; id=nothing, at=nothing)
-    c = _current_container()
-    c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
-    c === nothing && error("@raw outside of a @section or @page")
+    c = _open_container("@raw")
+    c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     html = string(s)
     rid = _node_id!(c, id, Symbol(c.id, "_raw_", _stable_hash(html)), "raw block")
     push!(c.raws, RawBlock(rid, _anchor(rid), html, _defined_at(at)))
