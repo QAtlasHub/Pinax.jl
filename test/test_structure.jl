@@ -6,6 +6,15 @@ using Test
 # page's top-level sections sit in its content order like a section's children do, so every face
 # walks one content list and lays every container out the same way.
 
+# A deliberately failing check is absorbed here, so this file's suite does not count it.
+mutable struct _StructIso <: Test.AbstractTestSet
+    description::String
+    results::Vector{Any}
+    _StructIso(desc::AbstractString=""; kw...) = new(String(desc), Any[])
+end
+Test.record(r::_StructIso, x) = (push!(r.results, x); x)
+Test.finish(r::_StructIso) = r
+
 @testset "structure" begin
     tmp = mktempdir()
 
@@ -72,21 +81,56 @@ using Test
         @test occursin("{\"kind\":\"section\",\"id\":\"s\"}", aj)
     end
 
-    @testset "every face: verdict band and own checks, then content" begin
+    @testset "every face: the verdict band leads, then content" begin
         Pinax.reset!()
         @page :p "P" begin
             @desc "PROSE_FIRST"
             @test 1 + 1 == 2
         end
+        # agent.md: the band (a count, and which checks fail) leads; each check then sits where it
+        # was written, right after its code — the block an agent reads as one piece
         Pinax.render(; out=joinpath(tmp, "o"), theme=:agent)
         md = read(joinpath(tmp, "o", "agent.md"), String)
         @test first(findfirst("1/1 PASS", md)) <
-            first(findfirst("[PASS]", md)) <
-            first(findfirst("PROSE_FIRST", md))
+            first(findfirst("PROSE_FIRST", md)) <
+            first(findfirst("@test 1 + 1 == 2", md)) <
+            first(findfirst("[PASS]", md))
+        # the human faces put the container's own checks in a table under the band
         g = read(Pinax.render(; out=joinpath(tmp, "og")), String)
         @test first(findfirst("pinax-checks", g)) < first(findfirst("PROSE_FIRST", g))
         lx = read(Pinax.render(; out=joinpath(tmp, "ol"), theme=:latex), String)
         @test first(findfirst("Verdict: PASS", lx)) < first(findfirst("PROSE\\_FIRST", lx))
+    end
+
+    @testset "agent.md: a failing band names its failing checks; each check is a block" begin
+        Pinax.reset!()
+        @testset _StructIso "iso" begin
+            @page :p "P" begin
+                @code id = :setup VAL = 2
+                @test VAL == 2
+                @caption "VAL_IS_TWO"
+                @test VAL == 3
+                @caption "VAL_IS_THREE"
+            end
+        end
+        failed = only(c for c in Pinax.current_document().pages[1].checks if !c.pass)
+        out = joinpath(tmp, "fb")
+        try
+            Pinax.render(; out=out, theme=:agent)
+        catch e
+            e isa Pinax.ChecksFailed || rethrow()
+        end
+        md = read(joinpath(out, "agent.md"), String)
+        @test occursin("1/2 FAIL** — failing: $(failed.id)", md)
+        @test occursin(
+            r"\[code: setup\] — defined at test/test_structure\.jl:\d+\n```julia\nVAL = 2",
+            md,
+        )
+        @test occursin(
+            r"- \[FAIL\] \S+ — VAL_IS_THREE: got .* — defined at test/test_structure\.jl:\d+",
+            md,
+        )
+        @test first(findfirst("VAL_IS_TWO", md)) < first(findfirst("VAL_IS_THREE", md))
     end
 
     @testset "@caption after a page's section names nothing" begin

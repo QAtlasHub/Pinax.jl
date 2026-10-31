@@ -125,4 +125,22 @@ _sec(id) = only(s for s in Pinax._all_sections(_pg()) if s.id === id)
         end
         @test [s.id for s in _pg().sections] == [:p_conv, Symbol("p_conv-2")]
     end
+
+    # Julia 1.13 prints the symbols `end` / `begin` as `var"end"` / `var"begin"`; 1.12 prints them as
+    # written. A label, a code string and every id hashed from them must not depend on that.
+    @testset "end / begin read as written, so ids do not depend on the Julia version" begin
+        @test Pinax._code_str(:(isapprox(Ms[end], 0.0; atol=0.1))) ==
+            "isapprox(Ms[end], 0.0; atol = 0.1)"
+        @test Pinax._code_str(:(a[begin:end])) == "a[begin:end]"
+        Pinax.reset!()
+        Ms = [1.0, 0.0]
+        @testset _IdentIso "iso" begin
+            @page :p "A" begin
+                @test isapprox(Ms[end], 0.0; atol=0.1)
+                @figure Ms[end] id = nothing
+            end
+        end
+        @test only(_pg().checks).label == "isapprox(Ms[end], 0.0; atol = 0.1)"
+        @test only(_pg().figures).code == "Ms[end]"
+    end
 end

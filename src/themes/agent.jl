@@ -567,13 +567,22 @@ function _agent_md_check(io, chk)
         " ",
         chk.kind,
         ")",
+        isempty(chk.source) ? "" : string(" — defined at ", chk.source),
     )
     return nothing
 end
 
-# A @code block in agent.md → a fenced source block + its captured output.
+# A @code block in agent.md: a line naming it (id, caption, where it was written), the fenced source,
+# then its captured output. A check's own block comes right before the check.
 function _agent_md_code(io, blk)
-    isempty(blk.caption) || println(io, "_", blk.caption, "_")
+    println(
+        io,
+        "[code: ",
+        blk.id,
+        "]",
+        isempty(blk.caption) ? "" : string(" ", blk.caption),
+        isempty(blk.defined_at) ? "" : string(" — defined at ", blk.defined_at),
+    )
     println(io, "```", blk.lang)
     println(io, blk.source)
     println(io, "```")
@@ -597,7 +606,7 @@ function _agent_md_node(io, t::Table, env)
     _agent_md_table(io, t)
     return _agent_md_notes(io, t.anchor, env.comments)
 end
-_agent_md_node(io, ::Check, env) = nothing   # listed under the container's verdict band, ahead
+_agent_md_node(io, chk::Check, env) = _agent_md_check(io, chk)   # where it was written
 _agent_md_node(io, b::CodeBlock, env) = _agent_md_code(io, b)
 function _agent_md_node(io, s::Section, env)   # a nested section, in declaration order
     return _agent_md_section(io, s, env.outdir, env.comments, env.files, env.rdiag)
@@ -624,11 +633,25 @@ end
 # A container's verdict over its subtree as one bold line ("" when it holds no checks).
 # A container's verdict band over its subtree, then its own checks — the same place every face puts
 # them, ahead of the content (Conventions › Faces).
+# A container's verdict band in agent.md: the count over its subtree and which checks fail. The checks
+# themselves are blocks in the content, each where it was written, after its code.
 function _agent_md_verdict(io, c)
     v = verdict(c)
     v === nothing && return nothing
-    println(io, "**", c.title, "   ", v.passed, "/", v.total, " ", v.verdict, "**")
-    foreach(chk -> _agent_md_check(io, chk), c.checks)
+    failing = [chk.id for chk in _subtree_checks(c) if !chk.pass]
+    println(
+        io,
+        "**",
+        c.title,
+        "   ",
+        v.passed,
+        "/",
+        v.total,
+        " ",
+        v.verdict,
+        "**",
+        isempty(failing) ? "" : string(" — failing: ", join(failing, ", ")),
+    )
     return nothing
 end
 

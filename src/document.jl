@@ -634,7 +634,11 @@ end
 
 # Stringify the @figure expression for change detection, stripping source line numbers so that
 # moving a figure to a different line does not spuriously invalidate its cache entry (notes 10).
-_code_str(expr) = string(expr isa Expr ? Base.remove_linenums!(deepcopy(expr)) : expr)
+# An expression as source text. Julia 1.13 prints the symbols `end` / `begin` (in an index) as
+# `var"end"` / `var"begin"`; here they read as written, so a label, a code string and every id hashed
+# from them are the same on every Julia version.
+_expr_str(ex) = replace(string(ex), "var\"end\"" => "end", "var\"begin\"" => "begin")
+_code_str(expr) = _expr_str(expr isa Expr ? Base.remove_linenums!(deepcopy(expr)) : expr)
 
 # A canonical string for a figure's `params`, hashed into its generated id. The PinaxParamIOExt
 # extension specializes this on a ParamIO.DataKey (its canonical key); anything else uses its repr.
