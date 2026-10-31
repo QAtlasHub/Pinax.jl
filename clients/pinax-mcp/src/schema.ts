@@ -203,6 +203,7 @@ export type Code = z.infer<typeof CodeZ>;
 export type Check = z.infer<typeof CheckZ>;
 export type Verdict = z.infer<typeof VerdictZ>;
 export type TableNode = z.infer<typeof TableNodeZ>;
+export type ContentKind = z.infer<typeof ContentKindZ>;
 export type ContentRef = z.infer<typeof ContentRefZ>;
 export type Section = SectionT;
 export type Page = z.infer<typeof PageZ>;

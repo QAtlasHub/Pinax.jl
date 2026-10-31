@@ -7,18 +7,10 @@
 // store), so a single id -> unit map is the index.
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { AgentDocZ, type AgentDoc, type Check, type ContentRef, type Page } from "./schema.js";
+import { AgentDocZ, type AgentDoc, type Check, type ContentKind, type ContentRef, type Page } from "./schema.js";
 
-export type UnitKind =
-  | "part"
-  | "page"
-  | "section"
-  | "text"
-  | "figure"
-  | "table"
-  | "code"
-  | "raw"
-  | "check";
+// a part or a page, or any kind a page's content lists (a section, and every node in one)
+export type UnitKind = "part" | "page" | ContentKind;
 
 export interface Unit {
   kind: UnitKind;
@@ -74,7 +66,7 @@ const commentFields = (n: any): Field[] =>
 const cellText = (c: unknown): string => (c == null ? "" : String(c));
 const cellsText = (rows: unknown[][] = []): string => rows.map((r) => r.map(cellText).join(" ")).join(" | ");
 const paramsFields = (params: unknown): Field[] => (typeof params === "string" ? [["params", params]] : []);
-// a part, section or check: its desc and its comments; a page adds its summary
+// a part or section: its desc and its comments; a page adds its summary
 const containerFields = (n: any): Field[] => [["desc", n.desc], ...commentFields(n)];
 
 const SEARCHED: Record<UnitKind, (n: any) => Field[]> = {
@@ -86,7 +78,7 @@ const SEARCHED: Record<UnitKind, (n: any) => Field[]> = {
   page: (n) => [["desc", n.desc], ["summary", n.summary], ...commentFields(n)],
   part: containerFields,
   section: containerFields,
-  check: containerFields,
+  check: () => [], // a check carries no desc or comments: its label is all there is
 };
 
 const SNIPPET_CONTEXT = 30;

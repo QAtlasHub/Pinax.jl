@@ -229,3 +229,8 @@ test("a symlink to a file inside the agent directory, or a file not yet written,
   assert.equal(readFileSync(atlas.figureData("p1_fig1")!.abs, "utf8"), "series,T,M\n");
   assert.equal(atlas.figureAssets("p1_fig1")[0].abs, join(atlas.baseDir, "not-rendered.svg"));
 });
+
+test("a check is searched by its label alone", () => {
+  const hits = loadAtlas(fixture).search("isapprox(1.0001").filter((h) => h.kind === "check");
+  assert.deepEqual(hits.map((h) => `${h.id}.${h.field}`), ["s1_t1.label"]);
+});

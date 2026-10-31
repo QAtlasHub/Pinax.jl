@@ -132,3 +132,12 @@ test("get_figure_data and an asset read refuse a path outside the agent director
     await assert.rejects(client.readResource({ uri: "pinax://asset/p1_fig1/0" }), /outside the agent directory/);
   }, dir);
 });
+
+test("get_unit and a unit resource return the same node, indented two spaces", { timeout: 20000 }, async () => {
+  await withClient(async (client) => {
+    const tool = text(await client.callTool({ name: "get_unit", arguments: { id: "p1_tbl1" } }));
+    const res = ((await client.readResource({ uri: "pinax://table/p1_tbl1" })).contents[0] as any).text;
+    assert.equal(tool, res);
+    assert.equal(tool, JSON.stringify(JSON.parse(tool), null, 2));
+  });
+});

@@ -95,10 +95,13 @@ function readAsset(atlas: Atlas, uri: string, rest: string) {
   return { contents: [{ uri, mimeType, ...body }] };
 }
 
+// a unit's agent.json node, verbatim, as a resource read and get_unit return it
+const unitJson = (u: Unit): string => JSON.stringify(u.node, null, 2);
+
 function readUnit(atlas: Atlas, uri: string, kind: string, id: string) {
   const u = atlas.unit(id);
   if (!u) throw new Error(`unknown ${kind}: ${id}`);
-  return { contents: [{ uri, mimeType: "application/json", text: JSON.stringify(u.node, null, 2) }] };
+  return { contents: [{ uri, mimeType: "application/json", text: unitJson(u) }] };
 }
 
 // ---- tools ----------------------------------------------------------------------------------
@@ -157,7 +160,7 @@ const READ_TOOLS: Tool[] = [
     inputSchema: inputs({ id: { type: "string", description: "the unit id, e.g. a figure or table id" } }, ["id"]),
     run: ({ atlas }, a) => {
       const u = atlas.unit(str(a, "id"));
-      return u ? ok(JSON.stringify(u.node, null, 2)) : err(`no unit with id '${str(a, "id")}'`);
+      return u ? ok(unitJson(u)) : err(`no unit with id '${str(a, "id")}'`);
     },
   },
   {
