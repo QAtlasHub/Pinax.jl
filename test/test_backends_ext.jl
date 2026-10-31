@@ -201,4 +201,9 @@ end
     line = Pinax._figure_table(Plots.plot([1, 2, 3], [4.0, 5.0, 6.0]; label="L"))
     @test only(line.series).label == "L" && only(line.series).y == [4.0, 5.0, 6.0]
     @test Pinax._figure_table(Plots.heatmap(1:4, 1:3, rand(3, 4))) === nothing
+    # a square grid or a 3-D plot has x and y of one length; z still holds what is plotted
+    @test Pinax._figure_table(Plots.heatmap(rand(5, 5))) === nothing
+    @test Pinax._figure_table(Plots.surface(rand(3, 3))) === nothing
+    @test Pinax._figure_table(Plots.contour(1:4, 1:4, rand(4, 4))) === nothing
+    @test Pinax._figure_table(Plots.plot(1:3, 1:3, 1:3)) === nothing
 end
