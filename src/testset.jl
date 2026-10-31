@@ -478,32 +478,27 @@ end
 # own defaults filled in, or nothing. The Expr arrives with its arguments already EVALUATED (that is
 # what `Test` records), so these are the real numbers the assertion actually compared.
 function _approx_numbers(e::Expr)
-    e.head === :call || return nothing
-    f = e.args[1]
-    (f === :isapprox || f === :≈) || return nothing
-    pos = Float64[]
-    rtol = nothing
-    atol = nothing
-    for a in e.args[2:end]
-        if a isa Expr && a.head === :parameters
-            for kw in a.args
-                kw isa Expr && kw.head === :kw || continue
-                kw.args[1] === :rtol && (rtol = _tofloat(kw.args[2]))
-                kw.args[1] === :atol && (atol = _tofloat(kw.args[2]))
-            end
-        elseif a isa Expr && a.head === :kw
-            a.args[1] === :rtol && (rtol = _tofloat(a.args[2]))
-            a.args[1] === :atol && (atol = _tofloat(a.args[2]))
-        else
-            v = _tofloat(a)
-            v === nothing || push!(pos, v)
-        end
-    end
+    (e.head === :call && e.args[1] in (:isapprox, :≈)) || return nothing
+    args = _flat_args(e.args[2:end])
+    kw = Dict(a.args[1] => _tofloat(a.args[2]) for a in args if _is_kw(a))
+    pos = Float64[v for v in (_tofloat(a) for a in args if !_is_kw(a)) if v !== nothing]
     length(pos) >= 2 || return nothing
-    a = something(atol, 0.0)
+    a = something(get(kw, :atol, nothing), 0.0)
     # isapprox's default: rtol = √eps when no atol is given, 0 when one is.
-    r = something(rtol, a > 0 ? 0.0 : sqrt(eps(Float64)))
+    r = something(get(kw, :rtol, nothing), a > 0 ? 0.0 : sqrt(eps(Float64)))
     return (; got=pos[1], want=pos[2], atol=a, rtol=r)
+end
+_is_kw(a) = a isa Expr && a.head === :kw
+# A call's arguments with its `; …` keywords spliced in, in order (a bare `; rtol` is not a value).
+function _flat_args(args)
+    return reduce(
+        vcat,
+        (
+            a isa Expr && a.head === :parameters ? filter(_is_kw, a.args) : Any[a] for
+            a in args
+        );
+        init=Any[],
+    )
 end
 _approx_numbers(::Any) = nothing
 
