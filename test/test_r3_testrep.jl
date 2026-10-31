@@ -157,4 +157,23 @@ const R3Ext = Base.get_extension(Pinax, :PinaxTestExt)
         @test p.exitcode != 0
         @test occursin("could not be written", read(log, String))   # and says why
     end
+
+    @testset "a sweep with no checks still places its code and names what it omits" begin
+        root = R3Ext.PinaxTestSet("Test report")
+        R3Ext._with_testset(root) do
+            @testset "test_nochecks.jl" begin
+                @testset for chi in (8, 16)
+                    @desc md"SWEEP_ONLY_PROSE"
+                    @code sweep_marker = chi + 1
+                end
+            end
+        end
+        render_test_report(root.node; out=joinpath(mktempdir(), "rep"))
+        doc = Pinax.current_document()
+        page = only(p for p in doc.pages if p.title == "test_nochecks.jl")
+        # the code its samples ran is the sweep's specification, lifted as with checks
+        @test any(c -> occursin("sweep_marker", c.source), page.codes)
+        # what the sweep cannot place is named, never dropped silently
+        @test any(d -> occursin("@desc", d.message), doc.diag.entries)
+    end
 end

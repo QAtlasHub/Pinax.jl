@@ -944,13 +944,13 @@ end
 
 # Render a swept level: a convergence + margin figure per quantity, then every sample check placed flat
 # (binding-tagged) so the page's pass/fail counts and `agent.json` verdict stay exactly what they were —
-# the sweep changes only how the checks are DRAWN, never the verdict.
+# the sweep changes only how the checks are DRAWN, never the verdict. A sweep with no checks still
+# lifts its code and names what it omits.
 function _emit_sweep!(n, page_when::Function, acc::Vector{Check}, id_prefix="")
     c = _ctx_container()
     samples = _sweep_samples!(
         Tuple{Vector{Pair{Symbol,String}},Check}[], n, Pair{Symbol,String}[], page_when
     )
-    isempty(samples) && return acc
     unplaced = join(("$(k) × $(m)" for (m, k) in _sweep_unplaced(n) if k > 0), ", ")
     isempty(unplaced) || _diag!(
         WARNING,
