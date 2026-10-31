@@ -183,6 +183,26 @@ _sec(id) = only(s for s in Pinax._all_sections(_pg()) if s.id === id)
 
     # Julia 1.13 prints the symbols `end` / `begin` as `var"end"` / `var"begin"`; 1.12 prints them as
     # written. A label, a code string and every id hashed from them must not depend on that.
+    @testset "a @testset named in any script keeps an id of its own, whatever the order" begin
+        ids(order) = begin
+            Pinax.reset!()
+            @testset _IdentIso "iso" begin
+                @page :p "P" begin
+                    for name in order
+                        @testset "$name" begin
+                            @test true
+                        end
+                    end
+                end
+            end
+            Dict(s.title => s.id for s in Pinax._all_sections(_pg()))
+        end
+        a = ids(["エネルギー", "磁化", "!!"])
+        @test allunique(values(a))
+        @test a == ids(["!!", "磁化", "エネルギー"])   # content-derived, not positional
+        @test a["エネルギー"] === :p_エネルギー
+    end
+
     @testset "end / begin read as written, so ids do not depend on the Julia version" begin
         @test Pinax._code_str(:(isapprox(Ms[end], 0.0; atol=0.1))) ==
             "isapprox(Ms[end], 0.0; atol = 0.1)"

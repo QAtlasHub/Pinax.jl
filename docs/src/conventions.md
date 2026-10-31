@@ -62,7 +62,7 @@ or pull request that tracks the gap.
   | prose block | a hash of its text | `energy_txt_9d0fngk` |
   | `@raw` block | a hash of its HTML | `energy_raw_04f9ir3` |
   | check | a hash of its source text | `energy_t0358x5n` |
-  | section of a nested `@testset` | its description, as a slug | `energy_conv` |
+  | section of a nested `@testset` | its description, as a slug of its letters and digits in any script (a hash when it has none) | `energy_conv`, `energy_エネルギー` |
 
   The same content twice in one container gets `-2`, `-3`. A generated id is never an error.
 - A generated id changes when its node's own content does, so a comment stored under it then names

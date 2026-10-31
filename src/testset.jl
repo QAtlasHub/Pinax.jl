@@ -162,7 +162,12 @@ function _ignore_current_testset! end
 
 _looks_like_a_file(desc::AbstractString) = endswith(desc, ".jl")
 
-_slug(s) = Symbol(replace(lowercase(strip(s)), r"[^a-z0-9]+" => "_"))
+# A description as an id: its letters and digits, in any script, joined by `_` (`:エネルギー`,
+# `:test_foo_jl`); one with none (`"!!"`) is a hash of itself, so it is still its own and not positional.
+function _slug(s)
+    t = replace(lowercase(strip(s)), r"[^\p{L}\p{N}]+" => "_")
+    return occursin(r"[\p{L}\p{N}]", t) ? Symbol(t) : Symbol("t", _stable_hash(s))
+end
 
 # ── the code behind a check: one code format, captured by default ────
 #
