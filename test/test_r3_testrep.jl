@@ -77,4 +77,43 @@ const R3Ext = Base.get_extension(Pinax, :PinaxTestExt)
         # each cell's pages sit in its own part
         @test count(pg -> pg.part === :cell_julia_1_11_linux, doc.pages) == 1
     end
+
+    @testset "Pinax.test(file) is the one capture: a suite's install_test_capture! declines" begin
+        # Pinax.test(file) sets PINAX_TEST_OUT, so a runtests.jl carrying the install line asks for a
+        # capture while one is already open: it must decline, or a second root takes every assertion
+        # (and, where the stack can be pushed, leaks past the call with no report written).
+        dir = mktempdir()
+        suite = joinpath(dir, "runtests.jl")
+        write(
+            suite,
+            """
+            using Pinax, Test
+            println("INSTALLED=", Pinax.install_test_capture!())
+            @testset "test_once.jl" begin
+                @test 1 == 1
+            end
+            """,
+        )
+        out = joinpath(dir, "rep")
+        script = joinpath(dir, "run.jl")
+        write(
+            script,
+            """
+            using Pinax, Test
+            Pinax.test($(repr(suite)); out=$(repr(out)))
+            println("REPORT=", isfile(joinpath($(repr(out)), "agent", "agent.json")))
+            println("AFTER=", Pinax._CAPTURE_INSTALLED[])
+            """,
+        )
+        log = tempname()
+        cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) $script`
+        ok = success(run(pipeline(ignorestatus(cmd); stdout=log, stderr=log)))
+        txt = read(log, String)
+        @test ok
+        @test occursin("INSTALLED=false", txt)     # declined: the open capture is Pinax.test's
+        @test !occursin("no report is produced", txt)   # …and not for a reason that is untrue here
+        @test occursin("REPORT=true", txt)         # written when the call returns
+        @test occursin("AFTER=false", txt)         # and the call leaves no capture open behind it
+        @test occursin("1/1 PASS", read(joinpath(out, "agent", "agent.md"), String))
+    end
 end

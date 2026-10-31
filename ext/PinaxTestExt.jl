@@ -326,10 +326,19 @@ function Pinax.test(
     Core.eval(m, :(include(p) = $(Base.include)($m, p)))
     Core.eval(m, :(eval(x) = $(Core.eval)($m, x)))
     empty!(Pinax._FILE_AST)
-    withenv("PINAX_TEST_OUT" => String(out), "PINAX_TEST_TITLE" => String(title)) do
-        Test.@testset PinaxTestSet "$(title)" begin
-            Base.include(m, file)
+    # This call is the process's capture while it runs: the suite it includes sees PINAX_TEST_OUT, so
+    # a `runtests.jl` carrying `install_test_capture!()` asks for one, and must find it open and
+    # decline — a second root would take every assertion and outlive the call.
+    installed = Pinax._CAPTURE_INSTALLED[]
+    Pinax._CAPTURE_INSTALLED[] = true
+    try
+        withenv("PINAX_TEST_OUT" => String(out), "PINAX_TEST_TITLE" => String(title)) do
+            Test.@testset PinaxTestSet "$(title)" begin
+                Base.include(m, file)
+            end
         end
+    finally
+        Pinax._CAPTURE_INSTALLED[] = installed
     end
     return nothing
 end
