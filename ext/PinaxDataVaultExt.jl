@@ -85,6 +85,8 @@ function Pinax.report(
     out::AbstractString,
     study=nothing,
     observe::Bool=true,
+    # `out` is a directory (Conventions › Output): one face per subdirectory, one comment store
+    comments_file::AbstractString=joinpath(out, "comments.toml"),
     kwargs...,
 )
     loaded = [
@@ -98,34 +100,34 @@ function Pinax.report(
     recipe(pairs)
     _READS[] = Dict(r.key => r.read_sha256 for r in reads)
     try
-        # `out` is a directory (Conventions › Output): one face per subdirectory, one comment store
-        cf = get(kwargs, :comments_file, joinpath(out, "comments.toml"))
-        kw = (; (k => v for (k, v) in kwargs if k !== :comments_file)...)
-        # a failing check makes `render` throw after it has written its face: write the other face
-        # too, then throw once (render's rule: every output, then the failure)
-        failed = nothing
-        face(dir, theme) =
-            try
-                Pinax.render(;
-                    out=joinpath(out, dir),
-                    theme=theme,
-                    vault,
-                    study,
-                    comments_file=cf,
-                    kw...,
-                )
-            catch e
-                e isa Pinax.ChecksFailed || rethrow()
-                failed = something(failed, e)
-                e.path
-            end
-        gallery = face("html", :gallery)
-        agent = face("agent", :agent)
+        face(dir, theme) = Pinax.render(;
+            out=joinpath(out, dir), theme, vault, study, comments_file, kwargs...
+        )
+        (gallery, agent), failed = _render_faces(
+            face, ("html" => :gallery, "agent" => :agent)
+        )
         failed === nothing || throw(failed)
         return (; gallery, agent, n=length(pairs), reads, render_observation)
     finally
         _READS[] = nothing
     end
+end
+
+# Each `dir => theme` face rendered in turn, returning the paths written and the first failure. A
+# failing check makes `render` throw after it has written its face: the other faces are written too,
+# so the caller throws once, after every output (render's rule).
+function _render_faces(face, faces)
+    failed = nothing
+    paths = map(faces) do (dir, theme)
+        try
+            face(dir, theme)
+        catch e
+            e isa Pinax.ChecksFailed || rethrow()
+            failed = something(failed, e)
+            e.path
+        end
+    end
+    return paths, failed
 end
 
 end # module PinaxDataVaultExt
