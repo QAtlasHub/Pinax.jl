@@ -786,6 +786,15 @@ function _call(f, posargs, kwspecs)
     end
 end
 
+# A structure macro's `args` (`:id "title" [key = value …] body`) as the call that opens the block and
+# the escaped body. The id and title are escaped and `written = true`: an id written in the macro is
+# the author's.
+function _enter_call(enter!, what, args)
+    length(args) >= 3 || error("$(what) needs :id, \"title\", and a begin…end body")
+    kws = vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :written, true))
+    return _call(enter!, (esc(args[1]), esc(args[2])), kws), esc(args[end])
+end
+
 # ============================================================ preamble macros
 
 "Document settings + reset of the implicit document. `@pinaxsetup theme=… index=… numbering=… debug=…`"
@@ -845,17 +854,11 @@ it as `"status"` and the gallery badges a `:draft` page. A page inherits its enc
 status default unless it sets its own. A page is written at the top level or directly in a `@part`.
 """
 macro page(args...)
-    length(args) >= 3 || error("@page needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    enter = _call(
-        :_enter_page!,
-        (esc(id), esc(title)),
-        vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :written, true)),
-    )
+    enter, body = _enter_call(:_enter_page!, "@page", args)
     return quote
         local pg = $enter
         try
-            $(_scoped_body(:pg, esc(body)))
+            $(_scoped_body(:pg, body))
         finally
             _exit_page!()
         end
@@ -956,17 +959,11 @@ group of drafts is declared once, the published result living in a separate part
 at the top level.
 """
 macro part(args...)
-    length(args) >= 3 || error("@part needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    enter = _call(
-        :_enter_part!,
-        (esc(id), esc(title)),
-        vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :written, true)),
-    )
+    enter, body = _enter_call(:_enter_part!, "@part", args)
     return quote
         $enter
         try
-            $(esc(body))
+            $body
         finally
             _exit_part!()
         end
@@ -1003,17 +1000,11 @@ _exit_part!() = (CTX.part=nothing; CTX.page=nothing; CTX.section=nothing)
 
 "A section. `@section :id \"Title\" [by=…] [summary=…] [layout=…] begin … end`"
 macro section(args...)
-    length(args) >= 3 || error("@section needs :id, \"title\", and a begin…end body")
-    id, title, body = args[1], args[2], args[end]
-    enter = _call(
-        :_enter_section!,
-        (esc(id), esc(title)),
-        vcat(_kwspecs(args[3:(end - 1)]), Expr(:kw, :written, true)),
-    )
+    enter, body = _enter_call(:_enter_section!, "@section", args)
     return quote
         local sec = $enter
         try
-            $(_scoped_body(:sec, esc(body)))
+            $(_scoped_body(:sec, body))
         finally
             _exit_section!()
         end
