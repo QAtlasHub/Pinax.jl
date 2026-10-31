@@ -109,6 +109,8 @@ test("add_comment is exposed only with --comments and persists over MCP", { time
     // commenting on an id not in the document is rejected
     const bad = await client.callTool({ name: "add_comment", arguments: { id: "ghost", text: "x" } });
     assert.equal(bad.isError, true);
+    const noText = await client.callTool({ name: "add_comment", arguments: { id: "p1_fig1" } });
+    assert.match((noText.content as any)[0].text, /add_comment requires 'id' and 'text'/);
 
     // a table carries comments; a check does not (no face would show it), so it is refused
     const tbl = await client.callTool({ name: "add_comment", arguments: { id: "p1_tbl1", text: "ok" } });
@@ -168,6 +170,10 @@ test("set_bookmark marks only a section, and 'on' must be a boolean", { timeout:
       assert.equal(res.isError, true, id);
       assert.match((res.content as any)[0].text, new RegExp(`on a ${kind}`), id);
     }
+
+    assert.match(((await call({})).content as any)[0].text, /set_bookmark requires 'id'/);
+    const ghost = await call({ id: "ghost" });
+    assert.match((ghost.content as any)[0].text, /no unit with id 'ghost'/);
 
     // a string is not a boolean: "false" must not set the bookmark
     const str = await call({ id: "s1", on: "false" });

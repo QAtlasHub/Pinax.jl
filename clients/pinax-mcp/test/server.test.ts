@@ -54,8 +54,20 @@ test("tools list and run end-to-end over MCP (figures + tables)", { timeout: 200
     // search reaches table cells
     assert.match(text(await client.callTool({ name: "search", arguments: { query: "critical" } })), /p1_tbl1/);
 
+    // each hit is its unit, then the field it matched and a snippet
+    assert.equal(
+      text(await client.callTool({ name: "search", arguments: { query: "critical" } })),
+      "[table p1_tbl1] critical temperatures\n  label: critical temperatures",
+    );
+    assert.equal(text(await client.callTool({ name: "search", arguments: { query: "zzz" } })), "no matches for 'zzz'");
+
     const miss = await client.callTool({ name: "get_unit", arguments: { id: "nope" } });
     assert.equal(miss.isError, true);
+    assert.equal(text(miss), "no unit with id 'nope'");
+
+    const unknown = await client.callTool({ name: "no_such_tool", arguments: {} });
+    assert.equal(unknown.isError, true);
+    assert.equal(text(unknown), "unknown tool: no_such_tool");
   });
 });
 
