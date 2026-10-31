@@ -242,10 +242,16 @@ end
 # `source::LineNumberNode`, or "" — duck-typed via `hasproperty` since a `Pass` may carry no source
 # across Julia versions.
 function _source_str(res)
-    hasproperty(res, :source) || return ""
+    loc = _source_loc(res)
+    return loc === nothing ? "" : Pinax._defined_at(loc)
+end
+
+# `(file, line)` from a result's `source::LineNumberNode`, or `nothing` when it carries none.
+function _source_loc(res)
+    hasproperty(res, :source) || return nothing
     s = getproperty(res, :source)
-    (s isa LineNumberNode && s.file !== nothing) || return ""
-    return Pinax._defined_at((String(s.file), s.line))
+    (s isa LineNumberNode && s.file !== nothing) || return nothing
+    return (String(s.file), s.line)
 end
 
 # The `@code` artifact for a test result — the code that produced it, read from the file at record
@@ -253,10 +259,8 @@ end
 # `LineNumberNode`. The extraction itself is core and `Test`-free (`Pinax._test_code_block`); the only
 # part that needs `Test` is getting the file and line out of a `Test.Result`.
 function _code_block_for(res)
-    hasproperty(res, :source) || return nothing
-    s = getproperty(res, :source)
-    (s isa LineNumberNode && s.file !== nothing) || return nothing
-    return Pinax._test_code_block(String(s.file), s.line)
+    loc = _source_loc(res)
+    return loc === nothing ? nothing : Pinax._test_code_block(loc...)
 end
 
 function Test.finish(ts::PinaxTestSet)
@@ -267,11 +271,23 @@ function Test.finish(ts::PinaxTestSet)
         return ts
     end
     # ── ROOT ─────────────────────────────────────────────────────────
-    if n.ignore
-        nothing
-    elseif !isempty(ts.dump)
-        # A CI shard: dump the tree, render NOTHING. One later job merges every shard's tree into the
-        # single gallery the design implies — one page per test FILE, not one gallery per shard.
+    _emit_root(ts)
+    # Stay a well-behaved testset: a failing suite must still fail the process (invariant IV — a
+    # report never turns a red suite green). Counted from the captured checks.
+    nfail, nerr = _nfail(n), _nerror(n)
+    if nfail + nerr > 0
+        error("PinaxTestSet: $(nfail) failed, $(nerr) errored")
+    end
+    return ts
+end
+
+# What a finished root leaves behind: nothing when it is ignored; under a CI shard, a dump and NO
+# render (one later job merges every shard's tree into the single gallery the design implies — one
+# page per test FILE, not one gallery per shard); otherwise the rendered report. Then a line saying so.
+function _emit_root(ts::PinaxTestSet)
+    n = ts.node
+    n.ignore && return nothing
+    if !isempty(ts.dump)
         dump_test_report(n, ts.dump)
         println("\nPinax test report: ", _summary_line(n), "\n  dumped → ", ts.dump)
     else
@@ -282,13 +298,7 @@ function Test.finish(ts::PinaxTestSet)
             "\n  rendered → $(joinpath(ts.out, "html"))/  $(joinpath(ts.out, "agent"))/",
         )
     end
-    # Stay a well-behaved testset: a failing suite must still fail the process (invariant IV — a
-    # report never turns a red suite green). Counted from the captured checks.
-    nfail, nerr = _nfail(n), _nerror(n)
-    if nfail + nerr > 0
-        error("PinaxTestSet: $(nfail) failed, $(nerr) errored")
-    end
-    return ts
+    return nothing
 end
 
 # The interface `Pinax.test` (docstring in src/testset.jl). In the EXTENSION, `PinaxTestSet` is an
@@ -356,19 +366,7 @@ function _finalize_test_capture!(root::PinaxTestSet)
     # do nothing (no render, no print, no exit) so their stdout stays clean for `Pkg` to parse.
     n = root.node
     (isempty(n.children) && isempty(n.checks)) && return nothing
-    if n.ignore
-        nothing
-    elseif !isempty(root.dump)
-        dump_test_report(n, root.dump)
-        println("\nPinax test report: ", _summary_line(n), "\n  dumped → ", root.dump)
-    else
-        render_test_report(n; out=root.out, title=root.title, page_when=root.page_when)
-        println(
-            "\nPinax test report: ",
-            _summary_line(n),
-            "\n  rendered → $(joinpath(root.out, "html"))/  $(joinpath(root.out, "agent"))/",
-        )
-    end
+    _emit_root(root)
     nfail, nerr = _nfail(n), _nerror(n)
     (nfail + nerr > 0) && exit(1)   # red suite → nonzero exit (finish's throw can't fire in atexit)
     return nothing
