@@ -1651,12 +1651,7 @@ function render_test_report(
 )
     reset!(; title=title)
     _diag_dropped!(root)
-    seen = Set{Symbol}((:overview, :per_file, :provenance))   # ids the overview page already owns
-    # An overview page first: one row per file, so the whole suite is one glance — and the SAME rows
-    # land in agent.json as data, so an LLM reads the suite without scraping a log.
-    _enter_page!(:overview, title; layout=:wide, summary=_summary_line(root))
-    try
-        _overview_hook(overview)   # the caller's verdict leads, above the fixed tables
+    seen = _overview_page!(title, root, overview) do
         prov = _provenance_rows()
         isempty(prov) || _push_table!(;
             data=prov,
@@ -1667,18 +1662,33 @@ function render_test_report(
         )
         rows = NamedTuple[]
         _collect_rows!(rows, root, page_when)
-        isempty(rows) || _push_table!(;
+        return isempty(rows) || _push_table!(;
             data=rows,
             code="",
             caption="Per-file result profile. `worst margin` is the largest `delta/tol` seen in " *
                     "that file: 1.0 means a check landed exactly on its tolerance.",
             gen_id=:per_file,
         )
-    finally
-        _exit_page!()
     end
     _emit_node!(root, page_when, seen)
     return _render_report_doc(current_document(), out)
+end
+
+# The ids the overview page owns, so no testset's page takes one.
+const _OVERVIEW_IDS = (:overview, :per_file, :provenance)
+
+# An overview page first: one row per file, so the whole suite is one glance — and the SAME rows land
+# in agent.json as data, so an LLM reads the suite without scraping a log. The caller's `overview`
+# hook leads, above the fixed tables `tables()` pushes. Returns the page ids taken so far.
+function _overview_page!(tables::Function, title, root, overview)
+    _enter_page!(:overview, title; layout=:wide, summary=_summary_line(root))
+    try
+        _overview_hook(overview)
+        tables()
+    finally
+        _exit_page!()
+    end
+    return Set{Symbol}(_OVERVIEW_IDS)
 end
 
 # Render a test report's document to both faces. Every check in it came from a `@test` the test runner
@@ -1775,19 +1785,8 @@ function _render_matrix(
     ]
     reset!(; title=title)
     foreach(((r, _),) -> _diag_dropped!(r), pairs)
-    seen = Set{Symbol}((:overview, :per_file, :provenance))
-    allfiles = reduce(vcat, (r.children for (r, _) in pairs); init=TestNode[])
-    rowsroot = TestNode(
-        title;
-        children=allfiles,
-        checks=reduce(vcat, (r.checks for (r, _) in pairs); init=Check[]),
-        nbroken=sum(((r, _),) -> r.nbroken, pairs; init=0),
-        nerror=sum(((r, _),) -> r.nerror, pairs; init=0),
-        elapsed=sum(((r, _),) -> isnan(r.elapsed) ? 0.0 : r.elapsed, pairs; init=0.0),
-    )
-    _enter_page!(:overview, title; layout=:wide, summary=_summary_line(rowsroot))
-    try
-        _overview_hook(overview)   # the caller's verdict leads, above the fixed tables
+    # the overview states the verdict of every cell together: the cells merged as if shards
+    seen = _overview_page!(title, _merge_shards(first.(pairs), title), overview) do
         _push_table!(;
             data=[(;
                 field="matrix cells", value=join(unique(c for (_, c) in pairs), "  ·  ")
@@ -1803,14 +1802,12 @@ function _render_matrix(
             _collect_rows!(cr, r, page_when)
             append!(rows, (merge((; cell=c), row) for row in cr))
         end
-        isempty(rows) || _push_table!(;
+        return isempty(rows) || _push_table!(;
             data=rows,
             code="",
             gen_id=:per_file,
             caption="Per-cell, per-file result profile. `worst margin` is the largest `delta/tol` in that (cell, file).",
         )
-    finally
-        _exit_page!()
     end
     for (r, c) in pairs
         _enter_part!(Symbol("cell_", _slug(c)), c)
