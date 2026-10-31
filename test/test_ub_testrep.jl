@@ -106,4 +106,51 @@ _ub_diags() = [(d.item, d.message) for d in Pinax.current_document().diag.entrie
         end
         @test Pinax.load_test_dump(good).children[1].content == [:check => 1]
     end
+
+    @testset "every node a shard dump drops is a diagnostic of the merged report" begin
+        fig(id) = Pinax.Figure(
+            id, string(id), "", nothing, () -> "x.svg", "code", false, String[], nothing
+        )
+        tbl(id) = Pinax.Table(id, string(id), "", ["a"], [Any[1]], "", (; n=1))
+        shard(file, figs, tbls) = TestNode(
+            "T";
+            children=[
+                TestNode(
+                    file;
+                    checks=[Check(:t, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+                    figures=fig.(figs),
+                    tables=tbl.(tbls),
+                ),
+            ],
+        )
+        dir = mktempdir()
+        d1 = joinpath(dir, "s1.toml")
+        d2 = joinpath(dir, "s2.toml")
+        # each dropped node is said in the shard's log too — every one, not the first only
+        @test_logs (:warn, r"FIG_A") (:warn, r"FIG_B") (:warn, r"TBL_A") match_mode = :any Pinax.dump_test_report(
+            shard("test_a.jl", [:FIG_A, :FIG_B], [:TBL_A]), d1
+        )
+        @test_logs (:warn, r"FIG_C") (:warn, r"TBL_B") match_mode = :any Pinax.dump_test_report(
+            shard("test_b.jl", [:FIG_C], [:TBL_B]), d2
+        )
+        out = joinpath(dir, "rep")
+        render_test_report([d1, d2]; out=out)
+        diags = _ub_diags()
+        for id in ("FIG_A", "FIG_B", "FIG_C", "TBL_A", "TBL_B")
+            @test count(((item, msg),) -> occursin(id, item * msg), diags) == 1
+        end
+        aj = read(joinpath(out, "agent", "agent.json"), String)
+        @test occursin("FIG_B", aj) && occursin("TBL_B", aj)
+        # …and of a CI-matrix report, where each cell is a part
+        cells = map(["1.10", "1.11"]) do v
+            withenv("PINAX_TEST_MATRIX" => v) do
+                @test_logs (:warn,) match_mode = :any Pinax.dump_test_report(
+                    shard("test_a.jl", [Symbol("FIG_M", v)], Symbol[]),
+                    joinpath(dir, "m$(v).toml"),
+                )
+            end
+        end
+        render_test_report(cells; out=joinpath(dir, "mrep"))
+        @test count(((item, _),) -> startswith(item, "FIG_M"), _ub_diags()) == 2
+    end
 end

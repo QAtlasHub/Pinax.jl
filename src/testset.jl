@@ -582,6 +582,7 @@ mutable struct TestNode
     texts::Vector{Prose}                # @desc prose blocks
     content::Vector{Pair{Symbol,Int}}   # declaration order of texts/figures/tables/raws/checks/codes
     written::Set{Symbol}                # ids of its content the author wrote (`id=`); others generated
+    dropped::Vector{Pair{String,String}} # id => why: what a shard dump could not carry (see the dump)
 end
 
 function TestNode(
@@ -599,6 +600,7 @@ function TestNode(
     texts::Vector{Prose}=Prose[],
     content::Vector{Pair{Symbol,Int}}=Pair{Symbol,Int}[],
     written::Set{Symbol}=Set{Symbol}(),
+    dropped::Vector{Pair{String,String}}=Pair{String,String}[],
 )
     id = _slug(description)
     return TestNode(
@@ -618,6 +620,7 @@ function TestNode(
         texts,
         content,
         written,
+        dropped,
     )
 end
 
@@ -1569,6 +1572,7 @@ function render_test_report(
     overview=nothing,
 )
     reset!(; title=title)
+    _diag_dropped!(root)
     seen = Set{Symbol}((:overview, :per_file, :provenance))   # ids the overview page already owns
     # An overview page first: one row per file, so the whole suite is one glance — and the SAME rows
     # land in agent.json as data, so an LLM reads the suite without scraping a log.
@@ -1646,6 +1650,7 @@ function _merge_shards(roots, title)
         children=reduce(vcat, (r.children for r in roots); init=TestNode[]),
         nbroken=sum(r -> r.nbroken, roots; init=0),
         nerror=sum(r -> r.nerror, roots; init=0),
+        dropped=reduce(vcat, (r.dropped for r in roots); init=Pair{String,String}[]),
     )
     foreach(r -> _append_content!(m, r), roots)
     return m
@@ -1691,6 +1696,7 @@ function _render_matrix(
         c in order
     ]
     reset!(; title=title)
+    foreach(((r, _),) -> _diag_dropped!(r), pairs)
     seen = Set{Symbol}((:overview, :per_file, :provenance))
     allfiles = reduce(vcat, (r.children for (r, _) in pairs); init=TestNode[])
     rowsroot = TestNode(
@@ -1756,7 +1762,6 @@ gallery.
 function dump_test_report(root, path::AbstractString)
     dir = dirname(path)
     isempty(dir) || mkpath(dir)
-    _warn_if_undumpable(root)
     d = Dict{String,Any}("root" => _node_to_dict(root))
     m = report_matrix()
     isempty(m) || (d["matrix"] = m)   # the CI matrix cell, so a later merge can group cells (#69 K)
@@ -1766,17 +1771,31 @@ function dump_test_report(root, path::AbstractString)
     return path
 end
 
-# Everything a test captures crosses a shard dump EXCEPT a `@figure`: its `gen` is a closure, and a
-# closure cannot be serialized (materializing the asset into the dump would make the dump a directory —
-# deliberately not done). So the one exception is warned about loudly rather than dropped silently: a
-# sharded report must never be quietly missing content. `@desc` / `@table` / `@raw` / declaration order
-# all ride along, which is what makes the sharded and unsharded documents the same document.
-function _warn_if_undumpable(n)
-    isempty(n.figures) ||
-        @warn "Pinax: a `@figure` written inside a test cannot cross a shard dump \
-               (its generator is a closure) — it appears in a direct \
-               (non-sharded) render only." testset = n.description maxlog = 1
-    foreach(_warn_if_undumpable, n.children)
+# Everything a test captures crosses a shard dump EXCEPT a `@figure` (its `gen` is a closure, and a
+# closure cannot be serialized; materializing the asset would make the dump a directory — deliberately
+# not done) and a `@table`'s `params`. A sharded report must never be quietly missing content, so each
+# such node is written INTO the dump as `id => why`, and the merged report states every one in its
+# diagnostics (`_diag_dropped!`); the shard's log says it too. `@desc` / `@table` / `@raw` /
+# declaration order all ride along, which is what makes the sharded and unsharded documents the same.
+function _dump_drops(n)
+    at = "in testset \"$(n.description)\""
+    fig = [
+        String(f.id) =>
+            "the `@figure` $(f.id) $(at) cannot cross a shard dump (its generator is a closure) — " *
+            "it appears in a direct (non-sharded) render only" for f in n.figures
+    ]
+    tbl = [
+        String(t.id) => "the `@table` $(t.id) $(at) lost its `params` in a shard dump — its data and caption crossed"
+        for t in n.tables if t.params !== nothing
+    ]
+    return vcat(n.dropped, fig, tbl)
+end
+
+# Every node the shard dumps dropped, as a diagnostic of the document being built.
+function _diag_dropped!(n)
+    n.ignore && return nothing
+    foreach(((id, why),) -> _diag!(WARNING, id, why), n.dropped)
+    foreach(_diag_dropped!, n.children)
     return nothing
 end
 
@@ -1822,6 +1841,10 @@ function _node_to_dict(n)
         ]
     )
     isempty(n.written) || (d["written"] = sort!([String(id) for id in n.written]))
+    drops = _dump_drops(n)
+    foreach(((_, why),) -> @warn("Pinax: $(why)."), drops)
+    isempty(drops) ||
+        (d["dropped"] = [Dict{String,Any}("id" => id, "why" => why) for (id, why) in drops])
     isempty(n.children) || (d["child"] = [_node_to_dict(c) for c in n.children])
     return d
 end
@@ -1837,9 +1860,6 @@ _from_toml_cell(x) = x
 _from_toml_cell(d::AbstractDict) = haskey(d, "missing") ? missing : nothing
 
 function _table_to_dict(t::Table)
-    t.params === nothing ||
-        @warn "Pinax: a `@table`'s `params` are not carried through a shard \
-               dump — the table's data and caption are." table = t.id maxlog = 1
     return Dict{String,Any}(
         "id" => String(t.id),
         "caption" => t.caption,
@@ -1934,6 +1954,7 @@ function _dict_to_node(d::AbstractDict, path::AbstractString="")
         ],
         children=TestNode[_dict_to_node(c, path) for c in get(d, "child", Any[])],
         written=Set{Symbol}(Symbol(id) for id in get(d, "written", Any[])),
+        dropped=Pair{String,String}[e["id"] => e["why"] for e in get(d, "dropped", Any[])],
     )
     # A `@figure` did not survive, so any `:figure` entry in the recorded order is dropped — the rest
     # keeps its declared position (a legacy dump with no `content` falls back to checks-then-codes in
