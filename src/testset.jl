@@ -890,11 +890,14 @@ function _swept_codes(n, out=CodeBlock[])
     return out
 end
 
-function _sweep_has_user_content(n)
-    return !isempty(n.figures) ||
-           !isempty(n.tables) ||
-           !isempty(n.raws) ||
-           any(_sweep_has_user_content, n.children)
+# What a sweep cannot place: the content its samples wrote besides checks and code (the checks and
+# the code are folded), as `macro => count` in a fixed order, over the whole swept subtree.
+const _SWEEP_UNPLACED = (
+    "@desc" => :texts, "@figure" => :figures, "@table" => :tables, "@raw" => :raws
+)
+_sweep_unplaced(n) = [m => _subtree_count(n, f) for (m, f) in _SWEEP_UNPLACED]
+function _subtree_count(n, f)
+    return length(getfield(n, f)) + sum(ch -> _subtree_count(ch, f), n.children; init=0)
 end
 
 # Group samples by quantity = the check label (the test expression `orig_expr`, which is loop-invariant,
@@ -919,10 +922,11 @@ function _emit_sweep!(n, page_when::Function, acc::Vector{Check})
         Tuple{Vector{Pair{Symbol,String}},Check}[], n, Pair{Symbol,String}[], page_when
     )
     isempty(samples) && return acc
-    _sweep_has_user_content(n) && _diag!(
+    unplaced = join(("$(k) × $(m)" for (m, k) in _sweep_unplaced(n) if k > 0), ", ")
+    isempty(unplaced) || _diag!(
         WARNING,
         string(c.id, "_sweep"),
-        "@figure/@table inside a swept `@testset for` is not folded yet — omitted from the sweep view (issue #69 E follow-up)",
+        "$(unplaced) inside a swept `@testset for` is not folded yet — omitted from the sweep view (issue #69 E follow-up)",
     )
     # The samples are folded away, but the CODE they captured is the sweep's specification (the loop
     # header + the assertion), so it must survive the fold: lift it to the section, deduplicated, ahead
