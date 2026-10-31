@@ -73,6 +73,7 @@ function _csv_field(v)
     return needs ? string('"', replace(s, '"' => "\"\""), '"') : s
 end
 _csv_num(v::Real) = isfinite(v) ? string(v) : ""   # NaN/Inf -> blank cell
+_csv_num(::Union{Missing,Nothing}) = ""             # a missing value is a gap too, like NaN
 _csv_num(v) = _csv_field(v)                         # categorical x (strings/dates)
 
 # The columns of a data file: the series label, then the x and y axes, named by the plot's axis labels
