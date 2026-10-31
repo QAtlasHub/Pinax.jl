@@ -13,27 +13,39 @@ function resolve!(doc::Document)
     empty!(doc.refs)
     for pg in doc.pages
         doc.refs[pg.id] = pg
-        for f in pg.figures            # page-level figures (page-as-leaf)
-            doc.refs[f.id] = f
-        end
-        for sec in _all_sections(pg)
-            doc.refs[sec.id] = sec
-            for f in sec.figures
-                doc.refs[f.id] = f
-            end
-        end
+        foreach(sec -> doc.refs[sec.id] = sec, _all_sections(pg))
+        figs = _page_figs(pg)
+        foreach(f -> doc.refs[f.id] = f, figs)
         # `@thumbnail :id` names a figure on its page; one it cannot find is an error, not a blank card
         t = pg.thumbnail
         t === nothing ||
-            any(
-                f -> f.id === t.id,
-                Iterators.flatten((pg.figures, (s.figures for s in _all_sections(pg))...)),
-            ) ||
+            any(f -> f.id === t.id, figs) ||
             error(
                 "Pinax: @thumbnail :$(t.id) on page :$(pg.id) names no figure on that page"
             )
     end
     return doc
+end
+
+# Where a face writes a container's figures: `<outdir>/assets/figures/<page>[/<section>]`, by the
+# anchors; a nested section's directory sits under its page, by its own anchor. LaTeX keeps them out
+# of `assets` (`assets=false`): `<outdir>/figures/…`.
+function _figure_dir(outdir, pg, sec=nothing; assets::Bool=true)
+    root = assets ? joinpath(outdir, "assets", "figures") : joinpath(outdir, "figures")
+    return if sec === nothing
+        joinpath(root, pg.anchor)
+    else
+        joinpath(root, pg.anchor, sec.anchor)
+    end
+end
+
+# Every figure of a page in display order: page-level (page-as-leaf) first, then each section's.
+function _page_figs(pg::Page)
+    figs = copy(pg.figures)
+    for sec in _all_sections(pg)
+        append!(figs, sec.figures)
+    end
+    return figs
 end
 
 # Materialize one figure into a face's directory. A failure is recorded in `rdiag` (the face then

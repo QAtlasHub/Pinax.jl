@@ -403,11 +403,10 @@ function _gallery_numbers(doc::Document)
         prev_part = pg.part
         pagen += 1
         perpage && (secn = fign = eqn = 0)
-        pid = pg.id
+        # the live counters for this page: section and figure as they stand when it is called
+        ctr(subfig, e) = _counters(pagen, pg.id, partn, pg.part, secn, fign, subfig, e)
         # the page badge itself (e.g. EQ3 / GQ7), then page-level desc + figures (page-as-leaf)
-        nums[pg.anchor] = string(
-            numberer(:page, _counters(pagen, pid, partn, pg.part, secn, fign, 0, eqn))
-        )
+        nums[pg.anchor] = string(numberer(:page, ctr(0, eqn)))
         # A container's content in reading order: each figure is numbered, the display equations in
         # prose and captions are numbered as a reader meets them, and a child section is numbered and
         # walked where it stands, so whatever follows it comes after its own figures.
@@ -416,18 +415,13 @@ function _gallery_numbers(doc::Document)
             for (kind, item) in _content_items(c)
                 if kind === :section
                     secn += 1
-                    nums[item.anchor] = string(
-                        numberer(
-                            :section,
-                            _counters(pagen, pid, partn, pg.part, secn, fign, 0, eqn),
-                        ),
-                    )
+                    nums[item.anchor] = string(numberer(:section, ctr(0, eqn)))
                     walk!(item)
                 elseif kind === :text
                     eqn = _scan_eqs!(
                         item.source,
                         item.anchor,
-                        e -> _counters(pagen, pid, partn, pg.part, secn, fign, 0, e),
+                        e -> ctr(0, e),
                         nums,
                         ids_eq,
                         eqseq,
@@ -437,17 +431,12 @@ function _gallery_numbers(doc::Document)
                 elseif kind === :figure
                     fign += 1
                     subfig += 1
-                    nums[item.anchor] = string(
-                        numberer(
-                            :figure,
-                            _counters(pagen, pid, partn, pg.part, secn, fign, subfig, eqn),
-                        ),
-                    )
+                    nums[item.anchor] = string(numberer(:figure, ctr(subfig, eqn)))
                     sf = subfig
                     eqn = _scan_eqs!(
                         item.caption,
                         item.anchor,
-                        e -> _counters(pagen, pid, partn, pg.part, secn, fign, sf, e),
+                        e -> ctr(sf, e),
                         nums,
                         ids_eq,
                         eqseq,
@@ -510,14 +499,8 @@ function emit_text(theme::GalleryBase, source, item, ctx; block::Bool=true)
     s = replace(s, _CITE_RE => m -> tok!(_cite_html(m, ctx, item)))
     s = replace(s, r"@label\(:\w+\)\s*" => "")
     # 2. Render the surviving prose as markdown (raw HTML is escaped -> safe). A parse failure is
-    #    non-fatal: fall back to escaped text and record a diagnostic (notes 09).
-    html = try
-        _markdown(s)
-    catch e
-        e isa InterruptException && rethrow()
-        push!(ctx.rdiag, DiagEntry(WARNING, item, "markdown render failed: $(e)"))
-        _esc(s)
-    end
+    #    non-fatal: escaped text, and a diagnostic (notes 09).
+    html = _render_markdown(_markdown, _esc, s, item, ctx.rdiag)
     # 3. Re-inject the protected fragments.
     for (k, frag) in enumerate(subs)
         html = replace(html, _tok(k) => frag)
@@ -525,9 +508,23 @@ function emit_text(theme::GalleryBase, source, item, ctx; block::Bool=true)
     return block ? html : _unwrap_p(html)
 end
 
-# Markdown -> HTML. Lets the (rare) parse error propagate; `emit_text` turns it into a diagnostic.
+# Markdown -> HTML. Lets the (rare) parse error propagate; `_render_markdown` turns it into a
+# diagnostic.
 function _markdown(s::AbstractString)
     return rstrip(Markdown.html(Markdown.parse(s)))
+end
+
+# Markdown in a face's markup: `render(s)`, or `escape(s)` when the markdown will not render — and
+# then a diagnostic under `item` in `rdiag`, never a silent fallback (notes 09). The one place every
+# face decides this, for prose, captions, comments and part descriptions.
+function _render_markdown(render, escape, s, item, rdiag)
+    try
+        return render(s)
+    catch e
+        e isa InterruptException && rethrow()
+        push!(rdiag, DiagEntry(WARNING, string(item), "markdown render failed: $(e)"))
+        return escape(s)
+    end
 end
 
 # Drop the single `<p>…</p>` wrapper markdown adds, for inline contexts (captions).
@@ -634,18 +631,7 @@ function _toc_indent(sec, base)
 end
 
 # Figure count of one page = its page-level figures plus every section's figures.
-function _page_nfigs(pg::Page)
-    return length(pg.figures) + sum(length(s.figures) for s in _all_sections(pg); init=0)
-end
-
-# Every figure of a page in display order: page-level (page-as-leaf) first, then each section's.
-function _page_figs(pg::Page)
-    figs = copy(pg.figures)
-    for sec in _all_sections(pg)
-        append!(figs, sec.figures)
-    end
-    return figs
-end
+_page_nfigs(pg::Page) = length(_page_figs(pg))
 
 # The figure shown on a page's index card. Author intent first (@thumbnail / a thumbnail=true marker),
 # then a bookmarked figure (the reader's "important" signal), then the first figure; `nothing` if the
@@ -821,14 +807,7 @@ function emit_page(theme::GalleryBase, pg, ctx)
     pg.summary === nothing ||
         println(io, "<p class=\"pinax-subtitle\">", _esc(pg.summary), "</p>")
     _emit_checks!(theme, pg, ctx)
-    _emit_content(
-        theme,
-        pg,
-        joinpath(ctx.outdir, "assets", "figures", pg.anchor),
-        pg.layout,
-        ctx;
-        page=pg,
-    )
+    _emit_content(theme, pg, _figure_dir(ctx.outdir, pg), pg.layout, ctx; page=pg)
     emit_comments(theme, pg.anchor, ctx)   # the page (file node) can carry its own comments
     return nothing
 end
@@ -925,17 +904,14 @@ end
 _page_count_meta(pg) = _count_meta(length(_all_sections(pg)), _page_nfigs(pg))
 
 # A part's overview description (markdown → HTML), shown beneath its index group heading; "" if none.
-# Math ($…$) renders client-side via KaTeX (the index loads it); a parse failure falls back to text.
-function _part_desc_html(doc::Document, pid)
+# Math ($…$) renders client-side via KaTeX (the index loads it). A parse failure falls back to text;
+# `emit_index` has no diagnostics to write to, so `_emit_index_file` records it (`rdiag` here is
+# where a caller that has them passes them).
+function _part_desc_html(doc::Document, pid, rdiag=DiagEntry[])
     pid === nothing && return ""
     d = get(doc.part_descs, pid, nothing)
     d === nothing && return ""
-    body = try
-        _markdown(d.source)
-    catch e
-        e isa InterruptException && rethrow()
-        _esc(d.source)
-    end
+    body = _render_markdown(_markdown, _esc, d.source, pid, rdiag)
     return string("<div class=\"part-desc\">", body, "</div>")
 end
 
@@ -1097,7 +1073,7 @@ function _gallery_setup(theme::GalleryBase, doc::Document, outdir, cache, commen
     citenums, citeorder = _gallery_citations(doc, bib)
     comments, bookmarks = _read_comments(doc, comments_file, rdiag)
     features = doc.meta.features
-    interactive = any(in(features), (:comments, :bookmarks, :export))
+    interactive = any(in(features), _FEATURES)
     katex = doc.meta.katex
     katex === :local && _copy_katex(outdir)   # vendor math assets for offline viewing
     ids = merge(base_ids, ids_eq)
@@ -1244,6 +1220,9 @@ function _emit_index_file(g)
         _nfigs_text(_total_figures(doc)),
         "</div>",
     )
+    # the index is the one place part descriptions are shown: a description whose markdown will not
+    # render is recorded here, where the diagnostics are in reach
+    foreach(((pid, _, _),) -> _part_desc_html(doc, pid, rdiag), _grouped_pages(doc))
     emit_index(theme, doc, io, g.outdir, g.bookmarks)
     _emit_diagnostics(doc, rdiag, io)
     emit_foot(theme, io, doc, katex, false, rdiag)
@@ -1263,7 +1242,7 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     heading *= _nfig_span(length(sec.figures))
     bookmarked && (heading *= " <span class=\"pinax-bm-on\" title=\"bookmarked\">★</span>")
     cls = bookmarked ? "section bookmarked" : "section"
-    open_h, close_h = _gallery_heading(sec, ctx)
+    open_h, close_h = _gallery_heading(sec.depth, sec.anchor, ctx)
     println(
         io,
         "<section class=\"",
@@ -1276,7 +1255,7 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
         close_h,
     )
     _emit_checks!(theme, sec, ctx)
-    assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
+    assetdir = _figure_dir(ctx.outdir, pg, sec)
     if sec.facet isa AbstractString
         # faceting regroups figures by a param axis, so declaration order does not apply to them;
         # everything else follows the facet groups, in declaration order (#168).
@@ -1300,7 +1279,6 @@ end
 # The one place the gallery turns depth into a heading: `<h1>` for a page, `<h2>` for a top-level
 # section down to `<h6>`; deeper sections keep their level as an ARIA heading, with a diagnostic
 # (never flattened). A part is a `<details>` group on the index, not a heading.
-_gallery_heading(sec, ctx) = _gallery_heading(sec.depth, sec.anchor, ctx)
 function _gallery_heading(d::Int, anchor, ctx)
     d <= 6 && return ("<h$(d)>", "</h$(d)>")
     push!(
@@ -1326,12 +1304,7 @@ function emit_comments(theme::GalleryBase, anchor, ctx)
     io = ctx.io
     println(io, "<div class=\"pinax-comments\">")
     for c in turns
-        body = try
-            _markdown(c.text)
-        catch e
-            e isa InterruptException && rethrow()
-            _esc(c.text)
-        end
+        body = _render_markdown(_markdown, _esc, c.text, anchor, ctx.rdiag)
         author = if isempty(c.author)
             ""
         else

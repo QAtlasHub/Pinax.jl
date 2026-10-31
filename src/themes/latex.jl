@@ -81,7 +81,7 @@ end
 
 # Render a desc/caption markdown source to LaTeX, protecting math + cross-references from the
 # markdown pass (same token scheme as the gallery), then re-injecting their LaTeX forms.
-function _latex_render(source::AbstractString, ids, rdiag)
+function _latex_render(source::AbstractString, item, ids, rdiag)
     subs = String[]
     tok!(x) = (push!(subs, x); _tok(length(subs)))
     s = replace(source, _EQ_RE => m -> tok!(_latex_eq(m)))
@@ -89,17 +89,15 @@ function _latex_render(source::AbstractString, ids, rdiag)
     s = replace(s, _REF_RE => m -> tok!(_latex_ref(m, ids, rdiag)))
     s = replace(s, _CITE_RE => m -> tok!(_latex_cite(m)))
     s = replace(s, r"@label\(:\w+\)\s*" => "")
-    out = try
-        rstrip(Markdown.latex(Markdown.parse(s)))
-    catch e
-        e isa InterruptException && rethrow()
-        _texesc(s)
-    end
+    out = _render_markdown(_latex_markdown, _texesc, s, item, rdiag)
     for (k, frag) in enumerate(subs)
         out = replace(out, _tok(k) => frag)
     end
     return out
 end
+
+# Markdown -> LaTeX. A parse error propagates; `_render_markdown` turns it into a diagnostic.
+_latex_markdown(s) = rstrip(Markdown.latex(Markdown.parse(s)))
 
 # Per-render LaTeX state, threaded through the per-node contract methods on `LaTeXBase`
 # (emit_document/page/section/figure/text/comments). `ctx` is left UNTYPED on those methods on
@@ -117,7 +115,7 @@ end
 
 # `@desc`/`@caption` markdown → LaTeX (the latex theme's emit_text).
 function emit_text(::LaTeXBase, source, item, ctx; block=true)
-    return _latex_render(source, ctx.ids, ctx.rdiag)
+    return _latex_render(source, item, ctx.ids, ctx.rdiag)
 end
 
 # A node's co-located comments as a "Notes" itemize.
@@ -299,7 +297,6 @@ end
 const _LATEX_HEADINGS = (
     "part", "section", "subsection", "subsubsection", "paragraph", "subparagraph"
 )
-_latex_heading(sec, ctx) = _latex_heading(sec.depth, sec.title, sec.anchor, ctx)
 function _latex_heading(depth::Int, title, anchor, ctx)
     t = _texesc(title)
     depth < length(_LATEX_HEADINGS) &&
@@ -326,8 +323,8 @@ function _latex_body!(theme::LaTeXBase, c, pg, assetdir, ctx)
 end
 
 function emit_section(theme::LaTeXBase, sec, pg, ctx)
-    println(ctx.io, _latex_heading(sec, ctx))
-    assetdir = joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor)
+    println(ctx.io, _latex_heading(sec.depth, sec.title, sec.anchor, ctx))
+    assetdir = _figure_dir(ctx.outdir, pg, sec; assets=false)
     return _latex_body!(theme, sec, pg, assetdir, ctx)
 end
 
@@ -335,7 +332,7 @@ function emit_page(theme::LaTeXBase, pg, ctx)
     io = ctx.io
     println(io, _latex_heading(1, pg.title, pg.anchor, ctx))   # a page = one \section
     pg.status === :draft && println(io, "\\par\\noindent\\textit{Draft.}")   # its maturity, as every face shows it
-    return _latex_body!(theme, pg, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
+    return _latex_body!(theme, pg, pg, _figure_dir(ctx.outdir, pg; assets=false), ctx)
 end
 
 function emit_document(

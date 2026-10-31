@@ -152,7 +152,7 @@ end
     @test occursin("data-tag=\"\"", html)
 
     # the cards carry what the filter matches on, and show it
-    @test occursin("data-tags=\"chaos example\"", html)
+    @test occursin("data-tags=\"[&quot;chaos&quot;,&quot;example&quot;]\"", html)
     @test occursin("<span class=\"card-tag\">chaos</span>", html)
     @test !occursin("data-tags=\"\"", html)               # an untagged card carries no empty attr
 
@@ -164,7 +164,7 @@ end
 
     # the same at :toc — the bar is emitted at every level, so the rows must match on something
     toc = read(Pinax.contents(entries; out=mktempdir(), level=:toc), String)
-    @test occursin("<li data-tags=\"chaos example\">", toc)
+    @test occursin("<li data-tags=\"[&quot;chaos&quot;,&quot;example&quot;]\">", toc)
     @test occursin("<div class=\"pinax-filters\"", toc)
 
     # search is emitted only when asked: a box over an index that was never built is worse than none

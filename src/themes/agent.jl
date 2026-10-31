@@ -40,20 +40,23 @@ struct AgentCtx
     # figure id => (its images, its data file or nothing), all in THIS face's directory
     files::Dict{Symbol,Tuple{Vector{String},Union{String,Nothing}}}
 end
-function AgentCtx(io, outdir, comments, cache, rdiag)
-    return AgentCtx(io, outdir, comments, cache, rdiag, Dict{Symbol,Any}())
-end
 
-# A JSON scalar for a param/cell value: numbers/bools stay native (a tool reads 16, not "16");
+# A JSON scalar for a param/cell value: integers and floats stay native (a tool reads 16, not "16");
 # missing/nothing map to JSON null; NaN/Inf are not valid JSON numbers so they're quoted; anything
-# else is stringified.
+# else is stringified — a `Rational` or an `Irrational` too (`1//3` and `π` are not JSON numbers),
+# which is the text the gallery and LaTeX cells show.
 _agent_jsonval(::Missing) = "null"
 _agent_jsonval(::Nothing) = "null"
 _agent_jsonval(v::Bool) = v ? "true" : "false"
 _agent_jsonval(v::Integer) = string(v)
-_agent_jsonval(v::Real) = isfinite(v) ? string(v) : _jsonstr(string(v))
+_agent_jsonval(v::AbstractFloat) = isfinite(v) ? _json_float(v) : _jsonstr(string(v))
 _agent_jsonval(v::AbstractString) = _jsonstr(v)
 _agent_jsonval(v) = _jsonstr(string(v))
+
+# A finite float as a JSON number. Julia prints a `Float64` or a `BigFloat` as one; a narrower float
+# (`0.5f0`, `Float16(0.5)`) is printed through `Float64`, which holds its value exactly.
+_json_float(v::Union{Float64,BigFloat}) = string(v)
+_json_float(v::AbstractFloat) = string(Float64(v))
 
 # A JSON array on `io`: `[`, then each element as `f(x)` prints it, comma-separated, then `]`.
 function _json_array(f, io, xs)
@@ -303,7 +306,7 @@ function _agent_container_fields(theme::AgentBase, c, pg, assetdir, ctx)
 end
 
 function emit_section(theme::AgentBase, sec, pg, ctx)
-    assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
+    assetdir = _figure_dir(ctx.outdir, pg, sec)
     return _json_object(
         ctx.io,
         "id" => _jsonstr(string(sec.id)),
@@ -314,7 +317,7 @@ function emit_section(theme::AgentBase, sec, pg, ctx)
 end
 
 function emit_page(theme::AgentBase, pg, ctx)
-    assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor)
+    assetdir = _figure_dir(ctx.outdir, pg)
     return _json_object(
         ctx.io,
         "id" => _jsonstr(string(pg.id)),
@@ -407,13 +410,21 @@ function _agent_md_table(io, tbl)
     println(io)
     isempty(tbl.caption) || println(io, "_", tbl.caption, "_  [table: ", tbl.id, "]")
     if !isempty(tbl.header)
-        println(io, "| ", join(tbl.header, " | "), " |")
+        println(io, "| ", join((_md_cell(h) for h in tbl.header), " | "), " |")
         println(io, "|", repeat(" --- |", length(tbl.header)))
     end
     for row in tbl.rows
-        println(io, "| ", join((_cellstr(c) for c in row), " | "), " |")
+        println(io, "| ", join((_md_cell(_cellstr(c)) for c in row), " | "), " |")
     end
     return nothing
+end
+
+# A Markdown table cell: a `|` (a ket `|0⟩`) is escaped and a line break is `<br>`, so a reader
+# never sees an extra column or a row cut in two.
+function _md_cell(s)
+    return replace(
+        string(s), "|" => "\\|", "\r\n" => "<br>", "\n" => "<br>", "\r" => "<br>"
+    )
 end
 
 # A single check as a markdown list line (the LLM read view): a PASS/FAIL/ERROR badge + the numbers,
@@ -505,7 +516,6 @@ end
 function _agent_md_verdict(io, c)
     v = verdict(c)
     v === nothing && return nothing
-    failing = [chk.id for chk in _subtree_checks(c) if !passed(chk)]
     println(
         io,
         "**",
@@ -517,7 +527,7 @@ function _agent_md_verdict(io, c)
         " ",
         v.verdict,
         "**",
-        isempty(failing) ? "" : string(" — failing: ", join(failing, ", ")),
+        isempty(v.failed) ? "" : string(" — failing: ", join(v.failed, ", ")),
     )
     return nothing
 end
@@ -543,11 +553,13 @@ function _agent_md_container(io, c, depth, badge, ctx)
     return nothing
 end
 
-# agent.md's body: the title, then each page under the heading of the part it opens.
+# agent.md's body: the title, then each page under the heading of the part it opens. Pages before
+# any part need no heading; pages outside any part that follow one get their own, so they never
+# read as inside it.
 function _agent_markdown(doc::Document, ctx)
     io = IOBuffer()
     isempty(doc.meta.title) || println(io, "# ", doc.meta.title)
-    curpart = :__start__
+    curpart = nothing
     for pg in doc.pages
         pg.part === curpart || _agent_md_part(io, doc, pg.part, ctx)
         curpart = pg.part
@@ -557,10 +569,12 @@ function _agent_markdown(doc::Document, ctx)
     return String(take!(io))
 end
 
-# A part's heading and description in agent.md, where its first page begins (nothing for the pages
-# outside any part).
+# A part's heading and description in agent.md, where its first page begins; for pages outside any
+# part, a part-level "Other" heading (the gallery index's name for them) that ends the part before.
 function _agent_md_part(io, doc, pid, ctx)
-    pid === nothing && return nothing
+    pid === nothing && return println(
+        io, "\n", _agent_md_heading(0, "Other", "", ctx.rdiag), "  [no part]"
+    )
     println(io, "\n", _agent_md_heading(0, _part_title(doc, pid), _anchor(pid), ctx.rdiag))
     d = get(doc.part_descs, pid, nothing)
     d === nothing || println(io, d.source)
@@ -586,7 +600,7 @@ function emit_document(
     rdiag = DiagEntry[]
     comments, _bm = _read_comments(doc, comments_file, rdiag)
     mkpath(outdir)
-    ctx = AgentCtx(IOBuffer(), String(outdir), comments, cache, rdiag)
+    ctx = AgentCtx(IOBuffer(), String(outdir), comments, cache, rdiag, Dict())
     # agent.json's body first: it materializes the figures agent.md then reads. Both files end with
     # the same diagnostics, agent.md's own (a fallback heading) included.
     body = _agent_json(theme, doc, ctx)
