@@ -940,6 +940,9 @@ function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, 
         numeric ? sort(unique(xval.(pts)); by=s -> parse(Float64, s)) : unique(xval.(pts))
     xticklabels = numeric ? [_fmt_num(parse(Float64, t)) for t in ticks] : ticks
     tickindex = Dict(t => i for (i, t) in enumerate(ticks))
+    # the axis's value at a tick: the number itself, or the category — what a data file must hold (a
+    # tick's position is a drawing detail)
+    axisval(i) = numeric ? parse(Float64, ticks[i]) : ticks[i]
     K = length(ticks)
     legkey(p) = _binding_str(p[1][1:(end - 1)])
     legs = unique(legkey.(pts))
@@ -1007,16 +1010,14 @@ function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, 
         data=(;
             xlabel=string(xvar),
             ylabel="got",
-            # the reference and band ride along per series, so the LLM face has what the plot draws
+            # what the plot draws, per series: the values, the reference and the tolerance band
             series=[
                 (;
-                    label=isempty(s.label) ? "got" : s.label,
-                    x=s.xs,
-                    y=s.ys,
-                    want=s.want,
-                    lo=s.lo,
-                    hi=s.hi,
-                ) for s in conv_series
+                    label=isempty(s.label) ? name : string(s.label, " ", name),
+                    x=axisval.(s.xs),
+                    y=getfield(s, field),
+                ) for s in conv_series for
+                (name, field) in (("got", :ys), ("want", :want), ("lo", :lo), ("hi", :hi))
             ],
         ),
     )
@@ -1038,8 +1039,8 @@ function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, 
             xlabel=string(xvar),
             ylabel="delta / tol",
             series=[
-                (; label=isempty(s.label) ? "margin" : s.label, x=s.xs, y=s.ys) for
-                s in marg_series
+                (; label=isempty(s.label) ? "margin" : s.label, x=axisval.(s.xs), y=s.ys)
+                for s in marg_series
             ],
         ),
     )

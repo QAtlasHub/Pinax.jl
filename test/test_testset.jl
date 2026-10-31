@@ -665,6 +665,23 @@ end
             @test occursin("1/3 FAIL", md)                         # verdict untouched (2 of 3 fail)
             @test occursin("[χ = 8]", md) && occursin("[χ = 32]", md)  # checks binding-tagged
             @test !occursin("[id: test_conv_jl_8]", md)            # NOT rendered as a per-value section
+            # the data file holds the axis's values (not tick positions), and what the plot draws:
+            # each series' reference and tolerance band as series of their own
+            csv = read(
+                joinpath(
+                    out,
+                    "agent",
+                    "assets",
+                    "figures",
+                    "test_conv_jl",
+                    "test_conv_jl_conv_1.csv",
+                ),
+                String,
+            )
+            @test startswith(csv, "series,χ,got\n")
+            @test occursin("got,8.0,1.2", csv) && occursin("got,32.0,1.01", csv)
+            @test occursin("want,16.0,1.0", csv)
+            @test occursin(r"\nlo,8\.0,0\.9", csv) && occursin(r"\nhi,8\.0,1\.0", csv)
         end
 
         @testset "nested loops: innermost = x-axis, outer = legend (C3)" begin
@@ -694,6 +711,18 @@ end
             render_test_report(TestNode("Test report"; children=[file]); out=out)
             html = read(joinpath(joinpath(out, "html"), "test_cat_jl.html"), String)
             @test occursin("TFIM", html) && occursin("Heisenberg", html) # string ticks, not numbers
+            csv = read(
+                joinpath(
+                    out,
+                    "agent",
+                    "assets",
+                    "figures",
+                    "test_cat_jl",
+                    "test_cat_jl_conv_1.csv",
+                ),
+                String,
+            )
+            @test occursin("got,TFIM,1.01", csv) && occursin("got,Heisenberg,1.03", csv)
         end
 
         @testset "mixed / inconsistent siblings do NOT fold — kept as sections, warned (III)" begin
