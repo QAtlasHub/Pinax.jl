@@ -17,7 +17,7 @@
 **Pinax** turns the figures and tables your analysis scripts produce into a **structured,
 self-contained catalogue** of a computational study — described once and rendered three ways:
 
-- **HTML gallery** — sections as cards, a responsive figure grid, markdown + KaTeX math,
+- **HTML gallery** — an index of page cards, a responsive figure grid, markdown + KaTeX math,
   cross-references, citations, and an interactive comment layer;
 - **LaTeX → PDF** — the same manuscript as a typeset document;
 - **`agent.md` / `agent.json`** — the same report for an agent to read: in reading order, each figure
@@ -63,8 +63,8 @@ render(theme = :agent, out = "agent")     # -> agent/agent.json  (machine-readab
 ```
 
 `@figure` captures its expression lazily, so figures are computed (and cached) only when you
-`render`. Sections become cards; figures lay out in a responsive grid; `$…$` math is rendered by
-KaTeX.
+`render`. Each page is a card on the index (a `:rich` index also lists the page's sections in its
+card); figures lay out in a responsive grid; `$…$` math is rendered by KaTeX.
 
 ## Three faces of one report
 

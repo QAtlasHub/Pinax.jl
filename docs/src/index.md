@@ -3,7 +3,7 @@
 > *A board of figures that is also a catalogue.*
 
 Pinax turns the figures your analysis scripts produce into a **structured, self-contained HTML
-gallery** — sections as cards, a multi-column figure grid, markdown + math descriptions,
+gallery** — an index of page cards, a multi-column figure grid, markdown + math descriptions,
 cross-references, citations, and an interactive comment layer — and can export the same manuscript
 to **PDF** via a LaTeX theme.
 
@@ -31,8 +31,9 @@ render(out = "site")                    # -> site/index.html  (self-contained)
 ```
 
 `@figure` captures its expression lazily, so figures are only computed (and cached) when you
-`render`. Sections become cards; figures lay out in a responsive grid; `$…$` math is rendered by
-KaTeX; `serve("site")` previews it over HTTP.
+`render`. Each page is a card on the index (a `:rich` index also lists the page's sections in its
+card); figures lay out in a responsive grid; `$…$` math is rendered by KaTeX; `serve("site")`
+previews it over HTTP.
 
 ## Where to go next
 
