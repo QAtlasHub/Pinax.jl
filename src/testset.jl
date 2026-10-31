@@ -1587,6 +1587,12 @@ function render_test_report(
     # like shards — so we group each cell under a `@part` rather than concatenating (which would merge
     # cells away). One report, structure preserved, navigable by cell; the cell IS the provenance.
     if length(unique(c for c in cells if !isempty(c))) >= 2
+        k = findfirst(isempty, cells)
+        k === nothing || error(
+            "Pinax.render_test_report: $(dumps[k]) has no matrix cell (PINAX_TEST_MATRIX), while " *
+            "the other dumps name theirs: a matrix report has no place for it. Set the cell in " *
+            "the job that wrote it, or leave it out.",
+        )
         return _render_matrix(roots, cells; title=title, kwargs...)
     end
     return render_test_report(_merge_shards(roots, title); title=title, kwargs...)
@@ -1619,7 +1625,7 @@ function _render_matrix(
 )
     # A cell may arrive as several shard dumps: merge each cell's shards first (they partition its
     # files), so every cell is one part.
-    order = unique(c for c in cells if !isempty(c))
+    order = unique(cells)
     pairs = [
         (_merge_shards([r for (r, rc) in zip(roots, cells) if rc == c], c), c) for
         c in order

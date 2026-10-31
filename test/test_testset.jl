@@ -989,6 +989,13 @@ end
             Pinax.dump_test_report(cellnode(false), joinpath(dir, "b.toml"))
         end
         @test occursin("matrix", read(dA, String))              # the cell rides in the dump
+        # a dump with no cell among cells has nowhere to go: it is an error naming it, never dropped
+        dO = withenv("PINAX_TEST_MATRIX" => "") do
+            Pinax.dump_test_report(cellnode(false), joinpath(dir, "orphan.toml"))
+        end
+        @test_throws r"orphan\.toml.*no matrix cell" render_test_report(
+            [dA, dB, dO]; out=joinpath(dir, "mo"), title="Matrix"
+        )
 
         out = joinpath(dir, "m")
         render_test_report([dA, dB]; out=out, title="Matrix")
