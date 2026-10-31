@@ -176,52 +176,57 @@ end
 
 function _emit_contents_cards(io, entries, rich::Bool)
     println(io, "<div class=\"pinax-cards\">")
-    for e in entries
-        thumb = _entry_get(e, :thumbnail, nothing)
-        summary = _entry_get(e, :summary, nothing)
-        metaline = _entry_get(e, :meta, nothing)
-        items = _entry_get(e, :items, nothing)
-        tags = String[string(t) for t in _entry_get(e, :tags, ())]
-        print(io, "<a class=\"pinax-card\"")
-        isempty(tags) || print(io, " data-tags=\"", _esc(join(tags, " ")), "\"")
-        print(io, " href=\"", _esc(_entry_str(e, :href)), "\">")
+    foreach(e -> _emit_contents_card(io, e, rich), entries)
+    return println(io, "</div>")
+end
+
+# One entry's card: its thumbnail, title, summary, (rich) section list, tags and meta line.
+function _emit_contents_card(io, e, rich::Bool)
+    tags = String[string(t) for t in _entry_get(e, :tags, ())]
+    print(io, "<a class=\"pinax-card\"")
+    isempty(tags) || print(io, " data-tags=\"", _esc(join(tags, " ")), "\"")
+    print(io, " href=\"", _esc(_entry_str(e, :href)), "\">")
+    thumb = _entry_get(e, :thumbnail, nothing)
+    print(
+        io,
         if thumb === nothing
-            print(io, "<div class=\"card-thumb card-thumb-empty\"></div>")
+            "<div class=\"card-thumb card-thumb-empty\"></div>"
         else
-            print(
-                io,
+            string(
                 "<div class=\"card-thumb\"><img src=\"",
                 _esc(string(thumb)),
                 "\" alt=\"\"></div>",
             )
-        end
-        print(
-            io,
-            "<div class=\"card-body\"><div class=\"card-title\">",
-            _esc(_entry_str(e, :title)),
-            "</div>",
-        )
-        summary === nothing ||
-            print(io, "<div class=\"card-summary\">", _esc(string(summary)), "</div>")
-        if rich && items !== nothing && !isempty(items)
-            print(io, "<div class=\"card-sections\">")
-            for it in items
-                print(io, "<div class=\"sec-item\">", _esc(string(it)), "</div>")
-            end
-            print(io, "</div>")
-        end
-        if !isempty(tags)
-            print(io, "<div class=\"card-tags\">")
-            for t in tags
-                print(io, "<span class=\"card-tag\">", _esc(t), "</span>")
-            end
-            print(io, "</div>")
-        end
-        metaline === nothing ||
-            print(io, "<div class=\"card-meta\">", _esc(string(metaline)), "</div>")
-        print(io, "</div></a>")
+        end,
+    )
+    print(
+        io,
+        "<div class=\"card-body\"><div class=\"card-title\">",
+        _esc(_entry_str(e, :title)),
+        "</div>",
+    )
+    _card_div(io, "card-summary", _entry_get(e, :summary, nothing))
+    items = _entry_get(e, :items, nothing)
+    rich && items !== nothing && _card_list(io, "card-sections", "div", "sec-item", items)
+    _card_list(io, "card-tags", "span", "card-tag", tags)
+    _card_div(io, "card-meta", _entry_get(e, :meta, nothing))
+    return print(io, "</div></a>")
+end
+
+# `<div class=…>text</div>`, or nothing when there is no text.
+function _card_div(io, class, x)
+    return x === nothing ||
+           print(io, "<div class=\"", class, "\">", _esc(string(x)), "</div>")
+end
+
+# A wrapping `<div class=…>` of one `<tag class=…>` per item, or nothing when there are none.
+function _card_list(io, class, tag, itemclass, items)
+    isempty(items) && return nothing
+    print(io, "<div class=\"", class, "\">")
+    for it in items
+        print(io, "<", tag, " class=\"", itemclass, "\">", _esc(string(it)), "</", tag, ">")
     end
-    return println(io, "</div>")
+    return print(io, "</div>")
 end
 
 function _emit_contents_toc(io, entries)
