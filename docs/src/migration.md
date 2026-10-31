@@ -71,10 +71,15 @@ and sections do not), every container carries the same keys, and nothing is inli
 | a figure's `data: "<path>.csv"` and `table: {header, rows, total}` (a 20-row preview) | `data: {path, columns, series: [{label, points}]}` or `null`. The file holds every plotted point; there is no inline preview. |
 | a code block's `anchor` | removed — the id is the only name |
 | a check's `code_anchor` | `code_id` (`null` when there is none) |
+| a check with no numbers (`@test x == 1`): `kind: "abs"`, `got` 1 or 0, `want` 1, `tol` 0.5 | `kind: "indicator"`, `got` / `want` / `delta` / `tol` all `null` |
+| an errored `@test`: `pass: false`, indistinguishable from a failure | `outcome: "error"` (and `pass: false`) |
 | a check's `source` | `defined_at` |
 | text the author did not write: `null` | `""` |
 
 New in 0.2:
+- `outcome` on every check: `"pass"`, `"fail"` or `"error"`. `pass` stays, and is `true` exactly
+  when `outcome` is `"pass"`. `kind` is `"abs"`, `"rel"` or `"indicator"`; read a check's numbers
+  only when it is not an indicator.
 - `defined_at` (`path:line`, relative to the project that holds the file) on every prose block,
   figure, table, code block, `@raw` block and check.
 - `comments` on every page, section and table, as on figures.
@@ -101,3 +106,8 @@ whether Pinax generated its id. Do not infer that from an id's shape.
 - The gallery renders a one-page document through `emit_page` too.
 - The gallery's status badge class is `pinax-status` (was `card-status`); verdict badges are
   `pinax-vbadge-pass` / `pinax-vbadge-fail`.
+- `Check` holds `outcome::Symbol` (`:pass` / `:fail` / `:error`) where it held `pass::Bool`: read it
+  with `Pinax.passed(c)`. Its `kind` is `:abs`, `:rel` or `:indicator` (the `indicator` field is
+  gone; an indicator's numbers are `NaN`), and the constructor refuses anything else. `code_anchor`
+  is `code_id::Union{Symbol,Nothing}`, the code block's id (the gallery derives the link's anchor).
+  `TestNode` has no `nerror`: errors are the checks whose outcome is `:error`.
