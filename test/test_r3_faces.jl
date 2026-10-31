@@ -144,3 +144,97 @@ end
     diag = read(joinpath(tmp, "diagnostics.md"), String)
     @test occursin(r"`p_txt_\w+` — markdown render failed", diag)
 end
+
+# A testset that keeps the results of the document's own checks, so a failing check is data here.
+mutable struct _R3Iso <: Test.AbstractTestSet
+    description::String
+    results::Vector{Any}
+    _R3Iso(desc::AbstractString=""; kw...) = new(String(desc), Any[])
+end
+Test.record(r::_R3Iso, x) = (push!(r.results, x); x)
+Test.finish(r::_R3Iso) = r
+
+@testset "pins for the face refactors: numbers, figure paths, verdict band, refs" begin
+    tmp = mktempdir()
+    svg = joinpath(tmp, "a.svg")
+    write(svg, "<svg xmlns='http://www.w3.org/2000/svg'/>")
+    nb(kind, c) = string(
+        kind,
+        " ",
+        join((c.page, c.part, c.section, c.figure, c.subfigure, c.equation), "."),
+        " ",
+        c.page_id,
+    )
+    Pinax.reset!(; title="T", numberer=nb)
+    @part :a "A" begin
+        @testset _R3Iso "iso" begin
+            @page :p "P" begin
+                @figure svg id = :pf caption = "\$\$x\$\$"
+                @test 1 == 2
+                @section :s "S" begin
+                    @figure svg id = :sf
+                    @desc "\$\$ y \$\$ and \$\$ z \$\$"
+                    @section :t "T" begin
+                        @test 2 == 3
+                        @figure svg id = :tf
+                    end
+                    @figure svg id = :sf2
+                end
+            end
+        end
+    end
+    @page :q "Q" begin
+        @thumbnail :qf
+        @figure svg id = :qf
+    end
+    doc = Pinax.current_document()
+
+    # numbering, in reading order: page.part.section.figure.subfigure.equation
+    nums = Pinax._gallery_numbers(doc)[1]
+    txt = only(
+        unique(first(split(k, "_eq")) for k in keys(nums) if startswith(k, "s_txt_"))
+    )
+    @test nums == Dict(
+        "p" => "page 1.1.0.0.0.0 p",
+        "pf" => "figure 1.1.0.1.1.0 p",
+        "pf_eq1" => "equation 1.1.0.1.1.1 p",
+        "s" => "section 1.1.1.1.0.1 p",
+        "sf" => "figure 1.1.1.2.1.1 p",
+        "$(txt)_eq1" => "equation 1.1.1.2.0.2 p",
+        "$(txt)_eq2" => "equation 1.1.1.2.0.3 p",
+        "t" => "section 1.1.2.2.0.3 p",
+        "tf" => "figure 1.1.2.3.1.3 p",
+        "sf2" => "figure 1.1.2.4.2.3 p",     # after its nested section's figure, in reading order
+        "q" => "page 2.0.2.4.0.3 q",
+        "qf" => "figure 2.0.2.5.1.3 q",
+    )
+
+    # resolve: every page, section and figure by id; an authored thumbnail found on its page
+    Pinax.resolve!(doc)
+    @test Set(keys(doc.refs)) == Set([:p, :s, :t, :pf, :sf, :tf, :sf2, :q, :qf])
+
+    # where each face writes a figure: gallery and agent under assets/, LaTeX without it; a nested
+    # section's figures under its page, by its own anchor
+    rendered(theme, dir) =
+        try
+            Pinax.render(; out=joinpath(tmp, dir), theme=theme)
+        catch e
+            e isa Pinax.ChecksFailed || rethrow()
+        end
+    for (theme, dir, root) in
+        ((:gallery, "g", "assets"), (:agent, "a", "assets"), (:latex, "l", ""))
+        rendered(theme, dir)
+        figs = joinpath(tmp, dir, root, "figures")
+        @test isfile(joinpath(figs, "p", "pf.svg"))
+        @test isfile(joinpath(figs, "p", "s", "sf.svg"))
+        @test isfile(joinpath(figs, "p", "t", "tf.svg"))
+        @test isfile(joinpath(figs, "q", "qf.svg"))
+    end
+
+    # agent.md's band on the page names every failing check of its subtree, in order
+    md = read(joinpath(tmp, "a", "agent.md"), String)
+    pg = doc.pages[1]
+    ids = [string(c.id) for c in (pg.checks[1], pg.sections[1].sections[1].checks[1])]
+    @test occursin("**P   0/2 FAIL** — failing: $(join(ids, ", "))", md)
+    @test occursin("**T   0/1 FAIL** — failing: $(ids[2])", md)
+end
