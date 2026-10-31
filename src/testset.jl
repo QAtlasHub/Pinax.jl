@@ -654,8 +654,8 @@ function TestNode(
 end
 
 # A broken/skipped test is deliberately NOT a Check. It has no verdict to show: it did not pass, but
-# it did not fail either, and encoding it as `pass=false` would paint the page red and flip the
-# benchmark verdict to FAIL — for a test the runner is perfectly happy about.
+# it did not fail either, and encoding it as a `:fail` check would paint the page red and flip the
+# verdict to FAIL — for a test the runner is perfectly happy about.
 _ntests(n) = length(n.checks) + n.nbroken + sum(_ntests, n.children; init=0)
 # Failed and errored are each read from the checks' own outcome, so they can never disagree with them.
 _nerror(n) = _noutcome(n, :error)
@@ -771,8 +771,8 @@ function _push_margin_figure!(page_id::Symbol, checks::Vector{Check})
     shown = checks[xs]
     capped = length(shown) < total
     # `data=` must be plot-data (`series=[(; label, x, y)]`) — it is the figure's TEXT channel for the
-    # agent backend. The per-check got/want/tol already ride along in the benchmark `checks` JSON, so
-    # the series carries only what the picture itself shows: the margin of check number i.
+    # agent backend. The per-check got/want/tol already ride along in each container's `checks` in
+    # agent.json, so the series carries only what the picture itself shows: the margin of check i.
     data = (;
         xlabel="check #",
         ylabel="delta / tol",
