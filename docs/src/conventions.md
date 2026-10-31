@@ -157,7 +157,8 @@ or pull request that tracks the gap.
   pinax-mcp's `set_bookmark` refuses the other kinds.
 - The `agent.json` shape is a contract. The pinax-mcp fixture is generated from the emitter
   (`test/test_contract.jl`) and checked against the consumer schema, which must name every key the
-  emitter writes. (#169)
+  emitter writes. The same test requires the fixture to hold every content kind, check kind and
+  outcome Pinax defines, and pinax-mcp's comment and bookmark carrier sets to equal Pinax's. (#169)
 - In `agent.json`, a text field the author did not write is the empty string, and an object or a
   reference that does not exist is `null`. Pages and sections carry the same keys; a page adds only
   `part` and `status`. A reference between nodes is an id (a check's `code_id`).
