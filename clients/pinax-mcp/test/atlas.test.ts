@@ -257,3 +257,22 @@ test("a figure's assets and data are asked of a figure: any other id has none", 
     assert.equal(atlas.figureData(id), null, id);
   }
 });
+
+test("a figure without a data form has no data file", () => {
+  const atlas = loadAtlas(
+    writeVariant((doc) => {
+      doc.pages[0].figures[0].data = null;
+    }),
+  );
+  assert.equal(atlas.figureData("p1_fig1"), null);
+});
+
+test("an outline names a part by its title as written, even an empty one", () => {
+  const atlas = loadAtlas(
+    writeVariant((doc) => {
+      doc.parts[0].title = "";
+    }),
+  );
+  const pid = atlas.doc.parts[0].id;
+  assert.ok(atlas.outline().split("\n").includes(`## [part ${pid}] `));
+});

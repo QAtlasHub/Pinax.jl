@@ -58,6 +58,12 @@ test("setBookmark writes the [bookmark] table next to comments", () => {
   assert.equal(data.comment.fig.length, 1);
 });
 
+test("a turn's author and text read as Pinax.read_comments reads them: any value as its text", () => {
+  const path = tmpToml();
+  writeFileSync(path, "[[comment.fig]]\nauthor = false\ntext = 0\n");
+  assert.deepEqual(new CommentStore(path).comments("fig"), [{ author: "false", text: "0" }]);
+});
+
 test("a missing store is non-fatal (empty)", () => {
   const store = new CommentStore(join(tmpdir(), "pinax-mcp-nope-xyz", "c.toml"));
   assert.deepEqual(store.comments("any"), []);
