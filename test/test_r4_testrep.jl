@@ -145,4 +145,27 @@ end
               "position 1 — so the timings are not a partition."
     end
 
+    @testset "a testset name is its id: trimmed, and hashed when it has no letters" begin
+        root = R4Ext.PinaxTestSet("Test report")
+        R4Ext._with_testset(root) do
+            @testset "test_slug.jl" begin
+                @testset "  Conv  " begin
+                    @test true
+                end
+                @testset "!!" begin
+                    @test true
+                end
+                @testset "??" begin
+                    @test true
+                end
+            end
+        end
+        render_test_report(root.node; out=joinpath(mktempdir(), "rep"))
+        doc = Pinax.current_document()
+        secs = [n.id for n in Pinax.node_ids(doc) if n.kind === :section]
+        hashed(s) = Symbol("test_slug_jl_t", Pinax._stable_hash(s))
+        # two names with no letters are two sections, each under its own hash, no `-2`
+        @test secs == [:test_slug_jl_conv, hashed("!!"), hashed("??")]
+        @test !any(e -> occursin("duplicate id", e.message), doc.diag.entries)
+    end
 end
