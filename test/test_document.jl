@@ -140,41 +140,6 @@ const SIDE = Ref(0)   # for checking @figure deferral
         end
     end
 
-    @testset "thumbnail resolution (explicit > marker > top > none)" begin
-        Pinax.reset!()
-        @page :a "A" begin
-            @thumbnail :picked
-            @section :sa "S" begin
-                @figure 1
-            end
-        end
-        @page :b "B" begin
-            @section :sb "S" begin
-                @figure 1
-                @figure 2 thumbnail = true
-            end
-        end
-        @page :c "C" begin
-            @section :sc "S" begin
-                @figure 1
-                @figure 2
-            end
-        end
-        @page :d "D" begin
-            @no_thumbnail
-            @section :sd "S" begin
-                @figure 1
-            end
-        end
-        pgs = Pinax.current_document().pages
-        @test Pinax.resolved_thumbnail(pgs[1]) == Pinax.FigRef(:picked)      # explicit
-        @test Pinax.resolved_thumbnail(pgs[2]) ==
-            Pinax.FigRef(pgs[2].sections[1].figures[2].id)  # marker
-        @test Pinax.resolved_thumbnail(pgs[3]) ==
-            Pinax.FigRef(pgs[3].sections[1].figures[1].id)  # top
-        @test Pinax.resolved_thumbnail(pgs[4]) === nothing                    # @no_thumbnail
-    end
-
     @testset "section kwargs: summary, layout" begin
         Pinax.reset!()
         @page :p "P" begin

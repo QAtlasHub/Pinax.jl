@@ -1577,27 +1577,6 @@ macro md_str(s)
     return s
 end
 
-# ============================================================ resolve (minimal: thumbnail)
-
-"Resolve a page's main figure: explicit `@thumbnail` > `thumbnail=true` marker > top (first) figure (notes 02)."
-function resolved_thumbnail(pg::Page)
-    pg.no_thumbnail && return nothing
-    pg.thumbnail === nothing || return pg.thumbnail
-    # a thumbnail=true marker anywhere (page-level figures first, then sections)
-    for f in pg.figures
-        f.thumbnail && return FigRef(f.id)
-    end
-    for sec in _all_sections(pg), f in sec.figures
-        f.thumbnail && return FigRef(f.id)
-    end
-    # else the first figure (page-level, then the first section's)
-    isempty(pg.figures) || return FigRef(pg.figures[1].id)
-    for sec in _all_sections(pg)
-        isempty(sec.figures) || return FigRef(sec.figures[1].id)
-    end
-    return nothing
-end
-
 # ============================================================ show (ergonomics)
 
 function Base.show(io::IO, d::Document)
