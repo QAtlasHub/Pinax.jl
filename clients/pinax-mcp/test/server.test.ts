@@ -3,18 +3,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
+import { writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { writeVariant } from "./variant.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const serverEntry = resolve(here, "../src/index.js"); // dist/src/index.js
 const fixture = resolve(here, "../../test/fixtures/sample");
 
-async function withClient<T>(fn: (c: Client) => Promise<T>): Promise<T> {
+async function withClient<T>(fn: (c: Client) => Promise<T>, agent = fixture): Promise<T> {
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [serverEntry, "--agent", fixture],
+    args: [serverEntry, "--agent", agent],
   });
   const client = new Client({ name: "pinax-mcp-test", version: "0" }, { capabilities: {} });
   await client.connect(transport);
@@ -29,8 +31,10 @@ const text = (r: any) => (r.content as any)[0].text;
 
 test("tools list and run end-to-end over MCP (figures + tables)", { timeout: 20000 }, async () => {
   await withClient(async (client) => {
-    const tools = (await client.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(tools, ["get_figure_data", "get_unit", "outline", "search"]);
+    const listed = (await client.listTools()).tools;
+    assert.deepEqual(listed.map((t) => t.name).sort(), ["get_figure_data", "get_unit", "outline", "search"]);
+    // every tool takes only the arguments it names
+    for (const t of listed) assert.equal(t.inputSchema.additionalProperties, false, t.name);
 
     const outline = text(await client.callTool({ name: "outline", arguments: {} }));
     assert.match(outline, /Demo Atlas/);
@@ -75,6 +79,8 @@ test("resources list and read end-to-end over MCP", { timeout: 20000 }, async ()
   await withClient(async (client) => {
     const uris = (await client.listResources()).resources.map((r) => r.uri);
     assert.ok(uris.includes("pinax://document"));
+    const docRes = (await client.listResources()).resources.find((r) => r.uri === "pinax://document");
+    assert.equal(docRes?.name, "Demo Atlas"); // the document resource is named by its title
     assert.ok(uris.includes("pinax://figure/p1_fig1"));
     assert.ok(uris.includes("pinax://table/p1_tbl1")); // @table node listed as a resource
 
@@ -91,4 +97,21 @@ test("resources list and read end-to-end over MCP", { timeout: 20000 }, async ()
     assert.equal((asset.contents[0] as any).mimeType, "image/svg+xml");
     assert.match((asset.contents[0] as any).text, /<svg/);
   });
+});
+
+test("a binary asset reads as base64; a bad resource uri is refused, saying why", { timeout: 20000 }, async () => {
+  const dir = writeVariant((doc) => doc.pages[0].figures[0].assets.push("p1_fig1.png"));
+  writeFileSync(join(dir, "p1_fig1.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  await withClient(async (client) => {
+    const png = (await client.readResource({ uri: "pinax://asset/p1_fig1/1" })).contents[0] as any;
+    assert.equal(png.mimeType, "image/png");
+    assert.equal(png.blob, Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64"));
+    assert.equal(png.text, undefined);
+    const refused = async (uri: string, why: RegExp) =>
+      assert.rejects(client.readResource({ uri }), (e: Error) => why.test(e.message));
+    await refused("pinax://asset/p1_fig1", /bad asset uri/);
+    await refused("pinax://asset/p1_fig1/9", /no asset 9 for figure p1_fig1$/);
+    await refused("pinax://figure/ghost", /unknown figure: ghost/);
+    await refused("file:///etc/passwd", /unsupported resource uri/);
+  }, dir);
 });
