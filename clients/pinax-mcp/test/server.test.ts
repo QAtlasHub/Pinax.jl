@@ -3,7 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -113,5 +114,21 @@ test("a binary asset reads as base64; a bad resource uri is refused, saying why"
     await refused("pinax://asset/p1_fig1/9", /no asset 9 for figure p1_fig1$/);
     await refused("pinax://figure/ghost", /unknown figure: ghost/);
     await refused("file:///etc/passwd", /unsupported resource uri/);
+  }, dir);
+});
+
+test("get_figure_data and an asset read refuse a path outside the agent directory", { timeout: 20000 }, async () => {
+  const secret = join(mkdtempSync(join(tmpdir(), "pinax-mcp-secret-")), "secret.txt");
+  writeFileSync(secret, "zqsecret");
+  const dir = writeVariant((doc) => {
+    doc.pages[0].figures[0].data.path = secret;
+    doc.pages[0].figures[0].assets = [secret];
+  });
+  await withClient(async (client) => {
+    const data = await client.callTool({ name: "get_figure_data", arguments: { id: "p1_fig1" } });
+    assert.equal(data.isError, true);
+    assert.match(text(data), new RegExp(`'${secret}'.*outside the agent directory`));
+    assert.doesNotMatch(text(data), /zqsecret/);
+    await assert.rejects(client.readResource({ uri: "pinax://asset/p1_fig1/0" }), /outside the agent directory/);
   }, dir);
 });

@@ -5,8 +5,8 @@
 // Every unit (part, page, section, and every node in one: prose, figure, table, code, check, raw) is
 // addressable by its id — Pinax ids are globally unique within a document (they key the comment
 // store), so a single id -> unit map is the index.
-import { readFileSync } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { AgentDocZ, type AgentDoc, type ContentRef, type Page } from "./schema.js";
 
 export type UnitKind =
@@ -37,6 +37,18 @@ export interface SearchHit {
   label: string;
   field: string;
   snippet: string;
+}
+
+/** A path an agent.json names, as written and as resolved inside its directory. */
+export interface Located {
+  rel: string;
+  abs: string;
+}
+
+// whether `path` is `dir` or lies under it (both absolute, symlinks already resolved or both not)
+function within(dir: string, path: string): boolean {
+  const r = relative(dir, path);
+  return r !== ".." && !r.startsWith(`..${sep}`) && !isAbsolute(r);
 }
 
 const firstLine = (s: string): string => s.split("\n")[0];
@@ -133,7 +145,7 @@ export class Atlas {
 
   constructor(doc: AgentDoc, baseDir: string) {
     this.doc = doc;
-    this.baseDir = baseDir;
+    this.baseDir = resolve(baseDir);
     this.build();
   }
 
@@ -247,21 +259,31 @@ export class Atlas {
   }
 
   /** Absolute paths of a figure's rendered assets, resolved against the agent.json directory. */
-  figureAssets(id: string): { rel: string; abs: string }[] {
-    const u = this.units.get(id);
-    if (!u || u.kind !== "figure") return [];
-    return (u.node.assets as string[]).map((rel) => ({
-      rel,
-      abs: isAbsolute(rel) ? rel : resolve(this.baseDir, rel),
-    }));
+  figureAssets(id: string): Located[] {
+    return ((this.figure(id)?.assets ?? []) as string[]).map((rel) => this.locate(rel));
   }
 
   /** The figure's data file (every plotted point; `data.path`), resolved to an absolute path, or null. */
-  figureData(id: string): { rel: string; abs: string } | null {
+  figureData(id: string): Located | null {
+    const rel = this.figure(id)?.data?.path;
+    return typeof rel === "string" ? this.locate(rel) : null;
+  }
+
+  private figure(id: string): any {
     const u = this.units.get(id);
-    if (!u || u.kind !== "figure" || typeof u.node.data?.path !== "string") return null;
-    const rel = u.node.data.path as string;
-    return { rel, abs: isAbsolute(rel) ? rel : resolve(this.baseDir, rel) };
+    return u?.kind === "figure" ? u.node : undefined;
+  }
+
+  // A path the agent.json names, resolved against its directory and refused unless it stays inside
+  // it once symlinks are followed: a registry ships agent.json files someone else wrote, and a path
+  // must not reach the reader's other files. A file not written yet is judged by its path alone.
+  private locate(rel: string): Located {
+    const abs = resolve(this.baseDir, rel);
+    const inside = existsSync(abs)
+      ? within(realpathSync(this.baseDir), realpathSync(abs))
+      : within(this.baseDir, abs);
+    if (!inside) throw new Error(`refused '${rel}': it resolves outside the agent directory ${this.baseDir}`);
+    return { rel, abs };
   }
 }
 

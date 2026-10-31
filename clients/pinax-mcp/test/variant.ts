@@ -9,11 +9,14 @@ import { fileURLToPath } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 export const sample = resolve(here, "../../test/fixtures/sample");
 
-/** Write the sample agent.json, as `change` leaves it, to a new directory; returns the directory. */
-export function writeVariant(change: (doc: any) => void): string {
+/**
+ * Write the sample agent.json, as `change` leaves it, to a new directory; returns the directory.
+ * `change` also gets the directory, so it can place files next to the document.
+ */
+export function writeVariant(change: (doc: any, dir: string) => void): string {
   const doc = JSON.parse(readFileSync(resolve(sample, "agent.json"), "utf8"));
-  change(doc);
   const dir = mkdtempSync(join(tmpdir(), "pinax-mcp-variant-"));
+  change(doc, dir);
   writeFileSync(join(dir, "agent.json"), JSON.stringify(doc));
   return dir;
 }

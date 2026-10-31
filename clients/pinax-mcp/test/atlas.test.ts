@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
 import { loadAtlas } from "../src/atlas.js";
 import { everyNodeVariant, sample as fixture, writeVariant } from "./variant.js";
 
@@ -179,4 +182,50 @@ test("outline: status, part headings, unresolvable refs, and the no-content fall
   assert.match(o, /\[page p2\][^]*- \[figure p2_fig1\] fallback figure\n- \[table p2_tbl1\] p2_tbl1\n/);
   assert.match(o, /\n\n### \[page p3\] Page Three\n/); // no part: no part heading, no status
   assert.equal(o.split("[part grp]").length, 2); // one heading per run of pages in a part
+});
+
+// A file outside any agent directory, and a variant whose first figure's data and asset point at it
+// by the path `point` returns.
+function outsideVariant(point: (secret: string, dir: string) => string): string {
+  const secret = join(mkdtempSync(join(tmpdir(), "pinax-mcp-secret-")), "secret.txt");
+  writeFileSync(secret, "zqsecret");
+  return writeVariant((doc, dir) => {
+    const rel = point(secret, dir);
+    doc.pages[0].figures[0].data.path = rel;
+    doc.pages[0].figures[0].assets = [rel];
+  });
+}
+
+test("a figure path that leaves the agent directory is refused, naming it", () => {
+  const cases: [string, (secret: string, dir: string) => string][] = [
+    ["..", (secret, dir) => relative(dir, secret)],
+    ["absolute", (secret) => secret],
+    [
+      "symlink",
+      (secret, dir) => {
+        symlinkSync(secret, join(dir, "link.csv"));
+        return "link.csv";
+      },
+    ],
+  ];
+  for (const [name, point] of cases) {
+    const atlas = loadAtlas(outsideVariant(point));
+    const rel = atlas.unit("p1_fig1")!.node.data.path as string;
+    const named = (e: Error) => e.message.includes(`'${rel}'`) && /outside the agent directory/.test(e.message);
+    assert.throws(() => atlas.figureData("p1_fig1"), named, name);
+    assert.throws(() => atlas.figureAssets("p1_fig1"), named, name);
+  }
+});
+
+test("a symlink to a file inside the agent directory, or a file not yet written, is located", () => {
+  const atlas = loadAtlas(
+    writeVariant((doc, dir) => {
+      writeFileSync(join(dir, "real.csv"), "series,T,M\n");
+      symlinkSync(join(dir, "real.csv"), join(dir, "link.csv"));
+      doc.pages[0].figures[0].data.path = "link.csv";
+      doc.pages[0].figures[0].assets = ["not-rendered.svg"];
+    }),
+  );
+  assert.equal(readFileSync(atlas.figureData("p1_fig1")!.abs, "utf8"), "series,T,M\n");
+  assert.equal(atlas.figureAssets("p1_fig1")[0].abs, join(atlas.baseDir, "not-rendered.svg"));
 });
