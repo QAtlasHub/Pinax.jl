@@ -403,11 +403,10 @@ function _gallery_numbers(doc::Document)
         prev_part = pg.part
         pagen += 1
         perpage && (secn = fign = eqn = 0)
-        pid = pg.id
+        # the live counters for this page: section and figure as they stand when it is called
+        ctr(subfig, e) = _counters(pagen, pg.id, partn, pg.part, secn, fign, subfig, e)
         # the page badge itself (e.g. EQ3 / GQ7), then page-level desc + figures (page-as-leaf)
-        nums[pg.anchor] = string(
-            numberer(:page, _counters(pagen, pid, partn, pg.part, secn, fign, 0, eqn))
-        )
+        nums[pg.anchor] = string(numberer(:page, ctr(0, eqn)))
         # A container's content in reading order: each figure is numbered, the display equations in
         # prose and captions are numbered as a reader meets them, and a child section is numbered and
         # walked where it stands, so whatever follows it comes after its own figures.
@@ -416,18 +415,13 @@ function _gallery_numbers(doc::Document)
             for (kind, item) in _content_items(c)
                 if kind === :section
                     secn += 1
-                    nums[item.anchor] = string(
-                        numberer(
-                            :section,
-                            _counters(pagen, pid, partn, pg.part, secn, fign, 0, eqn),
-                        ),
-                    )
+                    nums[item.anchor] = string(numberer(:section, ctr(0, eqn)))
                     walk!(item)
                 elseif kind === :text
                     eqn = _scan_eqs!(
                         item.source,
                         item.anchor,
-                        e -> _counters(pagen, pid, partn, pg.part, secn, fign, 0, e),
+                        e -> ctr(0, e),
                         nums,
                         ids_eq,
                         eqseq,
@@ -437,17 +431,12 @@ function _gallery_numbers(doc::Document)
                 elseif kind === :figure
                     fign += 1
                     subfig += 1
-                    nums[item.anchor] = string(
-                        numberer(
-                            :figure,
-                            _counters(pagen, pid, partn, pg.part, secn, fign, subfig, eqn),
-                        ),
-                    )
+                    nums[item.anchor] = string(numberer(:figure, ctr(subfig, eqn)))
                     sf = subfig
                     eqn = _scan_eqs!(
                         item.caption,
                         item.anchor,
-                        e -> _counters(pagen, pid, partn, pg.part, secn, fign, sf, e),
+                        e -> ctr(sf, e),
                         nums,
                         ids_eq,
                         eqseq,
