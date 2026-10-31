@@ -154,8 +154,8 @@ mutable struct Check
     tol::Float64
     kind::Symbol       # :rel or :abs (resolved; never :auto in the struct)
     pass::Bool
-    source::String     # "file:line" of the assertion (issue #69 I) — carried for a failing @test so the
-    # report says WHERE, not just what; "" when unknown (a passing @test).
+    source::String     # "file:line" of the assertion (issue #69 I), for every recorded @test, so the
+    # report says WHERE, not just what; "" when Test gives no location.
     code_anchor::String   # anchor of the `CodeBlock` holding the code that produced this check — the
     # code itself is ONE artifact in the document (a `@code` block), and this is the reference to it,
     # never a second copy of the source; "" when there is none.
@@ -667,12 +667,12 @@ function node_ids(doc::Document)
     return out
 end
 
-# Stringify the @figure expression for change detection, stripping source line numbers so that
-# moving a figure to a different line does not spuriously invalidate its cache entry (notes 10).
 # An expression as source text. Julia 1.13 prints the symbols `end` / `begin` (in an index) as
 # `var"end"` / `var"begin"`; here they read as written, so a label, a code string and every id hashed
 # from them are the same on every Julia version.
 _expr_str(ex) = replace(string(ex), "var\"end\"" => "end", "var\"begin\"" => "begin")
+# A node's code as text, without line numbers, so moving a figure, table or code block to another
+# line changes neither its cache entry nor its generated id (notes 10).
 _code_str(expr) = _expr_str(expr isa Expr ? Base.remove_linenums!(deepcopy(expr)) : expr)
 
 # A canonical string for a figure's `params`, hashed into its generated id. The PinaxParamIOExt

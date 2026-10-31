@@ -50,18 +50,19 @@ or pull request that tracks the gap.
     under either the id or the anchor.
 - An id the **author writes** is never renamed. A collision is an error raised where the second
   node is written, naming the id.
-- An id **Pinax generates** is the container's id plus a short stable hash of the node's own
-  content, so adding, removing or reordering other nodes never changes it.
+- An id **Pinax generates** is derived from the node's own content — for most kinds the container's
+  id plus a short stable hash of it — so adding, removing or reordering other nodes never changes it.
 
-  | node | hashed content | example |
+  | node | derived from | example |
   |---|---|---|
-  | figure | its code and `params` | `energy_fig_k3x9q2a` |
-  | table | its code | `energy_tbl_0bqw2jb` |
-  | code block | its source | `energy_code_1r2mwly` |
-  | prose block | its text | `energy_txt_9d0fngk` |
-  | `@raw` block | its HTML | `energy_raw_04f9ir3` |
-  | check | its source text | `energy_t0358x5n` |
-  | section of a nested `@testset` | its description | `energy_conv` |
+  | figure | a hash of its code and `params` | `energy_fig_k3x9q2a` |
+  | table | a hash of its code | `energy_tbl_0bqw2jb` |
+  | code block | a hash of its source | `energy_code_1r2mwly` |
+  | code a `@test` captured | its file's name and a hash of the captured source | `code_runtests_jl_13h2abw` |
+  | prose block | a hash of its text | `energy_txt_9d0fngk` |
+  | `@raw` block | a hash of its HTML | `energy_raw_04f9ir3` |
+  | check | a hash of its source text | `energy_t0358x5n` |
+  | section of a nested `@testset` | its description, as a slug | `energy_conv` |
 
   The same content twice in one container gets `-2`, `-3`. A generated id is never an error.
 - A generated id changes when its node's own content does, so a comment stored under it then names
