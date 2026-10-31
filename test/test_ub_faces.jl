@@ -97,3 +97,78 @@ end
         level === :rich && @test occursin("INNER_T", idx)
     end
 end
+
+# The agent face's diagnostics are the build's and this render's: an entry recorded while the
+# document was built reaches agent.json and agent.md.
+@testset "agent: build-phase diagnostics reach agent.json and agent.md" begin
+    out = joinpath(mktempdir(), "agent")
+    Pinax.reset!(; title="Diag")
+    @page :p "P" begin
+        @desc "x"
+    end
+    Pinax._diag!(Pinax.WARNING, :p, "BUILD_PHASE_MSG")
+    j = JSON.parsefile(Pinax.render(; out=out, theme=:agent))
+    @test any(d -> d["message"] == "BUILD_PHASE_MSG" && d["item"] == "p", j["diagnostics"])
+    @test occursin(
+        "- [WARNING] p: BUILD_PHASE_MSG", read(joinpath(out, "agent.md"), String)
+    )
+end
+
+# agent.md shows a table's and a section's comment threads, as it does a figure's.
+@testset "agent.md: comments on a table and on a section" begin
+    out = joinpath(mktempdir(), "agent")
+    Pinax.reset!(; title="Notes")
+    @page :p "P" begin
+        @section :sec "S" begin
+            @table (a=[1],) id = :tbl caption = "T"
+        end
+    end
+    mkpath(out)
+    f = joinpath(out, "comments.toml")
+    Pinax.add_comment(f, :tbl, "TABLE_NOTE"; author="me")
+    Pinax.add_comment(f, :sec, "SECTION_NOTE"; author="me")
+    Pinax.render(; out=out, theme=:agent)
+    md = read(joinpath(out, "agent.md"), String)
+    @test occursin("- note (me): TABLE_NOTE", md)
+    @test occursin("- note (me): SECTION_NOTE", md)
+    @test findfirst("TABLE_NOTE", md) < findfirst("SECTION_NOTE", md)   # each after its node
+end
+
+# A part's own status is in agent.json's `parts`, and `null` for a part that set none.
+@testset "agent.json: parts[].status" begin
+    out = joinpath(mktempdir(), "agent")
+    Pinax.reset!(; title="Parts")
+    @part :g "G" status = :final begin
+        @page :p "P" begin
+            @desc "x"
+        end
+    end
+    @part :h "H" begin
+        @page :q "Q" begin
+            @desc "y"
+        end
+    end
+    j = JSON.parsefile(Pinax.render(; out=out, theme=:agent))
+    @test j["parts"][1]["status"] == "final"
+    @test j["parts"][2]["status"] === nothing
+end
+
+# A `data=` figure's data file is in the render manifest: `rendered_assets` lists it, and a later
+# render without the figure removes it.
+@testset "agent: a data= figure's file is in the manifest" begin
+    out = joinpath(mktempdir(), "agent")
+    Pinax.reset!(; title="Manifest")
+    @page :p "P" begin
+        @figure error("no gen") data = (; x=[1, 2], y=[3.0, 4.0]) id = :f
+    end
+    Pinax.render(; out=out, theme=:agent)
+    csv = joinpath(out, "assets", "figures", "p", "f.csv")
+    @test isfile(csv)
+    @test "assets/figures/p/f.csv" in replace.(Pinax.rendered_assets(out), '\\' => '/')
+    Pinax.reset!(; title="Manifest")
+    @page :p "P" begin
+        @desc "no figure now"
+    end
+    Pinax.render(; out=out, theme=:agent)
+    @test !isfile(csv)
+end
