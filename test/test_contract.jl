@@ -31,7 +31,17 @@ function _contract_document!()
         @part :grp "Group" begin
             @page :p1 "Page One" status = :draft summary = "every node kind" begin
                 @desc md"A page description with math, $E = -J \sum_i s_i s_{i+1}$."
-                @figure nothing data = (; x=[0.1, 0.2, 0.3], y=[0.99, 0.8, 0.55]) caption = "magnetization"
+                tfim = (; L=16, J=1.0, model="TFIM")   # structured params: one value per axis
+                m = (; x=[0.1, 0.2, 0.3], y=[0.99, 0.8, 0.55])
+                @figure nothing data = m caption = "magnetization" id = :mag params = tfim
+                @figure nothing data = (;
+                    xlabel="T",
+                    ylabel="E",
+                    series=[
+                        (; label="up", x=[1.0, 2.0, 3.0], y=[-1.0, -0.5, -0.25]),
+                        (; label="down", x=[1.0, 2.0, 3.0], y=[-0.9, -0.6, -0.3]),
+                    ],
+                ) caption = "two sweeps" id = :sweeps
                 @table (; N=[8, 16], Tc=[2.1, 2.2]) caption = "critical temperatures"
                 @code E = 1.0 + 1.0 / 8 caption = "the energy"
                 @section :s1 "Section One" begin
@@ -42,7 +52,10 @@ function _contract_document!()
                     end
                 end
                 @section :s3 "Section Three" begin
-                    @test 1 + 1 == 2
+                    @test 1 + 1 == 2   # an indicator: no numbers to record
+                end
+                @section :s4 "Section Four" begin
+                    @test error("boom")   # an error: the assertion threw
                 end
             end
         end
@@ -58,6 +71,19 @@ end
 @testset "agent.json contract fixture (#169)" begin
     _contract_document!()
     out = mktempdir()
+    # a comment on a figure and on a section, as the comment store holds them
+    write(
+        joinpath(out, "comments.toml"),
+        """
+        [[comment.mag]]
+        author = "llm"
+        text = "The drop near 0.3 is the finite-size crossover."
+
+        [[comment.s1]]
+        author = "sensei"
+        text = "Tighten the tolerance."
+        """,
+    )
     Pinax.render(; out=out, theme=:agent)
     emitted = read(joinpath(out, "agent.json"), String)
     fixture = joinpath(_CONTRACT_DIR, "agent.json")
@@ -70,7 +96,8 @@ end
     # Drift is a failure, never a silent rewrite: regenerate on purpose (see the top of this file).
     @test emitted == read(fixture, String)
     # The fixture holds what the contract promises pinax-mcp: every node kind, both verdicts, a
-    # verdict-less page, a status, a @raw block and a diagnostic.
+    # verdict-less page, a status, a @raw block, a diagnostic, comments on a figure and a section,
+    # structured params, a two-series data file, an indicator check and an error check.
     for token in (
         "\"status\":\"draft\"",
         "\"kind\":\"figure\"",
@@ -91,6 +118,14 @@ end
         "\"kind\":\"raw\"",
         "\"raws\":[{\"id\":\"p2_raw_",
         "\"diagnostics\":[{\"severity\":\"ERROR\",\"item\":\"p2_fig_",
+        "\"comments\":[{\"author\":\"llm\",\"text\":\"The drop",       # on a figure
+        "\"comments\":[{\"author\":\"sensei\",\"text\":\"Tighten",     # on a section
+        "\"params\":{\"L\":16,\"J\":1.0,\"model\":\"TFIM\"}",
+        "\"series\":[{\"label\":\"up\",\"points\":3},{\"label\":\"down\",\"points\":3}]",
+        "\"got\":null,\"want\":null,\"delta\":null,\"tol\":null,\"kind\":\"indicator\",\"outcome\":\"pass\"",
+        "\"kind\":\"indicator\",\"outcome\":\"error\",\"pass\":false",
+        "\"kind\":\"rel\",\"outcome\":\"pass\",\"pass\":true",
+        "\"kind\":\"abs\",\"outcome\":\"fail\",\"pass\":false",
     )
         @test occursin(token, emitted)
     end

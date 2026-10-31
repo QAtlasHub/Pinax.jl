@@ -99,6 +99,12 @@ test("every emitted check states its outcome, and pass is derived from it", () =
   assert.equal(AgentDocZ.safeParse(changed((d) => (firstCheck(d).outcome = "maybe"))).success, false);
 });
 
+test("the outline leads each check with its outcome, an error included", () => {
+  const o = loadAtlas(emitted).outline();
+  assert.match(o, /\] ERROR error\("boom"\)/);
+  assert.match(o, /\] FAIL isapprox\(0\.5, 0\.0/);
+});
+
 test("an indicator check carries no numbers", () => {
   const doc = AgentDocZ.parse(raw);
   const all = (c: any): any[] => [...(c.checks ?? []), ...(c.sections ?? []).flatMap(all)];
