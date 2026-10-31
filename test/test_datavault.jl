@@ -186,3 +186,62 @@ end
     # method wins. A non-vault first arg still hits the core fallback error:
     @test_throws ErrorException Pinax.report(42, recipe; title="x", out=joinpath(tmp, "z"))
 end
+
+@testset "report: an empty vault is an error; the cache keys on the bytes the recipe read" begin
+    tmp = mktempdir()
+    cfg = joinpath(tmp, "config.toml")
+    write(
+        cfg,
+        """
+        [study]
+        project_name = "bytes"
+        total_samples = 1
+        outdir = "$(joinpath(tmp, "vault"))"
+        [datavault]
+        path_keys = ["system.N"]
+        [[paramsets]]
+        [paramsets.system]
+        N = [8]
+        """,
+    )
+    key = only(ParamIO.expand(ParamIO.load(cfg)))
+    calls = Ref(0)
+    svg = joinpath(tmp, "fig.svg")
+    figure_page(pairs) = @page :p "P" begin
+        @figure params = first(pairs)[1] begin
+            calls[] += 1
+            write(svg, "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>")
+            svg
+        end
+    end
+
+    # a vault with no :done key has nothing to report
+    @test_throws "no :done keys in vault (run=empty)" Pinax.report(
+        DataVault.Vault(cfg; run="empty"), figure_page; title="E", out=joinpath(tmp, "e")
+    )
+
+    vault = DataVault.Vault(cfg; run="phase1")
+    save_done!(v) = DataVault.mark_done!(
+        vault, key; result=DataVault.save!(vault, key, Dict("val" => v))
+    )
+    save_done!(1.0)
+    out = joinpath(tmp, "rep")
+    Pinax.report(vault, figure_page; title="B", out=out)
+    @test calls[] == 2                                   # gallery + agent
+
+    # the bytes change and the marker does not: the recipe reads the new bytes, so it is a miss
+    DataVault.save!(vault, key, Dict("val" => 3.0))
+    res = Pinax.report(vault, figure_page; title="B", out=out)
+    @test only(res.reads).read_sha256 != only(res.reads).result_sha256
+    @test calls[] == 2 + 2                               # re-materialized, in both faces
+
+    # the bytes change after the recipe read them, marker and all: the figure shows what was read,
+    # so it stays a cache hit
+    rewrite_after_read = function (pairs)
+        figure_page(pairs)
+        save_done!(2.0)
+    end
+    before = calls[]
+    Pinax.report(vault, rewrite_after_read; title="B", out=out)
+    @test calls[] == before
+end
