@@ -41,7 +41,9 @@ answers "what is here" and not "what state is it in".
 
 Entries carrying `tags` also get a filter bar above the cards: clicking a chip narrows the page to
 the entries that carry it. The filtering is a few lines of inline JavaScript over `data-tags`, so a
-reader without a server, and a reader without JavaScript, both still get the whole list.
+reader without a server, and a reader without JavaScript, both still get the whole list. A tag may
+hold any character, a space included (`"spin chain"`): `data-tags` is each entry's tags as a JSON
+array.
 
 `search=true` mounts the [Pagefind](https://pagefind.app/) UI from `pagefind/` NEXT TO the generated
 page, which is where `add_search` puts it. It is emitted only when asked, because a search box over
@@ -135,8 +137,8 @@ function _emit_contents_search(io)
     return nothing
 end
 
-# Every tag that appears, as a row of toggles. The cards carry `data-tags`, so the filter is a
-# string match in the page rather than a query anywhere.
+# Every tag that appears, as a row of toggles. The cards carry `data-tags` (a JSON array), so the
+# filter is a match in the page rather than a query anywhere.
 function _emit_contents_filters(io, entries)
     tags = String[]
     for e in entries
@@ -168,10 +170,18 @@ function _emit_contents_filters(io, entries)
         "var t=b.getAttribute('data-tag');",
         "bar.querySelectorAll('.pinax-chip').forEach(function(c){c.classList.toggle('is-on',c===b);});",
         "document.querySelectorAll('.pinax-card,.pinax-toc>li').forEach(function(card){",
-        "var ts=(card.getAttribute('data-tags')||'').split(' ');",
+        "var ts=JSON.parse(card.getAttribute('data-tags')||'[]');",
         "card.style.display=(!t||ts.indexOf(t)>=0)?'':'none';});});})();</script>",
     )
     return nothing
+end
+
+# An entry's tags as the ` data-tags` attribute the filter matches on: a JSON array, since a tag may
+# hold any character a separator could be ("spin chain"). Nothing for an untagged entry.
+function _print_tags_attr(io, tags)
+    isempty(tags) && return nothing
+    json = string("[", join((_jsonstr(t) for t in tags), ","), "]")
+    return print(io, " data-tags=\"", _esc(json), "\"")
 end
 
 function _emit_contents_cards(io, entries, rich::Bool)
@@ -184,7 +194,7 @@ end
 function _emit_contents_card(io, e, rich::Bool)
     tags = String[string(t) for t in _entry_get(e, :tags, ())]
     print(io, "<a class=\"pinax-card\"")
-    isempty(tags) || print(io, " data-tags=\"", _esc(join(tags, " ")), "\"")
+    _print_tags_attr(io, tags)
     print(io, " href=\"", _esc(_entry_str(e, :href)), "\">")
     thumb = _entry_get(e, :thumbnail, nothing)
     print(
@@ -238,7 +248,7 @@ function _emit_contents_toc(io, entries)
         # The filter bar is emitted at every level, so a `:toc` row has to carry what it matches on
         # or a click would empty the page.
         print(io, "<li")
-        isempty(tags) || print(io, " data-tags=\"", _esc(join(tags, " ")), "\"")
+        _print_tags_attr(io, tags)
         print(
             io,
             "><a href=\"",

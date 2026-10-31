@@ -82,3 +82,41 @@ end
     @test Pinax._agent_jsonval(NaN) == "\"NaN\""          # not a JSON number: quoted
     @test Pinax._agent_jsonval(1 // 3) == "\"1//3\""
 end
+
+# The HTML attribute values a browser would read: `name="…"` with the entities decoded.
+function _attr_values(html, name)
+    unesc(s) = replace(s, "&quot;" => "\"", "&lt;" => "<", "&gt;" => ">", "&amp;" => "&")
+    return [unesc(m.captures[1]) for m in eachmatch(Regex("$(name)=\"([^\"]*)\""), html)]
+end
+
+@testset "contents: a tag with a space filters as one tag" begin
+    entries = [
+        (; title="A", href="a/index.html", tags=["spin chain", "x"]),
+        (; title="B", href="b/index.html", tags=["spin"]),
+        (; title="C", href="c/index.html", tags=["chain"]),
+    ]
+    html = read(Pinax.contents(entries; out=mktempdir()), String)
+    # each card's tags, as the filter reads them: one JSON array, every tag whole
+    @test [JSON.parse(v) for v in _attr_values(html, "data-tags")] == [["spin chain", "x"], ["spin"], ["chain"]]
+    # clicking a chip, in the page's own script (run under node with a minimal DOM)
+    node = Sys.which("node")
+    if node !== nothing
+        script = match(r"<script>(\(function\(\)\{var bar=.*?)</script>"s, html).captures[1]
+        driver = """
+        const tags = $(JSON.json(_attr_values(html, "data-tags")));
+        const cards = tags.map(t => ({ style: {}, getAttribute: () => t }));
+        const chip = t => ({ getAttribute: () => t, closest: function () { return this; },
+                             classList: { toggle() {} } });
+        let onclick;
+        const bar = { addEventListener: (_, f) => { onclick = f; },
+                      querySelectorAll: () => [] };
+        globalThis.document = { getElementById: () => bar, querySelectorAll: () => cards };
+        $(script)
+        const shown = t => { onclick({ target: chip(t) });
+                             return cards.map(c => c.style.display !== 'none'); };
+        console.log(JSON.stringify([shown('spin chain'), shown('spin'), shown('')]));
+        """
+        got = JSON.parse(read(`$(node) -e $(driver)`, String))
+        @test got == [[true, false, false], [false, true, false], [true, true, true]]
+    end
+end
