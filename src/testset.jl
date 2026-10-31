@@ -1048,62 +1048,65 @@ function _one_series(pts, ax, lg)
 end
 
 function _conv_figure!(id, q, ax, series, fp)
-    _push_figure!(;
-        gen=() -> _sweep_plot_svg(
-            tempname() * ".svg";
-            title="convergence — $(q)",
-            xlabel=string(ax.xvar),
-            ylabel="got",
-            xticklabels=ax.labels,
-            series=series,
-        ),
-        code=fp,
+    return _sweep_figure!(
+        id,
+        ax,
+        series,
+        fp;
+        title="convergence — $(q)",
+        ylabel="got",
         caption="Convergence of `$(q)` over the swept axis `$(ax.xvar)`. Dashed line = `want`; the shaded " *
                 "band is the tolerance; a red marker is a failed check.",
-        gen_id=id,
-        data=(;
-            xlabel=string(ax.xvar),
-            ylabel="got",
-            # what the plot draws, per series: the values, the reference and the tolerance band
-            series=[
-                (;
-                    label=isempty(s.label) ? name : string(s.label, " ", name),
-                    x=[_axis_value(ax, i) for i in s.xs],
-                    y=getfield(s, field),
-                ) for s in series for
-                (name, field) in (("got", :ys), ("want", :want), ("lo", :lo), ("hi", :hi))
-            ],
-        ),
+        # what the plot draws, per series: the values, the reference and the tolerance band
+        data=[
+            (;
+                label=isempty(s.label) ? name : string(s.label, " ", name),
+                x=[_axis_value(ax, i) for i in s.xs],
+                y=getfield(s, field),
+            ) for s in series for
+            (name, field) in (("got", :ys), ("want", :want), ("lo", :lo), ("hi", :hi))
+        ],
     )
-    return nothing
 end
 
 function _margin_figure!(id, q, ax, series, fp)
+    return _sweep_figure!(
+        id,
+        ax,
+        series,
+        fp;
+        title="margin — $(q)",
+        ylabel="delta / tol",
+        caption="Tolerance budget `delta/tol` of `$(q)` over `$(ax.xvar)`; the dashed line at 1.0 is the " *
+                "pass/fail boundary.",
+        data=[
+            (;
+                label=isempty(s.label) ? "margin" : s.label,
+                x=[_axis_value(ax, i) for i in s.xs],
+                y=s.ys,
+            ) for s in series
+        ],
+        hline=1.0,
+    )
+end
+
+# A sweep figure: `series` drawn over the swept axis, with `data` as its text channel.
+function _sweep_figure!(id, ax, series, fp; title, ylabel, caption, data, hline=nothing)
+    xlabel = string(ax.xvar)
     _push_figure!(;
         gen=() -> _sweep_plot_svg(
             tempname() * ".svg";
-            title="margin — $(q)",
-            xlabel=string(ax.xvar),
-            ylabel="delta / tol",
+            title,
+            xlabel,
+            ylabel,
             xticklabels=ax.labels,
-            series=series,
-            hline=1.0,
+            series,
+            hline,
         ),
         code=fp,
-        caption="Tolerance budget `delta/tol` of `$(q)` over `$(ax.xvar)`; the dashed line at 1.0 is the " *
-                "pass/fail boundary.",
+        caption,
         gen_id=id,
-        data=(;
-            xlabel=string(ax.xvar),
-            ylabel="delta / tol",
-            series=[
-                (;
-                    label=isempty(s.label) ? "margin" : s.label,
-                    x=[_axis_value(ax, i) for i in s.xs],
-                    y=s.ys,
-                ) for s in series
-            ],
-        ),
+        data=(; xlabel, ylabel, series=data),
     )
     return nothing
 end
