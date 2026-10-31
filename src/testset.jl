@@ -917,7 +917,7 @@ function _emit_sweep!(n, page_when::Function, acc::Vector{Check})
     # header + the assertion), so it must survive the fold: lift it to the section, deduplicated, ahead
     # of the figures it explains.
     for blk in _swept_codes(n)
-        _push_auto_code!(c, blk)
+        _place_code!(c, blk, n.written)
     end
     qi = Ref(0)
     for (label, pts) in _group_quantities(samples)
@@ -1287,36 +1287,76 @@ function _emit_own_content!(n::TestNode, acc::Vector{Check})
     # No interleaved `content` (a legacy dump, a hand-built node) — place checks then codes directly,
     # so a dumped `@code` still shows.
     if isempty(n.content) && (!isempty(n.checks) || !isempty(n.codes))
-        for chk in n.checks
-            _place_check!(c, chk, acc)
-        end
+        placed = [_place_check!(c, chk, acc) for chk in n.checks]
         for blk in n.codes
-            _push_auto_code!(c, blk)
+            _place_code!(c, blk, n.written)
         end
+        foreach(chk -> _repoint_code!(c, chk), placed)   # its code block was placed after it
         return acc
     end
     for (kind, i) in n.content
         if kind === :check
             _place_check!(c, n.checks[i], acc)
         elseif kind === :figure
-            push!(c.figures, n.figures[i])
+            push!(c.figures, _place_captured(c, n.figures[i], n.written, "figure"))
             push!(c.content, :figure => length(c.figures))
         elseif kind === :table
-            push!(c.tables, n.tables[i])
+            push!(c.tables, _place_captured(c, n.tables[i], n.written, "table"))
             push!(c.content, :table => length(c.tables))
         elseif kind === :raw
-            push!(c.raws, n.raws[i])
+            push!(c.raws, _place_captured(c, n.raws[i], n.written, "raw block"))
             push!(c.content, :raw => length(c.raws))
         elseif kind === :text
-            push!(c.texts, n.texts[i])
+            push!(c.texts, _place_captured(c, n.texts[i], n.written, "prose block"))
             push!(c.content, :text => length(c.texts))
         elseif kind === :code
-            # Deduplicated by id: N shards of one sweep carry the same captured snippet, and it must
-            # appear once (the ids of explicit `@code` blocks are already container-unique).
-            _push_auto_code!(c, n.codes[i])
+            _place_code!(c, n.codes[i], n.written)
         end
     end
     return acc
+end
+
+# A node captured in a test, placed in the document: its id is claimed in the whole document
+# (Conventions › Identity), since it was named inside its test node only. An id the author wrote is
+# claimed as is — a repeat is an error, as everywhere — and a generated one steps aside with `-2`.
+function _place_captured(c, node, written, what)
+    where = string(what, " in \"", c.anchor, "\"")
+    id = node.id in written ? _claim!(node.id, where) : _claim!(_free_id(node.id), where)
+    return id === node.id ? node : _with_id(node, id)
+end
+
+# The same node under another id, with the anchor that follows it.
+function _with_id(x::T, id::Symbol) where {T}
+    return T((
+        if f === :id
+            id
+        elseif f === :anchor
+            _anchor(id)
+        else
+            getfield(x, f)
+        end for f in fieldnames(T)
+    )...)
+end
+
+# A captured code block, placed at most once per container: a sweep's samples and a sweep's shards
+# carry the same snippet under one id, and it shows once. Its id in the document is remembered, so
+# the checks that point at it keep pointing at it.
+function _place_code!(c, blk, written)
+    key = (c.id, blk.id)
+    haskey(_ensure_document!().fold_codes, key) && return nothing
+    placed = _place_captured(c, blk, written, "code block")
+    _ensure_document!().fold_codes[key] = placed.id
+    push!(c.codes, placed)
+    push!(c.content, :code => length(c.codes))
+    return placed
+end
+
+# Point a placed check at its code block's id in the document.
+function _repoint_code!(c, chk)
+    isempty(chk.code_anchor) && return chk
+    id = get(_ensure_document!().fold_codes, (c.id, Symbol(chk.code_anchor)), nothing)
+    id === nothing || (chk.code_anchor = _anchor(id))
+    return chk
 end
 
 # Assign the render-time id (t1, t2, … so a merge renumbers cleanly rather than N shards colliding at
@@ -1324,6 +1364,7 @@ end
 function _place_check!(c, chk::Check, acc::Vector{Check})
     # a copy: the fold must not renumber (or later tag) the tree's own Check (#130)
     chk = _copy_check(chk; id=_check_id(c, chk.label))   # stable: container + source text (#123)
+    _repoint_code!(c, chk)
     push!(c.checks, chk)
     push!(c.content, :check => length(c.checks))
     push!(acc, chk)

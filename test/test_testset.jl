@@ -1174,4 +1174,53 @@ end
         @test fig.id === Symbol("test_x_jl_margins-2") && fig.generated
         @test all(x -> x.generated, filter(x -> x.kind in (:figure, :table), ns))
     end
+
+    # Every id the fold places is claimed in the whole document. Captured content was named inside
+    # its test node, so two testsets that hold the same snippet (or two same-named testsets in two
+    # files that hold the same prose) would otherwise give one id twice. A generated id steps aside
+    # with `-2`, a check keeps pointing at its own code block, and an id the author wrote twice is an
+    # error, as everywhere.
+    @testset "the fold claims every id: no duplicates across test nodes" begin
+        blk = CodeBlock(
+            :code_test_x_jl_abc, "code_test_x_jl_abc", "f(1) == 2", "", "", "julia"
+        )
+        prose = Pinax.Prose(:conv_txt_q, "conv_txt_q", "the same words")
+        chk() =
+            Check(:c, "f(1) == 2", 1.0, 1.0, 0.0, 0.5, :abs, true, "", "code_test_x_jl_abc")
+        mk(d) = TestNode(
+            d;
+            codes=[blk],
+            texts=[prose],
+            checks=[chk()],
+            content=[:text => 1, :code => 1, :check => 1],
+        )
+        files = [
+            TestNode("test_x.jl"; children=[mk("a"), mk("b")]),
+            TestNode("test_y.jl"; children=[mk("a")]),
+        ]
+        Pinax.render_test_report(TestNode("T"; children=files); out=mktempdir())
+        doc = Pinax.current_document()
+        ns = Pinax.node_ids(doc)
+        @test allunique(n.id for n in ns)
+        @test count(n -> n.kind === :code, ns) == 3 && count(n -> n.kind === :text, ns) == 3
+        # each check points at the code block placed in its own section
+        for pg in doc.pages, sec in Pinax._all_sections(pg), c in sec.checks
+            @test c.code_anchor in [b.anchor for b in sec.codes]
+        end
+
+        # the same author-written id in two test files is an error naming it
+        t(id) = Pinax.Table(id, string(id), "", ["a"], Vector{Any}[Any[1]], "", nothing)
+        wr(f) = TestNode(
+            f; tables=[t(:summary)], content=[:table => 1], written=Set([:summary])
+        )
+        err = try
+            Pinax.render_test_report(
+                TestNode("T"; children=[wr("a.jl"), wr("b.jl")]); out=mktempdir()
+            )
+            nothing
+        catch e
+            e
+        end
+        @test err isa ErrorException && occursin("duplicate id :summary", err.msg)
+    end
 end
