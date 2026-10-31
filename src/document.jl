@@ -1011,6 +1011,26 @@ function _all_sections(pg)
     return out
 end
 
+# A content macro's arguments split into its one expression and its keywords. A `key = value`
+# argument is a keyword only when `key` is one of `reserved`; any other assignment is the expression
+# itself (`@code E = compute(x)`, the common case), so a variable named like a keyword cannot be it.
+function _macro_args(args, reserved, what, noun)
+    expr = nothing
+    kws = Expr[]
+    for a in args
+        if a isa Expr && a.head === :(=) && a.args[1] isa Symbol && a.args[1] in reserved
+            push!(kws, a)
+        elseif expr === nothing
+            expr = a
+        else
+            error("$(what) takes a single $(noun) (plus kwargs)")
+        end
+    end
+    expr === nothing &&
+        error("$(what) needs $(first(noun) in "aeiou" ? "an" : "a") $(noun)")
+    return expr, kws
+end
+
 """
 Register a plot; the expression is DEFERRED. `@figure expr [params=…] [caption=…] [id=…] [thumbnail=…]
 [data=…]` / `@figure [kw] begin … end`. `data=(; x, y[, label])` or `(; series=[(; label, x, y)])`, each
@@ -1018,22 +1038,9 @@ optionally with `xlabel` / `ylabel`, is the plotted data given eagerly: the agen
 figure's data file from it without building the plot.
 """
 macro figure(args...)
-    isempty(args) && error("@figure needs a plot expression")
-    expr = nothing
-    kws = Expr[]
-    for a in args
-        if a isa Expr &&
-            a.head === :(=) &&
-            a.args[1] isa Symbol &&
-            a.args[1] in (:params, :caption, :id, :thumbnail, :data)
-            push!(kws, a)
-        elseif expr === nothing
-            expr = a
-        else
-            error("@figure takes a single plot expression (plus kwargs)")
-        end
-    end
-    expr === nothing && error("@figure needs a plot expression")
+    expr, kws = _macro_args(
+        args, (:params, :caption, :id, :thumbnail, :data), "@figure", "plot expression"
+    )
     allk = vcat(
         Expr(:kw, :gen, Expr(:(->), Expr(:tuple), esc(expr))),
         Expr(:kw, :code, _code_str(expr)),
@@ -1115,22 +1122,9 @@ NamedTuple of columns `(T=…, M=…)`, a `Matrix` (with `header=`), a `Vector` 
 `Vector` of row-vectors/tuples (with `header=`). `@table data [caption=…] [id=…] [header=…] [params=…]`.
 """
 macro table(args...)
-    isempty(args) && error("@table needs a data expression")
-    data = nothing
-    kws = Expr[]
-    for a in args
-        if a isa Expr &&
-            a.head === :(=) &&
-            a.args[1] isa Symbol &&
-            a.args[1] in (:caption, :id, :header, :params)
-            push!(kws, a)
-        elseif data === nothing
-            data = a
-        else
-            error("@table takes a single data expression (plus kwargs)")
-        end
-    end
-    data === nothing && error("@table needs a data expression")
+    data, kws = _macro_args(
+        args, (:caption, :id, :header, :params), "@table", "data expression"
+    )
     allk = vcat(
         Expr(:kw, :data, esc(data)),
         Expr(:kw, :code, _code_str(data)),
@@ -1183,7 +1177,6 @@ macro expect(args...)
     ))
 end
 
-# The container's content (prose / figures / tables / @raw blocks / checks / code / sections) in declaration order, as (kind, item) pairs.
 """
     @code [caption=…] [id=…] [lang="julia"] [run=true] expr
     @code [kw…] begin … end
@@ -1204,79 +1197,42 @@ Content, not structure (law II): it needs `using Pinax`, is purely additive, and
 verdict — a Documenter `@example`-like block, rendered as code + output by every backend.
 """
 macro code(args...)
-    isempty(args) && error("@code needs an expression")
-    expr = nothing
-    kws = Expr[]
-    run = true
-    # A `key = value` arg is a KEYWORD only for the reserved names — anything else with `head === :(=)`
-    # is the expression itself (an assignment like `E = compute(x)`, the common case). So `@code caption`
-    # is reserved; a variable literally named `caption` cannot be the shown assignment (as in `@table`).
-    for a in args
-        if a isa Expr &&
-            a.head === :(=) &&
-            a.args[1] isa Symbol &&
-            a.args[1] in (:caption, :id, :lang, :run)
-            a.args[1] === :run ? (run = a.args[2] === true) : push!(kws, a)
-        elseif expr === nothing
-            expr = a
-        else
-            error("@code takes a single expression (plus kwargs)")
-        end
-    end
-    expr === nothing && error("@code needs an expression")
-    src = _code_str(expr)
-    _kw(k, v) = Expr(:kw, k, v)
+    expr, kws = _macro_args(args, (:caption, :id, :lang, :run), "@code", "expression")
+    run = all(k -> k.args[1] !== :run || k.args[2] === true, kws)
+    filter!(k -> k.args[1] !== :run, kws)
+    pre, output, result = _code_plan(expr, run)
     # `source` is the deparsed normal form; `at`/`ast` let `_push_code!` recover what was actually
     # WRITTEN at that line (see `_verbatim_code`) and fall back to the deparse when it cannot.
-    ksrc = [
-        _kw(:source, src),
-        _kw(:at, (String(string(__source__.file)), __source__.line)),
-        _kw(:ast, QuoteNode(expr)),
-    ]
-    isassign = expr isa Expr && expr.head === :(=) && expr.args[1] isa Symbol
-    isdefn =
-        expr isa Expr && (
-            expr.head in _CODE_STMT_HEADS ||
-            (expr.head === :(=) && !(expr.args[1] isa Symbol))
-        )
-    if !run
-        # show-only — do not evaluate at all
-        return Expr(
-            :block,
-            Expr(
-                :call,
-                _push_code!,
-                Expr(:parameters, ksrc..., _kw(:output, ""), _kwspecs(kws)...),
-            ),
-            nothing,
-        )
-    elseif isassign
+    params = Expr(
+        :parameters,
+        Expr(:kw, :source, _code_str(expr)),
+        Expr(:kw, :at, (String(string(__source__.file)), __source__.line)),
+        Expr(:kw, :ast, QuoteNode(expr)),
+        Expr(:kw, :output, output),
+        _kwspecs(kws)...,
+    )
+    return Expr(:block, pre..., Expr(:call, _push_code!, params), result)
+end
+
+# How `@code` runs `expr`: the statements before the block is recorded, the shown output, and the
+# value the macro returns.
+function _code_plan(expr, run::Bool)
+    run || return Any[], "", nothing   # show-only: not evaluated at all
+    if expr isa Expr && expr.head === :(=) && expr.args[1] isa Symbol
         # a simple `sym = rhs`: run it BARE (so `sym` leaks to the caller exactly as without @code),
         # then read the value back off `sym` — capturing output without a wrapper that would relocalise.
-        sym = expr.args[1]
-        params = Expr(
-            :parameters,
-            ksrc...,
-            _kw(:output, Expr(:call, _repr_output, esc(sym))),
-            _kwspecs(kws)...,
-        )
-        return Expr(:block, esc(expr), Expr(:call, _push_code!, params), esc(sym))
-    elseif isdefn
-        # a function/other definition or a compound statement: run BARE (its scoping must be identical
-        # to writing it without @code — a value wrapper would relocalise the definition); no output.
-        params = Expr(:parameters, ksrc..., _kw(:output, ""), _kwspecs(kws)...)
-        return Expr(:block, esc(expr), Expr(:call, _push_code!, params), nothing)
-    else
-        # a pure expression (leaks nothing): wrap it to capture its value as the output.
-        v = gensym(:codeval)
-        params = Expr(
-            :parameters,
-            ksrc...,
-            _kw(:output, Expr(:call, _repr_output, v)),
-            _kwspecs(kws)...,
-        )
-        return Expr(:block, Expr(:(=), v, esc(expr)), Expr(:call, _push_code!, params), v)
+        sym = esc(expr.args[1])
+        return Any[esc(expr)], Expr(:call, _repr_output, sym), sym
     end
+    # a definition (any other assignment is a method definition) or a compound statement: run BARE
+    # (its scoping must be identical to writing it without @code — a value wrapper would relocalise
+    # the definition); no output.
+    expr isa Expr &&
+        (expr.head in _CODE_STMT_HEADS || expr.head === :(=)) &&
+        return Any[esc(expr)], "", nothing
+    # a pure expression (leaks nothing): wrap it to capture its value as the output.
+    v = gensym(:codeval)
+    return Any[Expr(:(=), v, esc(expr))], Expr(:call, _repr_output, v), v
 end
 
 # Heads that must run BARE under `@code` (a value-capturing wrapper would change their scoping): a

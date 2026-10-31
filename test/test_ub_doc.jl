@@ -97,4 +97,36 @@ using Test
         Pinax._read_comments(Pinax.current_document(), store, rdiag)
         @test !any(d -> occursin("hides", d.message), rdiag)
     end
+    @testset "content macros: one expression plus reserved keywords; @code's four forms" begin
+        expand(ex) = macroexpand(@__MODULE__, ex)
+        @test_throws "@figure needs a plot expression" expand(:(@figure caption = "c"))
+        @test_throws "@figure takes a single plot expression (plus kwargs)" expand(
+            :(@figure 1 2)
+        )
+        @test_throws "@table needs a data expression" expand(:(@table id = :t))
+        @test_throws "@table takes a single data expression (plus kwargs)" expand(
+            :(@table 1 2)
+        )
+        @test_throws "@code needs an expression" expand(:(@code))
+        @test_throws "@code takes a single expression (plus kwargs)" expand(:(@code 1 2))
+
+        Pinax.reset!()
+        ran = Ref(0)
+        local leaked, r, f1
+        @page :p "P" begin
+            @code run = false (ran[] += 1)                     # shown, never run
+            @code leaked = 6 * 7 caption = "assign"            # runs bare; the value is shown
+            @code function _ubdoc_f(x)                         # a definition: runs bare, no output
+                return x + 1
+            end
+            f1 = _ubdoc_f(1)
+            r = @code 2 + 3 id = :val                          # a value: captured, and returned
+        end
+        @test r == 5
+        codes = Pinax.current_document().pages[1].codes
+        @test ran[] == 0 && codes[1].output == ""
+        @test leaked == 42 && codes[2].output == "42" && codes[2].caption == "assign"
+        @test f1 == 2 && codes[3].output == ""
+        @test codes[4].id === :val && codes[4].output == "5"
+    end
 end
