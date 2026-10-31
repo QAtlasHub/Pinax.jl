@@ -145,8 +145,10 @@ end
 
 # One (already-materialized) figure → a \includegraphics figure.
 function emit_figure(theme::LaTeXBase, fig, ctx)
-    isempty(fig.assets) &&
-        return _latex_left_out!(ctx, fig.anchor, "figure has no asset to include")
+    if isempty(fig.assets)
+        _latex_left_out!(ctx, fig.anchor, "figure has no asset to include")
+        return emit_comments(theme, fig.anchor, ctx)   # its comments stay, as in every face
+    end
     io = ctx.io
     rel = replace(relpath(fig.assets[1], ctx.outdir), '\\' => '/')
     println(io, "\\begin{figure}[htbp]\\centering")
@@ -165,7 +167,7 @@ function _latex_emit_fig!(theme::LaTeXBase, fig, assetdir, ctx)
     catch e
         e isa InterruptException && rethrow()
         push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
-        return nothing
+        return emit_comments(theme, fig.anchor, ctx)   # a failed figure keeps its comments
     end
     emit_figure(theme, fig, ctx)
     return nothing

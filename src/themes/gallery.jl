@@ -1350,12 +1350,12 @@ function emit_view(theme::GalleryBase, ::Val{:grid}, figs, assetdir, layout, ctx
         catch e
             e isa InterruptException && rethrow()
             push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
-            _emit_placeholder(fig, "figure failed", io)
+            _emit_placeholder(theme, fig, "figure failed", ctx)
             continue
         end
         if isempty(fig.assets)
             push!(ctx.rdiag, DiagEntry(WARNING, fig.anchor, "figure produced no assets"))
-            _emit_placeholder(fig, "no assets", io)
+            _emit_placeholder(theme, fig, "no assets", ctx)
             continue
         end
         emit_figure(theme, fig, ctx)
@@ -1393,9 +1393,11 @@ function _facet_groups(figures, facet::AbstractString)
     return [(v, groups[v]) for v in order]
 end
 
-# A broken/empty figure: a visible card plus a link back to the diagnostics section.
-function _emit_placeholder(fig::Figure, why, io)
-    return println(
+# A broken/empty figure: a visible card plus a link back to the diagnostics section, and the figure's
+# comments, which a figure with nothing to draw still carries.
+function _emit_placeholder(theme::GalleryBase, fig::Figure, why, ctx)
+    io = ctx.io
+    print(
         io,
         "<figure id=\"",
         fig.anchor,
@@ -1403,8 +1405,10 @@ function _emit_placeholder(fig::Figure, why, io)
         _esc(why),
         " (",
         _esc(string(fig.id)),
-        ") — see <a href=\"#diagnostics\">diagnostics</a></div></figure>",
+        ") — see <a href=\"#diagnostics\">diagnostics</a></div>",
     )
+    emit_comments(theme, fig.anchor, ctx)
+    return println(io, "</figure>")
 end
 
 # A @table artifact -> an HTML table inside a figure card (reusing the figure/figcaption styling).

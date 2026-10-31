@@ -24,3 +24,48 @@ using JSON
     @test read(joinpath(out, "assets", "figures", "p", "h.csv"), String) ==
         "series,x,y\ny,1,\ny,2,2.0\n"
 end
+
+# A figure with nothing to draw — its gen() failed, or it produced no asset — still carries its
+# comments in every face: the placeholder (gallery) and the left-out note (LaTeX) keep the thread.
+struct _NoAssetFig end
+Pinax.is_figure(::_NoAssetFig) = true
+Pinax._figure_table(::_NoAssetFig) = nothing
+struct _TableOnlyGallery <: Pinax.GalleryBase end
+Pinax.figure_formats(::_TableOnlyGallery) = Symbol[:table]
+struct _TableOnlyTeX <: Pinax.LaTeXBase end
+Pinax.figure_formats(::_TableOnlyTeX) = Symbol[:table]
+
+@testset "comments on a figure with nothing to draw reach every face" begin
+    tmp = mktempdir()
+    function doc!()
+        Pinax.reset!(; title="Empty figures")
+        @page :p "P" begin
+            @figure error("boom") id = :bad
+            @figure _NoAssetFig() id = :none
+        end
+    end
+    function comments!(out)
+        mkpath(out)
+        f = joinpath(out, "comments.toml")
+        Pinax.add_comment(f, :bad, "NOTEBAD"; author="me")
+        Pinax.add_comment(f, :none, "NOTENONE"; author="me")
+        return nothing
+    end
+    blob = r"<script type=\"application/json\" id=\"pinax-committed\">.*?</script>"s
+    for (name, theme, file) in (
+        ("gallery", :gallery, "index.html"),
+        ("gallery, no asset", _TableOnlyGallery(), "index.html"),
+        ("LaTeX", :latex, "document.tex"),
+        ("LaTeX, no asset", _TableOnlyTeX(), "document.tex"),
+    )
+        @testset "$name" begin
+            doc!()
+            out = joinpath(tmp, name)
+            comments!(out)
+            Pinax.render(; out=out, theme=theme)
+            s = replace(read(joinpath(out, file), String), blob => "")
+            @test occursin("NOTEBAD", s)
+            @test occursin("NOTENONE", s)
+        end
+    end
+end
