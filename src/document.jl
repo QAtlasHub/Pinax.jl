@@ -266,7 +266,9 @@ mutable struct Prose
     id::Symbol
     anchor::String
     source::String
+    defined_at::String    # where the `@desc` was written, `path:line`, or ""
 end
+Prose(id, anchor, source) = Prose(id, anchor, source, "")
 
 """
 A `@raw` block: author-written HTML, kept verbatim. Like every node it has an id (written with `id=`,
@@ -277,7 +279,9 @@ struct RawBlock
     id::Symbol
     anchor::String
     html::String
+    defined_at::String    # where the `@raw` was written, `path:line`, or ""
 end
+RawBlock(id, anchor, html) = RawBlock(id, anchor, html, "")
 
 "A section: a container of prose, figures, tables, code, checks and child sections, in order."
 mutable struct Section
@@ -1379,17 +1383,18 @@ A prose block (markdown + math), placed in content order like any other node. A 
 number of them, interleaved with figures, tables and code (Conventions › Content).
 """
 macro desc(x)
+    at = (String(string(__source__.file)), __source__.line)
     return quote
-        _set_desc!($(esc(x)))
+        _set_desc!($(esc(x)); at=($(at)))
     end
 end
-function _set_desc!(s)
+function _set_desc!(s; at=nothing)
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@desc outside of a @section or @page")
     src = string(s)
     tid = _node_id!(c, nothing, Symbol(c.id, "_txt_", _stable_hash(src)), "prose block")
-    push!(c.texts, Prose(tid, _anchor(tid), src))
+    push!(c.texts, Prose(tid, _anchor(tid), src, _defined_at(at)))
     push!(c.content, :text => length(c.texts))
     return nothing
 end
@@ -1415,15 +1420,16 @@ macro raw(args...)
         end
     end
     html === nothing && error("@raw needs an HTML expression")
-    return :(_push_raw!($(esc(html)); id=($(esc(id)))))
+    at = (String(string(__source__.file)), __source__.line)
+    return :(_push_raw!($(esc(html)); id=($(esc(id))), at=($(at))))
 end
-function _push_raw!(s; id=nothing)
+function _push_raw!(s; id=nothing, at=nothing)
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@raw outside of a @section or @page")
     html = string(s)
     rid = _node_id!(c, id, Symbol(c.id, "_raw_", _stable_hash(html)), "raw block")
-    push!(c.raws, RawBlock(rid, _anchor(rid), html))
+    push!(c.raws, RawBlock(rid, _anchor(rid), html, _defined_at(at)))
     push!(c.content, :raw => length(c.raws))
     return nothing
 end

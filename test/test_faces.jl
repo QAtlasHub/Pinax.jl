@@ -213,6 +213,8 @@ _pos(s, needle) = first(findfirst(needle, s))
             @figure svg id = :img
             @table (a=[1, 2],) id = :t
             @code id = :c Q_VAL = 1
+            @raw "<i>r</i>"
+            @test true
         end
         out = joinpath(tmp, "ptr")
         Pinax.render(; out=out, theme=:agent)
@@ -227,7 +229,10 @@ _pos(s, needle) = first(findfirst(needle, s))
         at = r"^test/test_faces\.jl:\d+$"   # relative to the project that holds the file
         @test occursin(at, f["defined_at"])
         @test occursin(at, only(pg["tables"])["defined_at"])
-        @test occursin(at, only(pg["codes"])["defined_at"])
+        @test occursin(at, only(c for c in pg["codes"] if c["id"] == "c")["defined_at"])
+        @test all(t -> occursin(at, t["defined_at"]), pg["texts"])
+        @test occursin(at, only(pg["raws"])["defined_at"])
+        @test occursin(at, only(pg["checks"])["defined_at"])
         # a figure with no data form says so: an agent sees it only through its image
         img = only(f for f in pg["figures"] if f["id"] == "img")
         @test img["data"] === nothing

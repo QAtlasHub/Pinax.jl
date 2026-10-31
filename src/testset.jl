@@ -1676,12 +1676,16 @@ function _node_to_dict(n)
     isempty(n.tables) || (d["table"] = [_table_to_dict(t) for t in n.tables])
     isempty(n.raws) || (
         d["raw"] = [
-            Dict{String,Any}("id" => String(r.id), "html" => r.html) for r in n.raws
+            Dict{String,Any}(
+                "id" => String(r.id), "html" => r.html, "defined_at" => r.defined_at
+            ) for r in n.raws
         ]
     )
     isempty(n.texts) || (
         d["text"] = [
-            Dict{String,Any}("id" => String(t.id), "source" => t.source) for t in n.texts
+            Dict{String,Any}(
+                "id" => String(t.id), "source" => t.source, "defined_at" => t.defined_at
+            ) for t in n.texts
         ]
     )
     isempty(n.content) || (
@@ -1776,12 +1780,20 @@ function _dict_to_node(d::AbstractDict)
         codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
         tables=Table[_dict_to_table(t) for t in get(d, "table", Any[])],
         raws=RawBlock[
-            RawBlock(Symbol(r["id"]), _anchor(Symbol(r["id"])), r["html"]) for
-            r in get(d, "raw", Any[])
+            RawBlock(
+                Symbol(r["id"]),
+                _anchor(Symbol(r["id"])),
+                r["html"],
+                get(r, "defined_at", ""),
+            ) for r in get(d, "raw", Any[])
         ],
         texts=Prose[
-            Prose(Symbol(t["id"]), _anchor(Symbol(t["id"])), t["source"]) for
-            t in get(d, "text", Any[])
+            Prose(
+                Symbol(t["id"]),
+                _anchor(Symbol(t["id"])),
+                t["source"],
+                get(t, "defined_at", ""),
+            ) for t in get(d, "text", Any[])
         ],
         # A `@figure` did not survive, so any `:figure` entry in the recorded order is dropped — the
         # rest keeps its declared position (a legacy dump with no `content` falls back to checks-then-

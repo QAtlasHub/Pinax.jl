@@ -218,7 +218,16 @@ function _agent_raws!(raws, ctx)
     print(io, "[")
     for (i, r) in enumerate(raws)
         i == 1 || print(io, ",")
-        print(io, "{\"id\":", _jsonstr(string(r.id)), ",\"html\":", _jsonstr(r.html), "}")
+        print(
+            io,
+            "{\"id\":",
+            _jsonstr(string(r.id)),
+            ",\"html\":",
+            _jsonstr(r.html),
+            ",\"defined_at\":",
+            _jsonstr(r.defined_at),
+            "}",
+        )
     end
     print(io, "]")
     return nothing
@@ -245,7 +254,7 @@ function emit_check(::AgentBase, chk, ctx)
         _jsonstr(string(chk.kind)),
         ",\"pass\":",
         _agent_jsonval(chk.pass),
-        ",\"source\":",
+        ",\"defined_at\":",   # where the @test was written, `path:line`, as for every node
         _jsonstr(chk.source),
         # the code is ONE object in `codes` (kind "code"); a check REFERENCES it by id, or null
         ",\"code_id\":",
@@ -368,6 +377,8 @@ function _agent_texts!(texts, ctx)
             _jsonstr(string(t.id)),
             ",\"text\":",
             _jsonstr(t.source),
+            ",\"defined_at\":",
+            _jsonstr(t.defined_at),
             "}",
         )
     end

@@ -825,16 +825,18 @@ end
         # A failing @test records WHERE it failed (its LineNumberNode), so the report says where to
         # look, not just what failed. Captured duck-typed (a Pass may carry no source), carried through
         # a shard dump, and emitted as a structured field in agent.json.
+        proj = mktempdir()   # a project: the location is relative to its Project.toml
+        write(joinpath(proj, "Project.toml"), "name = \"P\"\n")
         fail = Test.Fail(
             :test,
             :(isapprox(a, b)),
             "isapprox(0.5, 0.9; rtol = 0.01)",
             nothing,
             nothing,
-            LineNumberNode(42, Symbol("/proj/test/test_x.jl")),
+            LineNumberNode(42, Symbol(joinpath(proj, "test", "test_x.jl"))),
             false,
         )
-        @test Ext._source_str(fail) == "test_x.jl:42"          # basename:line, not the full path
+        @test Ext._source_str(fail) == "test/test_x.jl:42"   # relative to its project, never a machine path
         @test Ext._source_str(Test.Pass(:test, :x, :(1 == 1), nothing)) == ""   # no usable source → ""
 
         # recorded onto the check, alongside its (failing) verdict…
@@ -842,7 +844,8 @@ end
         Ext._with_testset(root) do
             Test.record(root, fail)
         end
-        @test root.node.checks[end].source == "test_x.jl:42" && !root.node.checks[end].pass
+        @test root.node.checks[end].source == "test/test_x.jl:42" &&
+            !root.node.checks[end].pass
 
         # …round-trips through a shard dump…
         dir = mktempdir()
@@ -858,7 +861,7 @@ end
             out=joinpath(dir, "rep"),
         )
         aj = read(joinpath(dir, "rep", "agent", "agent.json"), String)
-        @test occursin("\"source\":\"test_x.jl:42\"", aj)
+        @test occursin("\"defined_at\":\"test_x.jl:42\"", aj)
     end
 
     @testset "at scale the human gallery caps rows; agent.json stays complete (J)" begin

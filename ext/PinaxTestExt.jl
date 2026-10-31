@@ -234,13 +234,14 @@ function Test.record(ts::PinaxTestSet, res)
     return res
 end
 
-# "file:line" from a Test result's `source::LineNumberNode`, or "" — duck-typed via `hasproperty` since
-# a `Pass` may carry no source across Julia versions, and only a FAILING check really needs it.
+# Where a Test result was written, `path:line` relative to its project (`Pinax._defined_at`), from its
+# `source::LineNumberNode`, or "" — duck-typed via `hasproperty` since a `Pass` may carry no source
+# across Julia versions.
 function _source_str(res)
     hasproperty(res, :source) || return ""
     s = getproperty(res, :source)
     (s isa LineNumberNode && s.file !== nothing) || return ""
-    return string(basename(String(s.file)), ":", s.line)
+    return Pinax._defined_at((String(s.file), s.line))
 end
 
 # The `@code` artifact for a test result — the code that produced it, read from the file at record

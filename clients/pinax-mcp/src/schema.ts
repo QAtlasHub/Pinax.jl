@@ -65,10 +65,14 @@ export const CodeZ = z
   .passthrough();
 
 // A prose block (`@desc`): markdown and math, placed in content order like any other node.
-export const TextZ = z.object({ id: z.string(), text: z.string() }).passthrough();
+export const TextZ = z
+  .object({ id: z.string(), text: z.string(), defined_at: z.string().optional() })
+  .passthrough();
 
 // A `@raw` block: author-written HTML, as written (what the gallery shows verbatim).
-export const RawZ = z.object({ id: z.string(), html: z.string() }).passthrough();
+export const RawZ = z
+  .object({ id: z.string(), html: z.string(), defined_at: z.string().optional() })
+  .passthrough();
 
 // A number, or the string a non-finite value is written as ("NaN", "Inf").
 const NumZ = z.union([z.number(), z.string()]);
@@ -84,7 +88,7 @@ export const CheckZ = z
     tol: NumZ,
     kind: z.string(),
     pass: z.boolean(),
-    source: z.string().optional(),
+    defined_at: z.string().optional(), // where the @test was written, "path:line"
     code_id: z.string().nullable().optional(), // the code block it was captured from, by id
   })
   .passthrough();
