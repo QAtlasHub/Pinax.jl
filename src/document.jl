@@ -215,6 +215,12 @@ mutable struct Check
     )
         o = _outcome(outcome)
         _check_kind(kind, o, (got, want, delta, tol))
+        # a margin is finite: an infinite number has none, and would reach agent.json as "Inf"
+        kind === :indicator ||
+            all(isfinite, (got, want, delta, tol)) ||
+            error(
+                "Pinax: a $(repr(kind)) check needs finite got, want, delta and tol; one is infinite",
+            )
         return new(id, label, got, want, delta, tol, kind, o, source, code_id, reported)
     end
 end

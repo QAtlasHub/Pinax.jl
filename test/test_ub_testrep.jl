@@ -121,6 +121,12 @@ _ub_diags() = [(d.item, d.message) for d in Pinax.current_document().diag.entrie
                     checks=[Check(:t, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
                     figures=fig.(figs),
                     tables=tbl.(tbls),
+                    # placed in content order, as a capture records every node
+                    content=vcat(
+                        [:check => 1],
+                        [:figure => i for i in eachindex(figs)],
+                        [:table => i for i in eachindex(tbls)],
+                    ),
                 ),
             ],
         )

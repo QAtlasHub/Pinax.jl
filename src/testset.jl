@@ -405,7 +405,10 @@ end
 function _dedent(ls)
     indents = [length(l) - length(lstrip(l)) for l in ls if !isempty(strip(l))]
     ind = isempty(indents) ? 0 : minimum(indents)
-    return rstrip(join((isempty(strip(l)) ? "" : l[(ind + 1):end] for l in ls), "\n"))
+    # `ind` counts characters (an indent may hold a multi-byte space), so cut by characters
+    return rstrip(
+        join((isempty(strip(l)) ? "" : chop(l; head=ind, tail=0) for l in ls), "\n")
+    )
 end
 
 """
@@ -545,22 +548,30 @@ function _check_from(expr, label::AbstractString, outcome, i::Int)
     nums = o === :error ? nothing : _approx_numbers(expr)
     nums === nothing && return _indicator_check(id, label, o)
     (; got, want, atol, rtol) = nums
-    # No margin exists for a non-finite value or a zero tolerance: say so on the check, flagged as an
-    # indicator, rather than emitting a non-finite delta or fabricated numbers (#116).
+    # No margin exists for a non-finite value or tolerance (or a zero one, below): say so on the
+    # check, flagged as an indicator, rather than emitting non-finite or fabricated numbers (#116).
     (isfinite(got) && isfinite(want)) || return _indicator_check(
         id, "$(label)  [got = $(got), want = $(want): no margin]", o
     )
-    # isapprox passes iff |x-y| <= max(atol, rtol*max(|x|,|y|)) (#115). Record the term that
-    # governs, so `delta <= tol` is exactly that test: absolute when atol is the larger bound, else
-    # relative to max(|x|,|y|).
+    (isfinite(atol) && isfinite(rtol)) || return _indicator_check(
+        id, "$(label)  [atol = $(atol), rtol = $(rtol): no margin]", o
+    )
+    return _margin_check(id, String(label), got, want, atol, rtol, o)
+end
+
+# isapprox passes iff |x-y| <= max(atol, rtol*max(|x|,|y|)) (#115). Record the term that governs, so
+# `delta <= tol` is exactly that test: absolute when atol is the larger bound, else relative to
+# max(|x|,|y|). Finite got, want and tolerances, as `_check_from` hands them over.
+function _margin_check(id, label, got, want, atol, rtol, o)
     scale = max(abs(got), abs(want))
     atol <= 0 &&
         rtol * scale <= 0 &&
         return _indicator_check(id, "$(label)  [zero tolerance: no margin]", o)
-    if atol >= rtol * scale
-        return Check(id, String(label), got, want, abs(got - want), atol, :abs, o)
-    end
-    return Check(id, String(label), got, want, abs(got - want) / scale, rtol, :rel, o)
+    diff = abs(got - want)
+    isfinite(diff) ||
+        return _indicator_check(id, "$(label)  [|got - want| overflows: no margin]", o)
+    atol >= rtol * scale && return Check(id, label, got, want, diff, atol, :abs, o)
+    return Check(id, label, got, want, diff / scale, rtol, :rel, o)
 end
 
 # An indicator: every assertion still shows up in the verdict, but it has no numbers and no margin.
@@ -643,8 +654,8 @@ function TestNode(
 end
 
 # A broken/skipped test is deliberately NOT a Check. It has no verdict to show: it did not pass, but
-# it did not fail either, and encoding it as `pass=false` would paint the page red and flip the
-# benchmark verdict to FAIL — for a test the runner is perfectly happy about.
+# it did not fail either, and encoding it as a `:fail` check would paint the page red and flip the
+# verdict to FAIL — for a test the runner is perfectly happy about.
 _ntests(n) = length(n.checks) + n.nbroken + sum(_ntests, n.children; init=0)
 # Failed and errored are each read from the checks' own outcome, so they can never disagree with them.
 _nerror(n) = _noutcome(n, :error)
@@ -711,7 +722,7 @@ function _margin_svg(checks::Vector{Check}, path::AbstractString)
         else
             "#4c9f70"
         end
-        lab = length(c.label) > 34 ? c.label[1:31] * "…" : c.label
+        lab = _trunc(c.label, 34)
         w = max(x_of(m) - left, 1.0)
         print(
             io,
@@ -760,8 +771,8 @@ function _push_margin_figure!(page_id::Symbol, checks::Vector{Check})
     shown = checks[xs]
     capped = length(shown) < total
     # `data=` must be plot-data (`series=[(; label, x, y)]`) — it is the figure's TEXT channel for the
-    # agent backend. The per-check got/want/tol already ride along in the benchmark `checks` JSON, so
-    # the series carries only what the picture itself shows: the margin of check number i.
+    # agent backend. The per-check got/want/tol already ride along in each container's `checks` in
+    # agent.json, so the series carries only what the picture itself shows: the margin of check i.
     data = (;
         xlabel="check #",
         ylabel="delta / tol",
@@ -941,13 +952,13 @@ end
 
 # Render a swept level: a convergence + margin figure per quantity, then every sample check placed flat
 # (binding-tagged) so the page's pass/fail counts and `agent.json` verdict stay exactly what they were —
-# the sweep changes only how the checks are DRAWN, never the verdict.
-function _emit_sweep!(n, page_when::Function, acc::Vector{Check})
+# the sweep changes only how the checks are DRAWN, never the verdict. A sweep with no checks still
+# lifts its code and names what it omits.
+function _emit_sweep!(n, page_when::Function, acc::Vector{Check}, id_prefix="")
     c = _ctx_container()
     samples = _sweep_samples!(
         Tuple{Vector{Pair{Symbol,String}},Check}[], n, Pair{Symbol,String}[], page_when
     )
-    isempty(samples) && return acc
     unplaced = join(("$(k) × $(m)" for (m, k) in _sweep_unplaced(n) if k > 0), ", ")
     isempty(unplaced) || _diag!(
         WARNING,
@@ -958,7 +969,7 @@ function _emit_sweep!(n, page_when::Function, acc::Vector{Check})
     # header + the assertion), so it must survive the fold: lift it to the section, deduplicated, ahead
     # of the figures it explains.
     for blk in _swept_codes(n)
-        _place_code!(c, blk, n.written)
+        _place_code!(c, blk, n.written; id_prefix)
     end
     qi = Ref(0)
     for (label, pts) in _group_quantities(samples)
@@ -1307,13 +1318,13 @@ function _emit_node!(
         # overview counts it
         _emit_page_node!(n, n, page_when, seen, acc; id_prefix, recurse=false)
     else
-        _emit_own_content!(n, acc)
+        _emit_own_content!(n, acc, id_prefix)
     end
     # A level whose children are all canonical `@testset for` samples is a SWEEP, not a stack of
     # sections: fold it into convergence + margin figures (issue #69 C). Only inside an open container
     # (a page/section) — never at the root, where children are files and the grouping-flatten runs.
     if _ctx_container() !== nothing && _is_swept(n, page_when)
-        _emit_sweep!(n, page_when, acc)
+        _emit_sweep!(n, page_when, acc, id_prefix)
         return acc
     end
     # Nested testsets become pages (a file) or sections (a group). @pinaxignore'd ones are skipped
@@ -1378,32 +1389,36 @@ end
 # Move THIS node's own captured content (texts + figures/tables/raws + checks) into the CTX
 # container just entered, preserving declaration order. A captured node carries the full interleaved
 # `content`; one without it (a legacy dump, or a node built by hand) falls back to its checks. Uses
-# `_ctx_container()` (never the probe) — the fold builds the doc in `CTX`.
-function _emit_own_content!(n::TestNode, acc::Vector{Check})
+# `_ctx_container()` (never the probe) — the fold builds the doc in `CTX`. `id_prefix` qualifies every
+# id it places (a matrix cell's, see `_cell_keys`).
+function _emit_own_content!(n::TestNode, acc::Vector{Check}, id_prefix="")
     c = _ctx_container()
     c === nothing && return acc
-    union!(_ensure_document!().written, n.written)   # the ids its author wrote stay written
-    # No interleaved `content` (a legacy dump, a hand-built node) — place checks then codes directly,
-    # so a dumped `@code` still shows.
-    if isempty(n.content) && (!isempty(n.checks) || !isempty(n.codes))
-        placed = [_place_check!(c, chk, acc) for chk in n.checks]
-        for blk in n.codes
-            _place_code!(c, blk, n.written)
-        end
-        foreach(chk -> _repoint_code!(c, chk), placed)   # its code block was placed after it
-        return acc
-    end
+    # the ids its author wrote stay written, as they are placed
+    union!(_ensure_document!().written, (Symbol(id_prefix, id) for id in n.written))
     # the one registry of content kinds: a kind it does not know is an error, never dropped
-    for (kind, node) in _content_items(n)
+    for (kind, i) in _content_order(n)
+        node = getfield(n, _content_field(n, kind))[i]
         if kind === :check
             _place_check!(c, node, acc)
         elseif kind === :code
-            _place_code!(c, node, n.written)
+            _place_code!(c, node, n.written; id_prefix)
         else
-            _add_node!(c, kind, _place_captured(c, node, n.written, _KIND_NAME[kind]))
+            what = _KIND_NAME[kind]
+            _add_node!(c, kind, _place_captured(c, node, n.written, what; id_prefix))
         end
     end
     return acc
+end
+
+# A node's content order: the one it recorded, or — with none (a dump from before `content` was
+# written, a node built by hand) — its code blocks, then its checks, the order a capture records them
+# in (the code that produced a check reads before it).
+function _content_order(n::TestNode)
+    isempty(n.content) || return n.content
+    return vcat(
+        [:code => i for i in eachindex(n.codes)], [:check => i for i in eachindex(n.checks)]
+    )
 end
 
 # What a placed node is called in an id collision's error.
@@ -1412,9 +1427,11 @@ const _KIND_NAME = (; figure="figure", table="table", raw="raw block", text="pro
 # A node captured in a test, placed in the document: its id is claimed in the whole document
 # (Conventions › Identity), since it was named inside its test node only. An id the author wrote is
 # claimed as is — a repeat is an error, as everywhere — and a generated one steps aside with `-2`.
-function _place_captured(c, node, written, what)
+# `id_prefix` qualifies either (a matrix cell's, see `_cell_keys`).
+function _place_captured(c, node, written, what; id_prefix="")
     where = string(what, " in \"", c.anchor, "\"")
-    id = node.id in written ? _claim!(node.id, where) : _claim!(_free_id(node.id), where)
+    base = Symbol(id_prefix, node.id)
+    id = node.id in written ? _claim!(base, where) : _claim!(_free_id(base), where)
     return id === node.id ? node : _with_id(node, id)
 end
 
@@ -1435,20 +1452,26 @@ end
 # carry the same snippet under one id, and it shows once. Its id in the document is remembered, so
 # the checks that point at it keep pointing at it. The same snippet in another container is a node
 # of its own, under a free id.
-function _place_code!(c, blk, written)
+function _place_code!(c, blk, written; id_prefix="")
     key = (c.id, blk.id)
     haskey(_ensure_document!().fold_codes, key) && return nothing
-    placed = _place_captured(c, blk, written, "code block")
+    placed = _place_captured(c, blk, written, "code block"; id_prefix)
     _ensure_document!().fold_codes[key] = placed.id
     _add_node!(c, :code, placed)
     return placed
 end
 
-# Point a placed check at its code block's id in the document.
+# Point a placed check at its code block's id in the document. The block is placed in the same
+# container before the check (a capture records it first, and a sweep lifts its code ahead of its
+# checks), so a check whose block was not placed would point at nothing: an error, never kept.
 function _repoint_code!(c, chk)
     chk.code_id === nothing && return chk
     id = get(_ensure_document!().fold_codes, (c.id, chk.code_id), nothing)
-    id === nothing || (chk.code_id = id)
+    id === nothing && error(
+        "Pinax: check \"$(chk.label)\" in \"$(c.anchor)\" points at code block " *
+        "$(chk.code_id), which was not placed there before it",
+    )
+    chk.code_id = id
     return chk
 end
 
@@ -1468,7 +1491,7 @@ function _emit_page_node!(
         if recurse
             _emit_node!(n, page_when, seen, page_checks; id_prefix=id_prefix)
         else
-            _emit_own_content!(n, page_checks)
+            _emit_own_content!(n, page_checks, id_prefix)
         end
         append!(acc, page_checks)
         # Back at page level (every section closed), so the figure lands on the page.
@@ -1744,16 +1767,7 @@ end
 
 # `r`'s own content after `m`'s: its nodes appended to `m`'s, its `content` indices shifted past them.
 function _append_content!(m::TestNode, r::TestNode)
-    # a node with no `content` order (a legacy dump) reads as its checks, then its codes
-    order = if isempty(r.content)
-        vcat(
-            [:check => i for i in eachindex(r.checks)],
-            [:code => i for i in eachindex(r.codes)],
-        )
-    else
-        r.content
-    end
-    for (k, i) in order
+    for (k, i) in _content_order(r)
         _add_node!(m, k, getfield(r, _content_field(r, k))[i])
     end
     union!(m.written, r.written)
@@ -1761,9 +1775,9 @@ function _append_content!(m::TestNode, r::TestNode)
 end
 
 # A CI matrix merge (issue #69 K): each cell is a `@part` holding that cell's file pages (ids qualified
-# by the cell so the same file across cells does not collide). One overview across all cells, then the
-# cells; nothing is merged away and the file structure is preserved. The `julia/os/commit` provenance
-# of a merge job is not the cells', so the cell label carries that instead.
+# by the cell, see `_cell_keys`). One overview across all cells, then the cells; nothing is merged away
+# and the file structure is preserved. The `julia/os/commit` provenance of a merge job is not the
+# cells', so the cell label carries that instead.
 function _render_matrix(
     roots,
     cells;
@@ -1805,10 +1819,10 @@ function _render_matrix(
             caption="Per-cell, per-file result profile. `worst margin` is the largest `delta/tol` in that (cell, file).",
         )
     end
-    for (r, c) in pairs
-        _enter_part!(Symbol("cell_", _slug(c)), c)
+    for ((r, c), key) in zip(pairs, _cell_keys(order))
+        _enter_part!(Symbol("cell_", key), c)
         try
-            _emit_node!(r, page_when, seen; id_prefix=string(_slug(c), "_"))
+            _emit_node!(r, page_when, seen; id_prefix=string(key, "_"))
         finally
             _exit_part!()
         end
@@ -1816,6 +1830,19 @@ function _render_matrix(
     doc = current_document()
     gallery, agent = _render_report_doc(doc, out)
     return (; gallery, agent)
+end
+
+# Within a matrix report the cell is part of every node's identity: every cell ran the same files,
+# so one node of the source is a node per cell here, and only its cell tells them apart. Each cell
+# gets a key — the slug of its label, generated, so two labels that slug alike are `-2`, `-3` rather
+# than an error — and every id the fold places from that cell carries it: the part is `cell_<key>`,
+# and every page, section, check, figure, table, code block, prose and `@raw` block is `<key>_<id>`,
+# an id its author wrote included. The author's id is qualified, never otherwise changed: written
+# twice within one cell, it is still an error.
+function _cell_keys(cells)
+    keys = Symbol[]
+    foreach(c -> push!(keys, _free_id(_slug(c), in(keys))), cells)
+    return keys
 end
 
 # ── the dump (how a sharded run gets merged) ─────────────────────────
@@ -1913,18 +1940,18 @@ function _raw_to_dict(r::RawBlock)
         "id" => String(r.id), "html" => r.html, "defined_at" => r.defined_at
     )
 end
-function _dict_to_raw(r::AbstractDict)
-    id = Symbol(r["id"])
-    return RawBlock(id, _anchor(id), r["html"], get(r, "defined_at", ""))
+function _dict_to_raw(r::AbstractDict, at)
+    id = Symbol(_dump_key(r, "id", at))
+    return RawBlock(id, _anchor(id), _dump_key(r, "html", at), get(r, "defined_at", ""))
 end
 function _text_to_dict(t::Prose)
     return Dict{String,Any}(
         "id" => String(t.id), "source" => t.source, "defined_at" => t.defined_at
     )
 end
-function _dict_to_text(t::AbstractDict)
-    id = Symbol(t["id"])
-    return Prose(id, _anchor(id), t["source"], get(t, "defined_at", ""))
+function _dict_to_text(t::AbstractDict, at)
+    id = Symbol(_dump_key(t, "id", at))
+    return Prose(id, _anchor(id), _dump_key(t, "source", at), get(t, "defined_at", ""))
 end
 
 # TOML holds integers, floats, booleans and strings. `missing` / `nothing` cross as a marker table and
@@ -1934,8 +1961,15 @@ _toml_cell(x::Union{Integer,AbstractFloat,Bool,AbstractString}) = x
 _toml_cell(::Missing) = Dict{String,Any}("missing" => true)
 _toml_cell(::Nothing) = Dict{String,Any}("nothing" => true)
 _toml_cell(x) = _cellstr(x)
-_from_toml_cell(x) = x
-_from_toml_cell(d::AbstractDict) = haskey(d, "missing") ? missing : nothing
+_from_toml_cell(x, at) = x
+function _from_toml_cell(d::AbstractDict, at)
+    keys(d) == Set(["missing"]) && return missing
+    keys(d) == Set(["nothing"]) && return nothing
+    return error(
+        "Pinax: $(at) holds a cell $(repr(d)), which is no marker table — a table cell is " *
+        "{missing = true} or {nothing = true}",
+    )
+end
 
 function _table_to_dict(t::Table)
     return Dict{String,Any}(
@@ -1947,14 +1981,23 @@ function _table_to_dict(t::Table)
         "defined_at" => t.defined_at,
     )
 end
-function _dict_to_table(d::AbstractDict)
-    id = Symbol(d["id"])
+function _dict_to_table(d::AbstractDict, at)
+    id = Symbol(_dump_key(d, "id", at))
+    header = String[string(h) for h in _dump_key(d, "header", at)]
+    rows = Vector{Any}[
+        Any[_from_toml_cell(c, at) for c in r] for r in _dump_key(d, "rows", at)
+    ]
+    for (j, r) in enumerate(rows)
+        length(r) == length(header) || error(
+            "Pinax: $(at): row $(j) has $(length(r)) cell(s), and the header $(length(header))",
+        )
+    end
     return Table(
         id,
         _anchor(id),
         get(d, "caption", ""),
-        String[string(h) for h in get(d, "header", Any[])],
-        Vector{Any}[Any[_from_toml_cell(c) for c in row] for row in get(d, "rows", Any[])],
+        header,
+        rows,
         get(d, "code", ""),
         nothing,
         get(d, "defined_at", ""),
@@ -1970,11 +2013,12 @@ function _code_to_dict(c::CodeBlock)
         "defined_at" => c.defined_at,
     )
 end
-function _dict_to_code(d::AbstractDict)
+function _dict_to_code(d::AbstractDict, at)
+    id = Symbol(_dump_key(d, "id", at))
     return CodeBlock(
-        Symbol(d["id"]),
-        _anchor(Symbol(d["id"])),
-        d["source"],
+        id,
+        _anchor(id),
+        _dump_key(d, "source", at),
         get(d, "output", ""),
         get(d, "caption", ""),
         get(d, "lang", "julia"),
@@ -2001,36 +2045,55 @@ function _check_to_dict(c::Check)
 end
 
 # A dump is outside data: it is checked here, where it is read, so a stale or edited one is an error
-# naming its entry rather than a BoundsError deep in the fold. `path` is the dump file.
+# naming its entry rather than a KeyError or a BoundsError deep in the fold. `path` is the dump file;
+# `at` names the testset, and each entry is named `<at>, <key> <j>` (`…, check 2`).
 function _dict_to_node(d::AbstractDict, path::AbstractString="")
-    at = string("test dump ", path, ", testset \"", d["description"], "\"")
+    desc = _dump_key(d, "description", string("test dump ", path, ": a testset"))
+    at = string("test dump ", path, ", testset \"", desc, "\"")
     n = TestNode(
-        d["description"];
+        desc;
         elapsed=get(d, "elapsed", NaN),
         ignore=get(d, "ignore", false),
         nbroken=get(d, "nbroken", 0),
-        checks=Check[_dict_to_check(c, at) for c in get(d, "check", Any[])],
-        codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
-        tables=Table[_dict_to_table(t) for t in get(d, "table", Any[])],
-        raws=RawBlock[_dict_to_raw(r) for r in get(d, "raw", Any[])],
-        texts=Prose[_dict_to_text(t) for t in get(d, "text", Any[])],
+        checks=_dump_entries(Check, d, "check", at, _dict_to_check),
+        codes=_dump_entries(CodeBlock, d, "code", at, _dict_to_code),
+        tables=_dump_entries(Table, d, "table", at, _dict_to_table),
+        raws=_dump_entries(RawBlock, d, "raw", at, _dict_to_raw),
+        texts=_dump_entries(Prose, d, "text", at, _dict_to_text),
         children=TestNode[_dict_to_node(c, path) for c in get(d, "child", Any[])],
         written=Set{Symbol}(Symbol(id) for id in get(d, "written", Any[])),
-        dropped=Pair{String,String}[e["id"] => e["why"] for e in get(d, "dropped", Any[])],
+        dropped=_dump_entries(Pair{String,String}, d, "dropped", at, _dict_to_dropped),
     )
     # A `@figure` did not survive, so any `:figure` entry in the recorded order is dropped — the rest
-    # keeps its declared position (a legacy dump with no `content` falls back to checks-then-codes in
-    # `_emit_own_content!`).
+    # keeps its declared position.
     for (j, e) in enumerate(get(d, "content", Any[]))
-        e["kind"] == "figure" || push!(n.content, _dump_entry(n, e, j, at))
+        a = string(at, ", content entry ", j)
+        _dump_key(e, "kind", a) == "figure" || push!(n.content, _dump_entry(n, e, a))
     end
+    _check_placed(n, haskey(d, "content"), at)
+    _check_code_refs(n, at)
     return n
 end
 
+# A key a dump entry must have, or an error naming the entry.
+function _dump_key(d::AbstractDict, key::AbstractString, at)
+    haskey(d, key) || error("Pinax: $(at) has no \"$(key)\"")
+    return d[key]
+end
+
+# Each entry under `key`, read by `f(entry, at)` into a `Vector{T}`; none when the key is absent.
+function _dump_entries(::Type{T}, d::AbstractDict, key, at, f) where {T}
+    return T[
+        f(e, string(at, ", ", key, " ", j)) for (j, e) in enumerate(get(d, key, Any[]))
+    ]
+end
+
+_dict_to_dropped(e::AbstractDict, at) = _dump_key(e, "id", at) => _dump_key(e, "why", at)
+
 # One `content` entry of a dumped node, checked against the node's own nodes.
-function _dump_entry(n::TestNode, e::AbstractDict, j::Int, at)
-    bad(msg) = error("Pinax: $(at): content entry $(j) $(msg)")
-    kind, i = e["kind"], e["i"]
+function _dump_entry(n::TestNode, e::AbstractDict, at)
+    bad(msg) = error("Pinax: $(at) $(msg)")
+    kind, i = _dump_key(e, "kind", at), _dump_key(e, "i", at)
     k = Symbol(kind)
     f = get(_CONTENT_FIELDS, k, nothing)
     (f !== nothing && hasfield(TestNode, f)) || bad("has unknown kind \"$(kind)\"")
@@ -2040,43 +2103,87 @@ function _dump_entry(n::TestNode, e::AbstractDict, j::Int, at)
     return k => Int(i)
 end
 
-function _dict_to_check(d::AbstractDict, at::AbstractString="a test dump")
+# Every node a dumped testset holds has exactly one place in its content order — the recorded one,
+# or, in a dump with none, its code blocks then its checks (`_content_order`) — so the fold neither
+# drops a node nor places one twice.
+function _check_placed(n::TestNode, has_content::Bool, at)
+    order = has_content ? n.content : _content_order(n)
+    for k in (:check, :code, :table, :raw, :text)
+        placed = sort!([i for (kk, i) in order if kk === k])
+        len = length(getfield(n, _content_field(n, k)))
+        placed == 1:len || error(
+            "Pinax: $(at) holds $(len) $(k)(s), and its content places $(k)s $(placed) — " *
+            "each exactly once",
+        )
+    end
+    return n
+end
+
+# A dumped check's code reference names a code block of its own testset, as a captured one does.
+function _check_code_refs(n::TestNode, at)
+    for (j, c) in enumerate(n.checks)
+        c.code_id === nothing ||
+            any(b -> b.id === c.code_id, n.codes) ||
+            error(
+                "Pinax: $(at), check $(j) points at code block $(c.code_id), which the testset " *
+                "does not hold",
+            )
+    end
+    return n
+end
+
+function _dict_to_check(d::AbstractDict, at::AbstractString="a dumped check")
     kind = _dumped_kind(d, at)
-    num(k) = kind === :indicator ? NaN : Float64(d[k])
-    return Check(
-        :t0,                        # renumbered on render
-        d["label"],
-        num("got"),
-        num("want"),
-        num("delta"),
-        num("tol"),
-        kind,
-        _dumped_outcome(d, at),
-        get(d, "source", ""),
-        _dumped_code_id(d),
-    )
+    num(k) = kind === :indicator ? NaN : Float64(_dump_key(d, k, at))
+    label = _dump_key(d, "label", at)
+    got, want, delta, tol = num.(("got", "want", "delta", "tol"))
+    outcome = _dumped_outcome(d, at)
+    try
+        # the id is renumbered on render
+        return Check(
+            :t0,
+            label,
+            got,
+            want,
+            delta,
+            tol,
+            kind,
+            outcome,
+            get(d, "source", ""),
+            _dumped_code_id(d),
+        )
+    catch err
+        # what `Check` refuses (a margin check with a non-finite number, …), named as the entry
+        err isa ErrorException || rethrow()
+        error("Pinax: $(at): ", err.msg)
+    end
 end
 
 # A dumped check's outcome, checked where it is read. An older dump wrote `pass` (and counted errors
 # apart, on the testset), so its errors read as fails.
 function _dumped_outcome(d::AbstractDict, at)
-    haskey(d, "outcome") || return _outcome(d["pass"] === true)
-    o = d["outcome"]
-    o in ("pass", "fail", "error") || error(
-        "Pinax: $(at): check \"$(d["label"])\" has outcome \"$(o)\" — a check passes, fails or errors",
-    )
-    return Symbol(o)
+    (haskey(d, "outcome") || !haskey(d, "pass")) &&
+        return _dumped_symbol(d, "outcome", _CHECK_OUTCOMES, at)
+    p = d["pass"]
+    p isa Bool || error("Pinax: $(at) has pass $(repr(p)) — true or false")
+    return _outcome(p)
 end
 
 # A dumped check's kind, checked where it is read. An older dump wrote an indicator as kind "abs"
 # with `indicator = true` beside made-up numbers, which are dropped.
 function _dumped_kind(d::AbstractDict, at)
     get(d, "indicator", false) === true && return :indicator
-    kind = d["kind"]
-    kind in ("abs", "rel", "indicator") || error(
-        "Pinax: $(at): check \"$(d["label"])\" has kind \"$(kind)\" — a check is abs, rel or indicator",
-    )
-    return Symbol(kind)
+    return _dumped_symbol(d, "kind", _CHECK_KINDS, at)
+end
+
+# A dumped check's `key` — its kind or its outcome — as one of the symbols `allowed` (the `Check`'s own
+# vocabulary, so the dump reader never keeps a second copy of it).
+function _dumped_symbol(d::AbstractDict, key, allowed, at)
+    v = _dump_key(d, key, at)
+    s = v isa AbstractString ? Symbol(v) : nothing
+    s in allowed ||
+        error("Pinax: $(at) has $(key) $(repr(v)) — one of ", join(allowed, ", "))
+    return s
 end
 
 # A dumped check's code reference: `code_id`, or the anchor an older dump wrote (`code_anchor`,

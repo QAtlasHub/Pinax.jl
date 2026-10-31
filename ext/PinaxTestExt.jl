@@ -238,8 +238,12 @@ function Test.record(ts::PinaxTestSet, res)
         push!(n.children, res.node)
     elseif res isa Test.Broken
         # A broken/skipped test is deliberately NOT a Check: it did not pass, but the runner is happy
-        # about it, and `pass=false` would paint the page red and flip the verdict to FAIL. Counted.
+        # about it, and a `:fail` check would paint the page red and flip the verdict to FAIL. Counted.
         n.nbroken += 1
+        # …and, as in a page (`Pinax._record_no_check!`), its position is marked, so a `@caption`
+        # right after it names nothing rather than the check before it. No diagnostic: the summary
+        # line counts it, and a document built while the suite runs is not this node's.
+        Pinax.CTX.nonode = (n, length(n.content))
     elseif res isa Test.Result                        # Pass / Fail / Error
         _push_container_check!(n, res)
     end
@@ -326,10 +330,19 @@ function Pinax.test(
     Core.eval(m, :(include(p) = $(Base.include)($m, p)))
     Core.eval(m, :(eval(x) = $(Core.eval)($m, x)))
     empty!(Pinax._FILE_AST)
-    withenv("PINAX_TEST_OUT" => String(out), "PINAX_TEST_TITLE" => String(title)) do
-        Test.@testset PinaxTestSet "$(title)" begin
-            Base.include(m, file)
+    # This call is the process's capture while it runs: the suite it includes sees PINAX_TEST_OUT, so
+    # a `runtests.jl` carrying `install_test_capture!()` asks for one, and must find it open and
+    # decline — a second root would take every assertion and outlive the call.
+    installed = Pinax._CAPTURE_INSTALLED[]
+    Pinax._CAPTURE_INSTALLED[] = true
+    try
+        withenv("PINAX_TEST_OUT" => String(out), "PINAX_TEST_TITLE" => String(title)) do
+            Test.@testset PinaxTestSet "$(title)" begin
+                Base.include(m, file)
+            end
         end
+    finally
+        Pinax._CAPTURE_INSTALLED[] = installed
     end
     return nothing
 end
@@ -374,9 +387,20 @@ function _finalize_test_capture!(root::PinaxTestSet)
     # do nothing (no render, no print, no exit) so their stdout stays clean for `Pkg` to parse.
     n = root.node
     (isempty(n.children) && isempty(n.checks)) && return nothing
-    _emit_root(root)
-    nfail, nerr = _nfail(n), _nerror(n)
-    (nfail + nerr > 0) && exit(1)   # red suite → nonzero exit (finish's throw can't fire in atexit)
+    # Counted BEFORE the render: a red suite exits nonzero even when its report cannot be written
+    # (finish's throw can't fire in atexit, and an error raised in an atexit hook leaves the code 0).
+    red = _nfail(n) + _nerror(n) > 0
+    try
+        _emit_root(root)
+    catch err
+        red || rethrow()
+        # the exit below would discard the error: say it first
+        @error "Pinax: the test report could not be written" exception = (
+            err, catch_backtrace()
+        )
+    finally
+        red && exit(1)
+    end
     return nothing
 end
 
@@ -403,8 +427,7 @@ _result_data_expr(::Any) = nothing
 function _label(r::Test.Result)
     e = hasproperty(r, :orig_expr) ? getproperty(r, :orig_expr) : nothing
     s = e === nothing ? string(typeof(r)) : Pinax._expr_str(e)
-    length(s) > 110 && (s = s[1:107] * "…")
-    return s
+    return Pinax._trunc(s, 110)   # at most 110 characters, cut at a character
 end
 
 end # module
