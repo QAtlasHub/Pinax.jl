@@ -1893,38 +1893,48 @@ function _node_to_dict(n)
     )
     # TOML has no NaN, so an unmeasured elapsed is simply absent.
     isnan(n.elapsed) || (d["elapsed"] = n.elapsed)
-    isempty(n.checks) || (d["check"] = [_check_to_dict(c) for c in n.checks])
+    _put!(d, "check", n.checks, _check_to_dict)
     # Everything except a `@figure` closure is plain data, so it crosses the dump — and so does the
     # DECLARATION ORDER, without which a merged shard would re-order its own content (issue #67: the
     # sharded and unsharded documents must be the same document, by construction).
-    isempty(n.codes) || (d["code"] = [_code_to_dict(c) for c in n.codes])
-    isempty(n.tables) || (d["table"] = [_table_to_dict(t) for t in n.tables])
-    isempty(n.raws) || (
-        d["raw"] = [
-            Dict{String,Any}(
-                "id" => String(r.id), "html" => r.html, "defined_at" => r.defined_at
-            ) for r in n.raws
-        ]
-    )
-    isempty(n.texts) || (
-        d["text"] = [
-            Dict{String,Any}(
-                "id" => String(t.id), "source" => t.source, "defined_at" => t.defined_at
-            ) for t in n.texts
-        ]
-    )
-    isempty(n.content) || (
-        d["content"] = [
-            Dict{String,Any}("kind" => String(k), "i" => i) for (k, i) in n.content
-        ]
+    _put!(d, "code", n.codes, _code_to_dict)
+    _put!(d, "table", n.tables, _table_to_dict)
+    _put!(d, "raw", n.raws, _raw_to_dict)
+    _put!(d, "text", n.texts, _text_to_dict)
+    _put!(
+        d,
+        "content",
+        n.content,
+        ((k, i),) -> Dict{String,Any}("kind" => String(k), "i" => i),
     )
     isempty(n.written) || (d["written"] = sort!([String(id) for id in n.written]))
     drops = _dump_drops(n)
     foreach(((_, why),) -> @warn("Pinax: $(why)."), drops)
-    isempty(drops) ||
-        (d["dropped"] = [Dict{String,Any}("id" => id, "why" => why) for (id, why) in drops])
-    isempty(n.children) || (d["child"] = [_node_to_dict(c) for c in n.children])
+    _put!(d, "dropped", drops, ((id, why),) -> Dict{String,Any}("id" => id, "why" => why))
+    _put!(d, "child", n.children, _node_to_dict)
     return d
+end
+
+# `d[key]`, each of `xs` as a dump entry — and no key at all for none, so an empty list is absent.
+_put!(d, key, xs, f) = (isempty(xs) || (d[key] = [f(x) for x in xs]); d)
+
+function _raw_to_dict(r::RawBlock)
+    return Dict{String,Any}(
+        "id" => String(r.id), "html" => r.html, "defined_at" => r.defined_at
+    )
+end
+function _dict_to_raw(r::AbstractDict)
+    id = Symbol(r["id"])
+    return RawBlock(id, _anchor(id), r["html"], get(r, "defined_at", ""))
+end
+function _text_to_dict(t::Prose)
+    return Dict{String,Any}(
+        "id" => String(t.id), "source" => t.source, "defined_at" => t.defined_at
+    )
+end
+function _dict_to_text(t::AbstractDict)
+    id = Symbol(t["id"])
+    return Prose(id, _anchor(id), t["source"], get(t, "defined_at", ""))
 end
 
 # TOML holds integers, floats, booleans and strings. `missing` / `nothing` cross as a marker table and
@@ -2014,22 +2024,8 @@ function _dict_to_node(d::AbstractDict, path::AbstractString="")
         checks=Check[_dict_to_check(c, at) for c in get(d, "check", Any[])],
         codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
         tables=Table[_dict_to_table(t) for t in get(d, "table", Any[])],
-        raws=RawBlock[
-            RawBlock(
-                Symbol(r["id"]),
-                _anchor(Symbol(r["id"])),
-                r["html"],
-                get(r, "defined_at", ""),
-            ) for r in get(d, "raw", Any[])
-        ],
-        texts=Prose[
-            Prose(
-                Symbol(t["id"]),
-                _anchor(Symbol(t["id"])),
-                t["source"],
-                get(t, "defined_at", ""),
-            ) for t in get(d, "text", Any[])
-        ],
+        raws=RawBlock[_dict_to_raw(r) for r in get(d, "raw", Any[])],
+        texts=Prose[_dict_to_text(t) for t in get(d, "text", Any[])],
         children=TestNode[_dict_to_node(c, path) for c in get(d, "child", Any[])],
         written=Set{Symbol}(Symbol(id) for id in get(d, "written", Any[])),
         dropped=Pair{String,String}[e["id"] => e["why"] for e in get(d, "dropped", Any[])],
