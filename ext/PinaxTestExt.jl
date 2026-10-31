@@ -240,10 +240,10 @@ function Test.record(ts::PinaxTestSet, res)
         # A broken/skipped test is deliberately NOT a Check: it did not pass, but the runner is happy
         # about it, and a `:fail` check would paint the page red and flip the verdict to FAIL. Counted.
         n.nbroken += 1
-        # …and, as in a page (`Pinax._record_no_check!`), its position is marked, so a `@caption`
-        # right after it names nothing rather than the check before it. No diagnostic: the summary
-        # line counts it, and a document built while the suite runs is not this node's.
-        Pinax.CTX.nonode = (n, length(n.content))
+        # …and its position is marked, as in a page, so a `@caption` right after it names nothing
+        # rather than the check before it. No diagnostic: the summary line counts it, and a document
+        # built while the suite runs is not this node's.
+        Pinax._mark_no_check!(n)
     elseif res isa Test.Result                        # Pass / Fail / Error
         _push_container_check!(n, res)
     end

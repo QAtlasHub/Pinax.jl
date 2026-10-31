@@ -181,8 +181,8 @@ value against a reference. `kind` says what the numbers are:
 
 - `:abs` — `delta` is `|got - want|`;
 - `:rel` — `delta` is `|got - want| / max(|got|, |want|)`, as `isapprox` defines it;
-- `:indicator` — the assertion has no recoverable numbers (`@test x == 1`, a non-finite value, a zero
-  tolerance): `got`, `want`, `delta` and `tol` are `NaN`, it has no margin, and it still counts in
+- `:indicator` — the assertion has no recoverable numbers (`@test x == 1`, a non-finite value or
+  tolerance, a zero tolerance): `got`, `want`, `delta` and `tol` are `NaN`, it has no margin, and it still counts in
   every verdict.
 
 `outcome` is what `Test` recorded for the assertion — `:pass`, `:fail`, or `:error` (it threw, so it
@@ -1466,10 +1466,14 @@ macro caption(x)
         _set_caption!($(esc(x)))
     end
 end
+# Mark where a result that records no check was written in container `c` (a page, a section or a test
+# node), so a `@caption` right after it names nothing rather than the node before it.
+_mark_no_check!(c) = (CTX.nonode=(c, length(c.content)); nothing)
+
 # A `@test_broken` / `@test_skip` written at `where` in container `c`: it records no check (only the
 # suite counts it), so the document says so, and a `@caption` right after it names nothing.
 function _record_no_check!(c, where::AbstractString)
-    CTX.nonode = (c, length(c.content))
+    _mark_no_check!(c)
     at = isempty(where) ? "" : " at $(where)"
     _diag!(
         INFO,

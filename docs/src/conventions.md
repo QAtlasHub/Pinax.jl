@@ -114,8 +114,8 @@ or pull request that tracks the gap.
   - A `@test` is a check, recorded with what it compared and its margin (`delta / tol`), exactly as
     in a test report (`Pinax.test`, see "Test → Pinax").
 - A check's `kind` is `abs` or `rel` when the assertion has numbers (`isapprox`, `≈`), and
-  `indicator` when it has none (`@test x == 1`, a non-finite value, a zero tolerance). An indicator
-  records no `got` / `want` / `delta` / `tol` — `null` in `agent.json`, a dash or nothing in the
+  `indicator` when it has none (`@test x == 1`, a non-finite value or tolerance, a zero
+  tolerance). An indicator records no `got` / `want` / `delta` / `tol` — `null` in `agent.json`, a dash or nothing in the
   other faces — so it has no margin, and no margin figure, sweep figure or worst margin shows it. It
   still counts in every verdict.
 - A check's `outcome` is what `Test` recorded: `pass`, `fail`, or `error` (the assertion threw; an
