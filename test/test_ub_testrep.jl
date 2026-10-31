@@ -68,4 +68,42 @@ _ub_diags() = [(d.item, d.message) for d in Pinax.current_document().diag.entrie
             TestNode("T"; children=[file(Set([tid]))]); out=out
         )
     end
+
+    @testset "a dump's content is validated where it is read" begin
+        dir = mktempdir()
+        node = TestNode(
+            "test_d.jl";
+            checks=[Check(:t, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+            content=[:check => 1],
+        )
+        good = Pinax.dump_test_report(
+            TestNode("T"; children=[node]), joinpath(dir, "g.toml")
+        )
+        # an edited copy of the good dump: `edit!` changes the file's only testset's dict
+        function edited(name, edit!)
+            d = Pinax.TOML.parsefile(good)
+            edit!(only(d["root"]["child"]))
+            p = joinpath(dir, name)
+            open(io -> Pinax.TOML.print(io, d), p, "w")
+            return p
+        end
+        bad_kind = edited("k.toml", f -> (f["content"][1]["kind"] = "bogus"))
+        bad_index = edited("i.toml", f -> (f["content"][1]["i"] = 99))
+        bad_check = edited("c.toml", f -> (f["check"][1]["kind"] = "sqrt"))
+        for (p, what) in ((bad_kind, "bogus"), (bad_index, "99"), (bad_check, "sqrt"))
+            # an error naming the entry and the file, never a BoundsError deep in the fold
+            err = try
+                Pinax.load_test_dump(p)
+                nothing
+            catch e
+                e
+            end
+            @test err isa ErrorException
+            @test occursin(what, sprint(showerror, err)) &&
+                occursin(basename(p), sprint(showerror, err)) &&
+                occursin("test_d.jl", sprint(showerror, err))
+            @test_throws ErrorException render_test_report([p]; out=joinpath(dir, "r"))
+        end
+        @test Pinax.load_test_dump(good).children[1].content == [:check => 1]
+    end
 end

@@ -1618,7 +1618,7 @@ function render_test_report(
 )
     isempty(dumps) && error("Pinax.render_test_report: no dumps given.")
     parsed = [TOML.parsefile(d) for d in dumps]
-    roots = [_dict_to_node(d["root"]) for d in parsed]
+    roots = [_dict_to_node(d["root"], p) for (d, p) in zip(parsed, dumps)]
     cells = [String(get(d, "matrix", "")) for d in parsed]
     # A CI MATRIX (issue #69 K): ≥2 distinct cells means the SAME files ran in each cell — NOT disjoint
     # like shards — so we group each cell under a `@part` rather than concatenating (which would merge
@@ -1785,7 +1785,7 @@ end
 
 Read back a tree written by [`dump_test_report`](@ref).
 """
-load_test_dump(path::AbstractString) = _dict_to_node(TOML.parsefile(path)["root"])
+load_test_dump(path::AbstractString) = _dict_to_node(TOML.parsefile(path)["root"], path)
 
 function _node_to_dict(n)
     d = Dict{String,Any}(
@@ -1903,14 +1903,17 @@ function _check_to_dict(c::Check)
     return d
 end
 
-function _dict_to_node(d::AbstractDict)
-    return TestNode(
+# A dump is outside data: it is checked here, where it is read, so a stale or edited one is an error
+# naming its entry rather than a BoundsError deep in the fold. `path` is the dump file.
+function _dict_to_node(d::AbstractDict, path::AbstractString="")
+    at = string("test dump ", path, ", testset \"", d["description"], "\"")
+    n = TestNode(
         d["description"];
         elapsed=get(d, "elapsed", NaN),
         ignore=get(d, "ignore", false),
         nbroken=get(d, "nbroken", 0),
         nerror=get(d, "nerror", 0),
-        checks=Check[_dict_to_check(c) for c in get(d, "check", Any[])],
+        checks=Check[_dict_to_check(c, at) for c in get(d, "check", Any[])],
         codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
         tables=Table[_dict_to_table(t) for t in get(d, "table", Any[])],
         raws=RawBlock[
@@ -1929,19 +1932,36 @@ function _dict_to_node(d::AbstractDict)
                 get(t, "defined_at", ""),
             ) for t in get(d, "text", Any[])
         ],
-        # A `@figure` did not survive, so any `:figure` entry in the recorded order is dropped — the
-        # rest keeps its declared position (a legacy dump with no `content` falls back to checks-then-
-        # codes in `_emit_own_content!`).
-        content=Pair{Symbol,Int}[
-            Symbol(e["kind"]) => Int(e["i"]) for
-            e in get(d, "content", Any[]) if e["kind"] != "figure"
-        ],
-        children=TestNode[_dict_to_node(c) for c in get(d, "child", Any[])],
+        children=TestNode[_dict_to_node(c, path) for c in get(d, "child", Any[])],
         written=Set{Symbol}(Symbol(id) for id in get(d, "written", Any[])),
     )
+    # A `@figure` did not survive, so any `:figure` entry in the recorded order is dropped — the rest
+    # keeps its declared position (a legacy dump with no `content` falls back to checks-then-codes in
+    # `_emit_own_content!`).
+    for (j, e) in enumerate(get(d, "content", Any[]))
+        e["kind"] == "figure" || push!(n.content, _dump_entry(n, e, j, at))
+    end
+    return n
 end
 
-function _dict_to_check(d::AbstractDict)
+# One `content` entry of a dumped node, checked against the node's own nodes.
+function _dump_entry(n::TestNode, e::AbstractDict, j::Int, at)
+    bad(msg) = error("Pinax: $(at): content entry $(j) $(msg)")
+    kind, i = e["kind"], e["i"]
+    k = Symbol(kind)
+    f = get(_CONTENT_FIELDS, k, nothing)
+    (f !== nothing && hasfield(TestNode, f)) || bad("has unknown kind \"$(kind)\"")
+    len = length(getfield(n, f))
+    (i isa Integer && 1 <= i <= len) ||
+        bad("points at $(kind) $(i), and the testset has $(len) of them")
+    return k => Int(i)
+end
+
+function _dict_to_check(d::AbstractDict, at::AbstractString="a test dump")
+    kind = d["kind"]
+    kind in ("abs", "rel") || error(
+        "Pinax: $(at): check \"$(d["label"])\" has kind \"$(kind)\" — a check is abs or rel",
+    )
     return Check(
         :t0,                        # renumbered on render
         d["label"],
@@ -1949,7 +1969,7 @@ function _dict_to_check(d::AbstractDict)
         Float64(d["want"]),
         Float64(d["delta"]),
         Float64(d["tol"]),
-        Symbol(d["kind"]),
+        Symbol(kind),
         d["pass"],
         get(d, "source", ""),
         get(d, "code_anchor", ""),
