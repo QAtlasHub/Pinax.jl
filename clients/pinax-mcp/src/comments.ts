@@ -25,12 +25,16 @@ export interface CommentTurn {
 export class CommentStore {
   constructor(readonly path: string) {}
 
-  private read(): Record<string, any> {
+  // The store as data. A file that does not parse reads as empty (as Julia's read_comments does, with
+  // a diagnostic), except for a write: writing the empty store back would erase what a person wrote,
+  // so `forWrite` refuses instead, naming the file.
+  private read(forWrite = false): Record<string, any> {
     if (!existsSync(this.path)) return {};
     try {
       return parse(readFileSync(this.path, "utf8")) as Record<string, any>;
-    } catch {
-      // mirror Julia read_comments: an unparseable file is non-fatal and treated as empty.
+    } catch (e) {
+      if (forWrite)
+        throw new Error(`${this.path} does not parse, so it is left as it is: ${(e as Error).message}`);
       return {};
     }
   }
@@ -42,7 +46,7 @@ export class CommentStore {
 
   /** Append one comment turn for `id`, preserving existing turns and bookmarks (Pinax.add_comment). */
   addComment(id: string, text: string, author = ""): CommentTurn[] {
-    const data = this.read();
+    const data = this.read(true);
     const comment = (data.comment ??= {});
     const turns = (comment[id] ??= []) as CommentTurn[];
     turns.push({ author, text });
@@ -52,7 +56,7 @@ export class CommentStore {
 
   /** Mark/unmark `id` as bookmarked (Pinax.set_bookmark!). */
   setBookmark(id: string, on = true): void {
-    const data = this.read();
+    const data = this.read(true);
     (data.bookmark ??= {})[id] = on;
     this.write(data);
   }

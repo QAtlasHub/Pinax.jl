@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -60,6 +60,18 @@ test("setBookmark writes the [bookmark] table next to comments", () => {
 test("a missing store is non-fatal (empty)", () => {
   const store = new CommentStore(join(tmpdir(), "pinax-mcp-nope-xyz", "c.toml"));
   assert.deepEqual(store.comments("any"), []);
+});
+
+test("a store that does not parse is never overwritten: a write refuses, naming the file", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pinax-mcp-bad-"));
+  const path = join(dir, "comments.toml");
+  const bad = '[[comment.fig]]\nauthor = "me"\ntext = "unterminated\n';
+  writeFileSync(path, bad);
+  const store = new CommentStore(path);
+  assert.deepEqual(store.comments("fig"), []); // a read sees nothing it can trust
+  assert.throws(() => store.addComment("fig", "new"), /comments\.toml.*does not parse/);
+  assert.throws(() => store.setBookmark("fig"), /does not parse/);
+  assert.equal(readFileSync(path, "utf8"), bad); // what a person wrote is still there
 });
 
 // ---- end-to-end: the write tool over MCP, gated on --comments ----
