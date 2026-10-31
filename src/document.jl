@@ -1083,6 +1083,7 @@ function _push_figure!(;
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@figure outside of a @section or @page")
+    data === nothing || _check_series_lengths(_series_of(data))   # eager: an error where written
     base = something(
         gen_id, Symbol(c.id, "_fig_", _stable_hash(string(code, "|", _params_key(params))))
     )

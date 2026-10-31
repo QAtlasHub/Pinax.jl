@@ -82,12 +82,35 @@ function _data_columns(tbl)
     return ["series", name(get(tbl, :xlabel, ""), "x"), name(get(tbl, :ylabel, ""), "y")]
 end
 
-# A data table `(; xlabel, ylabel, series)` as a long-format CSV: the column header, then every point.
+# A series whose x and y differ in length has no one set of points: an error naming it, never a cut.
+function _check_series_lengths(series)
+    for s in series
+        length(s.x) == length(s.y) || error(
+            "Pinax: figure data series \"$(s.label)\" has $(length(s.x)) x values and " *
+            "$(length(s.y)) y values: each point needs both.",
+        )
+    end
+    return series
+end
+
+# Series labels as the data file's `series` column names them: a label shared by two series gets
+# " (2)", " (3)" after its first, so the two never read as one.
+function _unique_labels(series)
+    seen = Dict{String,Int}()
+    return map(series) do s
+        n = seen[s.label] = get(seen, s.label, 0) + 1
+        return n == 1 ? s.label : string(s.label, " (", n, ")")
+    end
+end
+
+# A data table `(; xlabel, ylabel, series)` as a long-format CSV: the column header, then every point
+# (a NaN — a gap in the plot — is a row with a blank cell, and not counted as a point).
 function _print_csv_table(io, tbl)
+    _check_series_lengths(tbl.series)
     println(io, join((_csv_field(c) for c in _data_columns(tbl)), ","))
-    for s in tbl.series
-        for i in 1:min(length(s.x), length(s.y))
-            println(io, _csv_field(s.label), ",", _csv_num(s.x[i]), ",", _csv_num(s.y[i]))
+    for (s, label) in zip(tbl.series, _unique_labels(tbl.series))
+        for i in eachindex(s.x, s.y)
+            println(io, _csv_field(label), ",", _csv_num(s.x[i]), ",", _csv_num(s.y[i]))
         end
     end
     return nothing
@@ -141,7 +164,8 @@ function _split_csv_line(line)
 end
 
 # What an agent is told about a data file without reading it: its columns and, per series in order,
-# how many points it holds. Exact — read from the file itself.
+# how many points it holds — a row with a blank x or y (a gap) is not one. Exact — read from the
+# file itself.
 function _data_descriptor(path)
     isfile(path) || return nothing
     lines = [l for l in eachline(path) if !isempty(l)]
@@ -149,12 +173,12 @@ function _data_descriptor(path)
     series = Pair{String,Int}[]
     at = Dict{String,Int}()
     for l in @view lines[2:end]
-        lbl = _split_csv_line(l)[1]
+        lbl, x, y = _split_csv_line(l)
         k = get!(at, lbl) do
             push!(series, lbl => 0)
             return length(series)
         end
-        series[k] = lbl => last(series[k]) + 1
+        isempty(x) || isempty(y) || (series[k] = lbl => last(series[k]) + 1)
     end
     return (columns=_split_csv_line(lines[1]), series=series)
 end

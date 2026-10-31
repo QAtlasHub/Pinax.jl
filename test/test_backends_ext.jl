@@ -1,5 +1,6 @@
 using Pinax
 using Test
+using Plots: Plots
 
 # A fake backend figure that exercises the is_figure / pinax_save extension contract without a
 # real backend, so the contract is covered on every shard rather than only where a backend loads.
@@ -192,4 +193,12 @@ end
     Pinax.render(; out=out2, theme=:agent)
     @test read(joinpath(out2, "assets", "figures", "q", "g.csv"), String) ==
         "series,N,gap\na,0,2\na,1,3\nb,0,4\nb,1,5\n"
+end
+
+@testset "the Plots extension: a figure's data is its points, or none" begin
+    # a line is a list of points; a heatmap is a grid (x and y differ in length, z holds the
+    # values), which a points file cannot hold — so it has no data form, and the agent face says so
+    line = Pinax._figure_table(Plots.plot([1, 2, 3], [4.0, 5.0, 6.0]; label="L"))
+    @test only(line.series).label == "L" && only(line.series).y == [4.0, 5.0, 6.0]
+    @test Pinax._figure_table(Plots.heatmap(1:4, 1:3, rand(3, 4))) === nothing
 end

@@ -196,6 +196,29 @@ _pos(s, needle) = first(findfirst(needle, s))
         @test any(d -> d["item"] == "cd" && occursin("code block", d["message"]), ds)
     end
 
+    # A data file's description is exact: two series never merge because they share a label, a gap
+    # (NaN) is not a point, and a series whose x and y differ in length is an error where written.
+    @testset "agent face: a data description counts what is plotted" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @figure nothing data = (;
+                series=[
+                    (; label="a", x=[1, 2], y=[1.0, 2.0]),
+                    (; label="a", x=[1, 2, 3], y=[3.0, NaN, 5.0]),
+                ],
+            ) id = :twins
+        end
+        out = joinpath(tmp, "dcount")
+        Pinax.render(; out=out, theme=:agent)
+        aj = JSON.parse(read(joinpath(out, "agent.json"), String))
+        d = only(only(aj["pages"])["figures"])["data"]
+        @test [(s["label"], s["points"]) for s in d["series"]] == [("a", 2), ("a (2)", 2)]
+        Pinax.reset!()
+        @test_throws r"series \"a\" has 3 x values and 2 y values" @page :q "Q" begin
+            @figure nothing data = (; series=[(; label="a", x=[1, 2, 3], y=[1.0, 2.0])])
+        end
+    end
+
     # The agent face is the same compiled report: a figure sits in its block, between the prose
     # written around it, and its data is pointed to, never inlined as a cut copy. What it inlines
     # is exact (columns, series, point counts); where a node was written is a `path:line` pointer.

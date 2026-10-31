@@ -15,7 +15,7 @@ end
 
 # Extract per-series x/y + axis labels for the agent backend's text/CSV data view. Best-effort and
 # defensive (Plots' series/axis accessors vary by version): any series that won't read is skipped,
-# and missing axis guides degrade to "". Returns `nothing` if no series carry data.
+# and missing axis guides degrade to "". Returns `nothing` if no series carry data, or one is a grid.
 function Pinax._figure_table(p::Plots.Plot)
     series = NamedTuple[]
     for s in p.series_list
@@ -28,6 +28,9 @@ function Pinax._figure_table(p::Plots.Plot)
             catch
                 ""
             end
+            # a grid (a heatmap, a surface: z holds the values) is not a list of points; a file of
+            # points cannot hold it, so the figure has no data form rather than a cut one
+            length(x) == length(y) || return nothing
             push!(series, (; label=label, x=collect(x), y=collect(y)))
         catch
             continue
