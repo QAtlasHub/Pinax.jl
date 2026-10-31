@@ -143,20 +143,10 @@ const containerShape = {
 };
 
 // Sections nest to any depth: `depth` counts from the part (a page is 1, a top-level section 2).
-export interface SectionT {
-  id: string;
-  title: string;
-  depth?: number;
+// The recursive type is written out only for what `containerShape` cannot say: the nesting.
+type ContainerT = z.infer<z.ZodObject<typeof containerShape>>;
+export interface SectionT extends ContainerT {
   summary?: string;
-  verdict?: z.infer<typeof VerdictZ> | null;
-  texts?: z.infer<typeof TextZ>[];
-  figures: z.infer<typeof FigureZ>[];
-  tables?: z.infer<typeof TableNodeZ>[];
-  codes?: z.infer<typeof CodeZ>[];
-  raws?: z.infer<typeof RawZ>[];
-  checks?: z.infer<typeof CheckZ>[];
-  content?: z.infer<typeof ContentRefZ>[];
-  comments?: z.infer<typeof CommentZ>[];
   sections?: SectionT[];
   [k: string]: unknown;
 }
