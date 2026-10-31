@@ -176,4 +176,73 @@ const R3Ext = Base.get_extension(Pinax, :PinaxTestExt)
         # what the sweep cannot place is named, never dropped silently
         @test any(d -> occursin("@desc", d.message), doc.diag.entries)
     end
+
+    @testset "a dump is validated where it is read, each error naming its entry" begin
+        blk = Pinax.CodeBlock(:code_v, "code_v", "x = 1", "", "", "julia")
+        node = TestNode(
+            "test_v.jl";
+            checks=[Check(:t, "c", 1.0, 1.0, 0.0, 0.5, :abs, :pass, "", :code_v)],
+            codes=[blk],
+            tables=[Pinax.Table(:tv, "tv", "", ["a", "b"], [Any[1, 2]], "", nothing, "")],
+            content=[:code => 1, :check => 1, :table => 1],
+        )
+        good() = Pinax._node_to_dict(node)
+        load(d) = Pinax._dict_to_node(d, "v.toml")
+        @test length(load(good()).tables) == 1   # the good dump reads back
+        edit(f) = (d=good(); f(d); d)
+
+        # a table cell's marker table is `missing` or `nothing`, nothing else
+        @test_throws r"v\.toml.*table 1.*marker" load(
+            edit(
+                d -> d["table"][1]["rows"] = Any[Any[Dict{String,Any}("weird" => true), 2]]
+            ),
+        )
+        # a table has its rows and its header, every row as wide as the header
+        @test_throws r"v\.toml.*table 1 has no \"rows\"" load(
+            edit(d -> delete!(d["table"][1], "rows"))
+        )
+        @test_throws r"v\.toml.*table 1 has no \"header\"" load(
+            edit(d -> delete!(d["table"][1], "header"))
+        )
+        @test_throws r"v\.toml.*table 1.*row 1 has 1 cell" load(
+            edit(d -> d["table"][1]["rows"][1] = Any[1])
+        )
+        # every node is placed by `content`, once
+        @test_throws r"v\.toml.*table" load(edit(d -> pop!(d["content"])))
+        @test_throws r"v\.toml.*check" load(
+            edit(d -> push!(d["content"], Dict{String,Any}("kind" => "check", "i" => 1)))
+        )
+        # with no `content` (an older dump) only checks and code blocks have a place
+        @test_throws r"v\.toml.*table" load(edit(d -> delete!(d, "content")))
+        # a check's code reference names a code block of its own testset
+        @test_throws r"v\.toml.*check 1.*code_nope" load(
+            edit(d -> d["check"][1]["code_id"] = "code_nope")
+        )
+        # a missing key is named, never a bare KeyError
+        for key in ("label", "kind")
+            @test_throws Regex("v\\.toml.*check 1 has no \"$(key)\"") load(
+                edit(d -> delete!(d["check"][1], key))
+            )
+        end
+        @test_throws r"v\.toml.*check 1 has no \"outcome\"" load(
+            edit(d -> delete!(d["check"][1], "outcome"))
+        )
+        @test_throws r"v\.toml.*check 1 has no \"tol\"" load(
+            edit(d -> delete!(d["check"][1], "tol"))
+        )
+        @test_throws r"v\.toml.*content entry 1 has no \"i\"" load(
+            edit(d -> delete!(d["content"][1], "i"))
+        )
+        @test_throws r"v\.toml.*has no \"description\"" load(
+            edit(d -> delete!(d, "description"))
+        )
+
+        # the fold never leaves a check pointing at a code block it did not place
+        Pinax.reset!()
+        @page :p "P" begin end
+        pg = Pinax.current_document().pages[1]
+        @test_throws r"code_gone" Pinax._repoint_code!(
+            pg, Check(:t, "c", 1.0, 1.0, 0.0, 0.5, :abs, :pass, "", :code_gone)
+        )
+    end
 end
