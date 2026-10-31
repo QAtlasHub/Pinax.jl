@@ -2082,22 +2082,26 @@ end
 # apart, on the testset), so its errors read as fails.
 function _dumped_outcome(d::AbstractDict, at)
     haskey(d, "outcome") || return _outcome(d["pass"] === true)
-    o = d["outcome"]
-    o in ("pass", "fail", "error") || error(
-        "Pinax: $(at): check \"$(d["label"])\" has outcome \"$(o)\" — a check passes, fails or errors",
-    )
-    return Symbol(o)
+    return _dumped_symbol(d, "outcome", _CHECK_OUTCOMES, at)
 end
 
 # A dumped check's kind, checked where it is read. An older dump wrote an indicator as kind "abs"
 # with `indicator = true` beside made-up numbers, which are dropped.
 function _dumped_kind(d::AbstractDict, at)
     get(d, "indicator", false) === true && return :indicator
-    kind = d["kind"]
-    kind in ("abs", "rel", "indicator") || error(
-        "Pinax: $(at): check \"$(d["label"])\" has kind \"$(kind)\" — a check is abs, rel or indicator",
+    return _dumped_symbol(d, "kind", _CHECK_KINDS, at)
+end
+
+# A dumped check's `key` — its kind or its outcome — as one of the symbols `allowed` (the `Check`'s own
+# vocabulary, so the dump reader never keeps a second copy of it).
+function _dumped_symbol(d::AbstractDict, key, allowed, at)
+    v = d[key]
+    s = v isa AbstractString ? Symbol(v) : nothing
+    s in allowed || error(
+        "Pinax: $(at): check \"$(d["label"])\" has $(key) $(repr(v)) — one of ",
+        join(allowed, ", "),
     )
-    return Symbol(kind)
+    return s
 end
 
 # A dumped check's code reference: `code_id`, or the anchor an older dump wrote (`code_anchor`,
