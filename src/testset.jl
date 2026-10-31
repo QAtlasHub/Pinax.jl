@@ -420,16 +420,22 @@ function _verbatim_code(file, line, expr)
 end
 
 """
-    _push_auto_code!(container, blk) -> CodeBlock | nothing
+    _push_auto_code!(container, blk) -> Symbol
 
-Place an auto-captured `@code` artifact into a container, at most once per id. Deduplication by id is
-what collapses a sweep's N samples — and N shards' dumps — onto the one block they share.
+Place an auto-captured `@code` artifact into a container, at most once per id, and return the id it
+holds there. Deduplication by id is what collapses a sweep's N samples — and N shards' dumps — onto
+the one block they share. A test node keeps the block as captured (the fold places it in the
+document); a document container places it now, under an id no other node holds.
 """
 function _push_auto_code!(c, blk)
-    any(b -> b.id === blk.id, c.codes) && return nothing
+    if !(c isa TestNode)
+        _place_code!(c, blk, ())
+        return _ensure_document!().fold_codes[(c.id, blk.id)]
+    end
+    any(b -> b.id === blk.id, c.codes) && return blk.id
     push!(c.codes, blk)
     push!(c.content, :code => length(c.codes))
-    return blk
+    return blk.id
 end
 
 # ── recovering the NUMBERS out of a test's expression ────────────────
@@ -1341,7 +1347,8 @@ end
 
 # A captured code block, placed at most once per container: a sweep's samples and a sweep's shards
 # carry the same snippet under one id, and it shows once. Its id in the document is remembered, so
-# the checks that point at it keep pointing at it.
+# the checks that point at it keep pointing at it. The same snippet in another container is a node
+# of its own, under a free id.
 function _place_code!(c, blk, written)
     key = (c.id, blk.id)
     haskey(_ensure_document!().fold_codes, key) && return nothing

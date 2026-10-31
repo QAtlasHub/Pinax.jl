@@ -112,6 +112,25 @@ _sec(id) = only(s for s in Pinax._all_sections(_pg()) if s.id === id)
         @test string(b) == string(a, "-2")
     end
 
+    @testset "a @test's captured code is one node per container, never one id twice" begin
+        # sections built in a loop capture the same source region; each holds its own copy of the
+        # code, under an id no other node holds, and its check points at that copy
+        Pinax.reset!()
+        @page :p "P" begin
+            for k in 1:2
+                @section Symbol("s", k) "S$k" begin
+                    @test k > 0
+                    @test k < 3
+                end
+            end
+        end
+        ids = [r.id for r in Pinax.node_ids(Pinax.current_document())]
+        @test allunique(ids)
+        for sec in Pinax._all_sections(_pg())
+            @test [chk.code_anchor for chk in sec.checks] == [b.anchor for b in sec.codes]
+        end
+    end
+
     @testset "a nested @testset's section id is its container's id plus the description" begin
         Pinax.reset!()
         @testset _IdentIso "iso" begin

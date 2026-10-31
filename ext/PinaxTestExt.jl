@@ -145,15 +145,12 @@ end
 function _push_container_check!(c, res)
     chk = _check_from(_result_data_expr(res), _label(res), res isa Test.Pass, 0)
     chk.id = Pinax._check_id(c, chk.label)   # stable: container + source text (#123)
-    chk.source = _source_str(res)            # WHERE it failed (issue #69 I)
+    chk.source = _source_str(res)            # WHERE it was asserted (issue #69 I)
     # By DEFAULT, the code that produced this check — captured as the same `@code` artifact a
     # manuscript would build, pushed BEFORE the check so it reads code-then-result. One block per
     # source region: a `@testset for`'s N samples all point at the one snippet they share.
     blk = _code_block_for(res)
-    if blk !== nothing
-        Pinax._push_auto_code!(c, blk)
-        chk.code_anchor = blk.anchor
-    end
+    blk === nothing || (chk.code_anchor = Pinax._anchor(Pinax._push_auto_code!(c, blk)))
     push!(c.checks, chk)
     push!(c.content, :check => length(c.checks))
     return chk
