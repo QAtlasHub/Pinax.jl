@@ -13,7 +13,7 @@ Pinax (not extend it), read this directory.
 
 | you write | human sees (gallery) | LLM reads (`agent.json`) |
 | --- | --- | --- |
-| `@figure plot(…)` | the curve | the **plotted data as a table** (`figure_as_table`) — it can't read a value off a chart |
+| `@figure plot(…)` | the curve | a pointer to its **data file** (every plotted point, columns named by the axes) and where it was written — it can't read a value off a chart |
 | `@table` | an HTML table | the rows |
 | `@test` in a `@section` | a colored **check table** (green/red) | the section's **verdict** `{verdict, passed, total, failed}` and its `checks:[{id,got,want,delta,tol,pass}]` |
 | `@desc` · comments · `status` | rendered prose | the same text |
@@ -56,8 +56,9 @@ Then look at the **two faces of the same result**:
 
 - **human** → `examples/out/gallery/index.html` — the `M(T)` curve, the spin-lattice GIF, and the
   checks' green/red rows.
-- **LLM** → `examples/out/agent/agent.json` — the `M(T)` figure *as a data table* + the checks'
-  **verdict** (`grep -o '"verdict":"[A-Z]*"' …/agent.json`).
+- **LLM** → `examples/out/agent/agent.md` — the same report in reading order: the `M(T)` figure points
+  at its data file (every point), and each check sits with its code and its verdict
+  (`grep -o '"verdict":"[A-Z]*"' …/agent.json`).
 
 The Monte Carlo runs once into the vault; re-running rebuilds the figures from stored data (the
 `render(; vault)` cache is data-aware), so the two faces stay in lock-step with the numbers.

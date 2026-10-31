@@ -53,9 +53,9 @@ Register it with an MCP client (Claude Desktop, etc.):
 | resource `pinax://{kind}/{id}` | any part/page/section/figure/**table**/**code**/**check** node (JSON) |
 | resource `pinax://asset/{figureId}/{index}` | a figure's rendered asset (image/PDF bytes, for vision models) |
 | tool `outline()` | the document tree, token-lean — figures, tables, code blocks and checks in declaration order, nested sections one level deeper, each container's `[PASS/FAIL passed/total]` verdict, and the document's diagnostics |
-| tool `get_unit(id)` | one unit; a figure → its substrate (incl. an inline data-table preview when the theme presents figures as tables); a `@table` → its header + rows |
+| tool `get_unit(id)` | one unit; a figure → its substrate: caption, `defined_at`, code, params, image paths, comments, and its data file described exactly (`data: {path, columns, series:[{label, points}]}`); a `@table` → its header + rows |
 | tool `search(query)` | substring search over captions/code/comments/**table cells** → unit ids + snippet |
-| tool `get_figure_data(id)` | a figure's **full** plotted-data CSV (its `table` field is only a preview) |
+| tool `get_figure_data(id)` | a figure's data file: **every** plotted point as CSV, columns named by the axis labels |
 | tool `add_comment(id, text, author?)` | append a comment to the store — **only with `--comments`** |
 | tool `set_bookmark(id, on?)` | bookmark a unit — **only with `--comments`** |
 
@@ -81,4 +81,4 @@ There are two fixtures in `test/fixtures/`:
   and that `src/schema.ts` names every key it holds, so a field the emitter adds cannot slip past
   the `.passthrough()` schema unnoticed. Change the emitter, the fixture and the schema together.
 - `sample/` is hand-written. It carries what the emitted fixture does not: figure assets and a
-  full-data CSV on disk, comments, and the `params` shapes a figure can have.
+  data file on disk, comments, and the `params` shapes a figure can have.

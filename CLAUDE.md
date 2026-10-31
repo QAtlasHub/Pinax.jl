@@ -13,11 +13,13 @@ The same doc has **two representations, chosen by who reads it** — neither is 
 - **Human → the gallery (pixels).** A plot is the *right* human view: you read a curve's shape and
   scan a dozen panels at a glance. `:gallery` (interactive HTML) and `:latex` (print) are the human
   faces.
-- **LLM → `agent.json` (data).** An LLM reasons over *numbers* far more precisely than over pixels —
-  it cannot read a value off a chart, and image tokens are costly + non-deterministic. So
-  `figure_as_table` presents each `@figure` **AS its plotted-data table**: the LLM gets the numbers
-  (cheap inline preview + a CSV via the MCP `get_figure_data`, downsampled shape-preservingly to at
-  most 2,000 points per series), not the image.
+- **LLM → `agent.md` / `agent.json` (data).** An LLM reads to discuss a report or to drive its
+  revision, and it reasons over *numbers* far more precisely than over pixels (image tokens are
+  costly + non-deterministic). The agent face is the **same compiled report**, in reading order,
+  each `@desc`/`@figure`/`@caption` kept one block — and it is **exact or a pointer, never a cut
+  copy**: a figure points at its data file (every plotted point, columns named by the axis labels,
+  described by its columns and points per series; read it via the MCP `get_figure_data`), its image,
+  and where it was written (`defined_at`). Conventions › The agent face.
 
 `@table`, `@desc`/`@caption`, comments, `status`, and each container's **verdict** flow to **both**
 faces from one source. This duality — *figure for humans, data for LLMs, single source* — is why the

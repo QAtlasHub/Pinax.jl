@@ -20,8 +20,9 @@ self-contained catalogue** of a computational study — described once and rende
 - **HTML gallery** — sections as cards, a responsive figure grid, markdown + KaTeX math,
   cross-references, citations, and an interactive comment layer;
 - **LaTeX → PDF** — the same manuscript as a typeset document;
-- **`agent.json`** — a machine-readable view (figures *as data tables*, sections, captions) that an
-  LLM or downstream tool can read.
+- **`agent.md` / `agent.json`** — the same report for an agent to read: in reading order, each figure
+  pointing at its data file (every plotted point) and at where it was written, every check with its
+  numbers and verdict.
 
 It generalizes the hand-written `build_report` page an analysis pipeline grows over time: you
 describe the manuscript once with a small DSL, point each figure at the value (or data key) it
@@ -124,5 +125,5 @@ alongside the Documenter docs is [#68](https://github.com/QAtlasHub/Pinax.jl/iss
 
 `render(theme = :agent)` emits an `agent.json` an LLM can read. **[`clients/pinax-mcp`](clients/pinax-mcp)**
 is a Node MCP server over that artifact: it serves every unit (figure / table / section) by id and
-presents a figure as its underlying data table — `npx pinax-mcp --agent <render-out>`. See its
+reads a figure's data file for an agent — `npx pinax-mcp --agent <render-out>`. See its
 [README](clients/pinax-mcp/README.md).

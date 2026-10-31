@@ -118,6 +118,9 @@ or pull request that tracks the gap.
     the suite counts it as if the `@test` were written there.
   - Otherwise `render` writes every output with the failure shown as FAIL, then raises
     `ChecksFailed`, naming the failing ids and the file written.
+- A check sits in the section whose claim it verifies, so the claim, its evidence and its verdict
+  are read together — by a person in the gallery and by an agent in `agent.md`. A check kept on a
+  separate page leaves the claim unverified where it is made.
 - `@assert` is plain Julia: a precondition. When it fails, rendering stops with the error. It is
   not recorded as a check.
 - `@expect` and `@benchmark` are removed. During 0.2 each raises an error that names its
@@ -129,8 +132,9 @@ or pull request that tracks the gap.
   Every face handles every kind explicitly; a kind a face does not handle is an error naming the
   face and the kind, never a silent omission. (#168)
 - Every container is laid out in the same order in every face: its heading, then its verdict band
-  and the table of its own checks (when its subtree holds checks), then its content in declaration
-  order, then its comments.
+  (when its subtree holds checks), then its content in declaration order, then its comments. The
+  human faces put the table of the container's own checks under the band; the agent face keeps each
+  check where it was written, after its code, and its band names the failing checks.
 - A comment is stored under its node's id, and every face shows it on that node — a page, a
   section, a figure or a table. A comment no face can show — its id names no node, or a node of
   another kind — is a diagnostic in every face, as is a comment store that does not parse; pinax-mcp's
@@ -143,6 +147,29 @@ or pull request that tracks the gap.
   `part` and `status`. A reference between nodes is an id (a check's `code_id`).
 - `agent.json` and `agent.md` end with the document's `diagnostics` — what the build and the render
   recorded, such as a node a face left out — so an agent sees the gaps as data.
+
+## The agent face
+
+The agent face (`agent.md`, and `agent.json` as its index) is what an agent reads to discuss a report
+or to drive its revision. The revision itself happens outside Pinax; the face's job is to make that
+reading light and exact.
+
+- **It is the whole report, compiled.** The same document as the gallery, in the same reading
+  order — not a dump of parts. `@desc`, `@figure` and `@caption` stay one block, so a figure is read
+  with the prose written around it; a check is read with its code.
+- **Exact, or a pointer — never a cut copy.** What the face writes inline is exact and small: a
+  caption, params, a verdict's numbers, and a description of what lies behind a pointer. What is
+  large is pointed to:
+  - a figure's data file holds every plotted point, its columns named by the plot's axis labels
+    (`series,beta,E/N`; `@figure … data=(; xlabel, ylabel, series)` names them for eager data), and
+    the face describes it — its columns and each series' point count — without inlining it;
+  - a figure's image, by its path;
+  - where each node was written, as `defined_at` (`path:line`, relative to the project that holds the
+    file), on every prose block, figure, table, code block, `@raw` block and check.
+- **A pointer is real.** It names a file that exists, in this face's own directory: a face never
+  points into a file another face wrote. A `data=` figure has its data file written by the agent
+  face (without building the plot). What the face cannot give is said, not skipped — a figure with no
+  data form is a diagnostic: an agent sees it only through its image.
 
 ## Output
 
@@ -161,5 +188,6 @@ or pull request that tracks the gap.
 
 These are not settled yet. Each will move into a section above once decided.
 
-- **The figure form in `agent.json`.** A plotted-data table may not convey a plot's features. This
-  is to be measured before the form changes.
+- **What else a figure needs in the agent face.** A figure is its data file, described and pointed
+  to. Whether an agent also needs a summary of the plot's features (extrema, crossings, slopes) to
+  discuss it well is to be measured before anything is added.

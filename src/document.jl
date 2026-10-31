@@ -958,7 +958,12 @@ function _all_sections(pg)
     return out
 end
 
-"Register a plot; the expression is DEFERRED. `@figure expr [params=…] [caption=…] [id=…] [thumbnail=…]` / `@figure [kw] begin … end`"
+"""
+Register a plot; the expression is DEFERRED. `@figure expr [params=…] [caption=…] [id=…] [thumbnail=…]
+[data=…]` / `@figure [kw] begin … end`. `data=(; x, y[, label])` or `(; series=[(; label, x, y)])`, each
+optionally with `xlabel` / `ylabel`, is the plotted data given eagerly: the agent face writes the
+figure's data file from it without building the plot.
+"""
 macro figure(args...)
     isempty(args) && error("@figure needs a plot expression")
     expr = nothing
