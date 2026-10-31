@@ -893,6 +893,32 @@ end
         @test occursin("\"defined_at\":\"test_x.jl:42\"", aj)
     end
 
+    @testset "a shard dump keeps where each node was written and what each check points at" begin
+        at = "test/test_x.jl:7"
+        blk = CodeBlock(:code_x, "code_x", "y = 1", "", "", "julia", at)
+        chk = Check(:t, "y == 1", 1.0, 1.0, 0.0, 0.0, :abs, true, at)
+        chk.code_anchor = "code_x"
+        n = TestNode(
+            "test_x.jl";
+            checks=[chk],
+            codes=[blk],
+            tables=[Pinax.Table(:tb, "tb", "", ["a"], [Any[1]], "(a=[1],)", nothing, at)],
+            raws=[Pinax.RawBlock(:rw, "rw", "<i>r</i>", at)],
+            texts=[Pinax.Prose(:tx, "tx", "prose", at)],
+            content=[:text => 1, :code => 1, :check => 1, :table => 1, :raw => 1],
+        )
+        back = Pinax.load_test_dump(
+            Pinax.dump_test_report(n, joinpath(mktempdir(), "s.toml"))
+        )
+        @test only(back.checks).source == at
+        @test only(back.checks).code_anchor == "code_x"
+        @test all(
+            x -> x.defined_at == at,
+            (back.codes..., back.tables..., back.raws..., back.texts...),
+        )
+        @test back.content == n.content
+    end
+
     @testset "at scale the human gallery caps rows; agent.json stays complete (J)" begin
         # A 10k-check page is an unusable HTML table, so the gallery caps rows — FAILURES first and
         # never silently (a summary row counts the hidden) — while agent.json and the shard dump stay

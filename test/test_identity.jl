@@ -101,6 +101,42 @@ _sec(id) = only(s for s in Pinax._all_sections(_pg()) if s.id === id)
         @test startswith(string(c), "p_code_")
     end
 
+    @testset "a figure's generated id hashes its params too" begin
+        # one plotting expression over two parameter points is two figures, each named by its point
+        Pinax.reset!()
+        @page :p "A" begin
+            for g in (0.5, 1.0)
+                @figure 1 params = (; g)
+            end
+            @figure 1 params = (; g=0.5)
+        end
+        a, b, c = (f.id for f in _pg().figures)
+        @test a != b
+        @test string(c) == string(a, "-2")   # the same code and params: the same content
+    end
+
+    @testset "defined_at is the line each node was written on" begin
+        line = @__LINE__
+        Pinax.reset!()
+        @page :p "A" begin
+            @desc "x"                 # line + 3
+            @figure 1 id = :f         # line + 4
+            @table (a=[1],) id = :t   # line + 5
+            @code id = :c y = 1       # line + 6
+            @raw "<i>r</i>" id = :r   # line + 7
+            @test true                # line + 8
+        end
+        pg = _pg()
+        at(n) = "test/test_identity.jl:$(line + n)"
+        @test only(pg.texts).defined_at == at(3)
+        @test only(pg.figures).defined_at == at(4)
+        @test only(pg.tables).defined_at == at(5)
+        @test only(c for c in pg.codes if c.id === :c).defined_at == at(6)
+        @test only(pg.raws).defined_at == at(7)
+        @test only(pg.checks).source == at(8)
+        @test only(c for c in pg.codes if c.id !== :c).defined_at == at(8)   # the @test's code
+    end
+
     @testset "the same content twice in one container gets -2; a generated id never errors" begin
         Pinax.reset!()
         @page :p "A" begin
