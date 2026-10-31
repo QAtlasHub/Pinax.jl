@@ -1045,8 +1045,7 @@ function _enter_section!(
         parent,
         Section[],
     )
-    push!(owner.sections, sec)
-    push!(owner.content, :section => length(owner.sections))
+    _add_node!(owner, :section, sec)
     CTX.section = sec
     return sec
 end
@@ -1165,8 +1164,7 @@ function _push_figure!(;
         tbl,
         _defined_at(at),
     )
-    push!(c.figures, fig)
-    push!(c.content, :figure => length(c.figures))
+    _add_node!(c, :figure, fig)
     return fig
 end
 
@@ -1214,8 +1212,7 @@ function _push_table!(;
     tbl = Table(
         tid, _anchor(tid), string(caption), hdr, rows, code, params, _defined_at(at)
     )
-    push!(c.tables, tbl)
-    push!(c.content, :table => length(c.tables))
+    _add_node!(c, :table, tbl)
     return tbl
 end
 
@@ -1350,8 +1347,7 @@ function _push_code!(;
         string(lang),
         _defined_at(at),
     )
-    push!(c.codes, blk)
-    push!(c.content, :code => length(c.codes))
+    _add_node!(c, :code, blk)
     return blk
 end
 
@@ -1371,6 +1367,15 @@ function _content_field(c, k::Symbol)
     haskey(_CONTENT_FIELDS, k) ||
         error("Pinax: unknown content kind :$(k) in \"$(c.anchor)\"")
     return _CONTENT_FIELDS[k]
+end
+
+# Append `node` to `c` as content kind `k`: into its field, and at the end of its content order — the
+# one place a node joins a container.
+function _add_node!(c, k::Symbol, node)
+    nodes = getfield(c, _content_field(c, k))
+    push!(nodes, node)
+    push!(c.content, k => length(nodes))
+    return node
 end
 
 function _content_items(c)
@@ -1513,8 +1518,7 @@ function _set_desc!(s; at=nothing)
     c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     src = string(s)
     tid = _node_id!(c, nothing, Symbol(c.id, "_txt_", _stable_hash(src)), "prose block")
-    push!(c.texts, Prose(tid, _anchor(tid), src, _defined_at(at)))
-    push!(c.content, :text => length(c.texts))
+    _add_node!(c, :text, Prose(tid, _anchor(tid), src, _defined_at(at)))
     return nothing
 end
 
@@ -1547,8 +1551,7 @@ function _push_raw!(s; id=nothing, at=nothing)
     c === nothing && return nothing   # inside a test with the report off — no-op (invariant V)
     html = string(s)
     rid = _node_id!(c, id, Symbol(c.id, "_raw_", _stable_hash(html)), "raw block")
-    push!(c.raws, RawBlock(rid, _anchor(rid), html, _defined_at(at)))
-    push!(c.content, :raw => length(c.raws))
+    _add_node!(c, :raw, RawBlock(rid, _anchor(rid), html, _defined_at(at)))
     return nothing
 end
 

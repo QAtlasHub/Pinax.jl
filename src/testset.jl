@@ -468,8 +468,7 @@ function _push_auto_code!(c, blk)
         return _ensure_document!().fold_codes[(c.id, blk.id)]
     end
     any(b -> b.id === blk.id, c.codes) && return blk.id
-    push!(c.codes, blk)
-    push!(c.content, :code => length(c.codes))
+    _add_node!(c, :code, blk)
     return blk.id
 end
 
@@ -1401,9 +1400,7 @@ function _emit_own_content!(n::TestNode, acc::Vector{Check})
         elseif kind === :code
             _place_code!(c, node, n.written)
         else
-            nodes = getfield(c, _content_field(c, kind))
-            push!(nodes, _place_captured(c, node, n.written, _KIND_NAME[kind]))
-            push!(c.content, kind => length(nodes))
+            _add_node!(c, kind, _place_captured(c, node, n.written, _KIND_NAME[kind]))
         end
     end
     return acc
@@ -1443,8 +1440,7 @@ function _place_code!(c, blk, written)
     haskey(_ensure_document!().fold_codes, key) && return nothing
     placed = _place_captured(c, blk, written, "code block")
     _ensure_document!().fold_codes[key] = placed.id
-    push!(c.codes, placed)
-    push!(c.content, :code => length(c.codes))
+    _add_node!(c, :code, placed)
     return placed
 end
 
@@ -1495,8 +1491,7 @@ function _place_check!(c, chk::Check, acc::Vector{Check})
     # a copy: the fold must not renumber (or later tag) the tree's own Check (#130)
     chk = _copy_check(chk; id=_claim_check_id!(c, chk.label))
     _repoint_code!(c, chk)
-    push!(c.checks, chk)
-    push!(c.content, :check => length(c.checks))
+    _add_node!(c, :check, chk)
     push!(acc, chk)
     return chk
 end
@@ -1759,9 +1754,7 @@ function _append_content!(m::TestNode, r::TestNode)
         r.content
     end
     for (k, i) in order
-        nodes = getfield(m, _content_field(m, k))
-        push!(nodes, getfield(r, _content_field(r, k))[i])
-        push!(m.content, k => length(nodes))
+        _add_node!(m, k, getfield(r, _content_field(r, k))[i])
     end
     union!(m.written, r.written)
     return m

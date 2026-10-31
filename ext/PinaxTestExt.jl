@@ -158,8 +158,7 @@ function _push_container_check!(c, res)
     # source region: a `@testset for`'s N samples all point at the one snippet they share.
     blk = _code_block_for(res)
     blk === nothing || (chk.code_id = Pinax._push_auto_code!(c, blk))
-    push!(c.checks, chk)
-    push!(c.content, :check => length(c.checks))
+    Pinax._add_node!(c, :check, chk)
     return chk
 end
 

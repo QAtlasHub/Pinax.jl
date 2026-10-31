@@ -113,8 +113,7 @@ function _push_evidence_table!(node, ev, prefix::Symbol)
         "",
         nothing,
     )
-    push!(node.tables, tbl)
-    push!(node.content, :table => length(node.tables))
+    Pinax._add_node!(node, :table, tbl)
     return tbl
 end
 
