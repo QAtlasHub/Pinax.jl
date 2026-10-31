@@ -137,15 +137,16 @@ _sec(id) = only(s for s in Pinax._all_sections(_pg()) if s.id === id)
         @test only(c for c in pg.codes if c.id !== :c).defined_at == at(8)   # the @test's code
     end
 
-    @testset "the same content twice in one container gets -2; a generated id never errors" begin
+    @testset "the same content repeated in one container gets -2, -3; a generated id never errors" begin
         Pinax.reset!()
         @page :p "A" begin
-            for _ in 1:2
+            for _ in 1:3
                 @figure 1
             end
         end
-        a, b = (f.id for f in _pg().figures)
+        a, b, c = (f.id for f in _pg().figures)
         @test string(b) == string(a, "-2")
+        @test string(c) == string(a, "-3")   # the next free suffix, never one skipped
     end
 
     @testset "a @test's captured code is one node per container, never one id twice" begin
