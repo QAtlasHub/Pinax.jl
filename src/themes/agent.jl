@@ -110,7 +110,7 @@ function emit_figure(theme::AgentBase, fig, ctx)
 end
 
 # A path in this face's directory, as `agent.json` / `agent.md` name it.
-_agent_rel(path, ctx) = replace(relpath(path, ctx.outdir), '\\' => '/')
+_agent_rel(path, ctx) = _rel_url(path, ctx.outdir)
 
 # A figure's data file as a pointer and an exact description of what it holds — its columns (named by
 # the axis labels) and each series with its point count — or `null` when the figure has none.
@@ -287,11 +287,7 @@ function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
             ctx.files[fig.id] = (String[], csv)
             continue
         end
-        try
-            materialize!(fig, base, fmts, ctx.cache)   # into this face's directory
-        catch e
-            e isa InterruptException && rethrow()
-            push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+        if !_try_materialize!(fig, base, fmts, ctx.cache, ctx.rdiag)   # into this face's directory
             ctx.files[fig.id] = (String[], nothing)
             continue
         end
@@ -474,7 +470,7 @@ end
 # what is behind it — the data file described exactly (columns, points per series), and its image.
 function _agent_md_fig(io, fig, outdir, comments, files)
     imgs, csv = get(files, fig.id, (String[], nothing))
-    rel(p) = replace(relpath(p, outdir), '\\' => '/')
+    rel(p) = _rel_url(p, outdir)
     println(io, "- [fig: ", fig.id, "] ", fig.caption)
     isempty(fig.defined_at) || println(io, "  - defined at: ", fig.defined_at)
     isempty(fig.code) || println(io, "  - code: `", fig.code, "`")
@@ -648,8 +644,7 @@ function _agent_markdown(doc::Document, outdir, comments, files, rdiag)
         if pg.part !== curpart
             curpart = pg.part
             if pg.part !== nothing
-                k = findfirst(p -> first(p) === pg.part, doc.parts)
-                ptitle = k === nothing ? string(pg.part) : last(doc.parts[k])
+                ptitle = _part_title(doc, pg.part)
                 println(io, "\n", _agent_md_heading(0, ptitle, _anchor(pg.part), rdiag))
                 d = get(doc.part_descs, pg.part, nothing)
                 d === nothing || println(io, d.source)

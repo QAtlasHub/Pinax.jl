@@ -150,7 +150,7 @@ function emit_figure(theme::LaTeXBase, fig, ctx)
         return emit_comments(theme, fig.anchor, ctx)   # its comments stay, as in every face
     end
     io = ctx.io
-    rel = replace(relpath(fig.assets[1], ctx.outdir), '\\' => '/')
+    rel = _rel_url(fig.assets[1], ctx.outdir)
     println(io, "\\begin{figure}[htbp]\\centering")
     println(io, "\\includegraphics[width=0.8\\linewidth]{", rel, "}")
     cap = isempty(fig.caption) ? "" : emit_text(theme, fig.caption, fig.anchor, ctx)
@@ -162,13 +162,9 @@ end
 
 # Materialize one figure to `assetdir`, then emit it.
 function _latex_emit_fig!(theme::LaTeXBase, fig, assetdir, ctx)
-    try
-        materialize!(fig, joinpath(assetdir, fig.anchor), figure_formats(theme), ctx.cache)
-    catch e
-        e isa InterruptException && rethrow()
-        push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+    base = joinpath(assetdir, fig.anchor)
+    _try_materialize!(fig, base, figure_formats(theme), ctx.cache, ctx.rdiag) ||
         return emit_comments(theme, fig.anchor, ctx)   # a failed figure keeps its comments
-    end
     emit_figure(theme, fig, ctx)
     return nothing
 end
@@ -339,13 +335,6 @@ function emit_page(theme::LaTeXBase, pg, ctx)
     )
     emit_comments(theme, pg.anchor, ctx)
     return nothing
-end
-
-function _part_title(doc::Document, pid)
-    return (
-        i=findfirst(p -> first(p) === pid, doc.parts);
-        i === nothing ? string(pid) : last(doc.parts[i])
-    )
 end
 
 function emit_document(

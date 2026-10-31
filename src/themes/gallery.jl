@@ -672,7 +672,7 @@ end
 # Pick a card-thumbnail asset for a figure: a raster/vector image if it has one (drawn as <img>),
 # else a PDF (a lazy mini-preview of the actual page), else nothing. Returns (:img|:pdf, rel).
 function _thumb_asset(fig::Figure, outdir)
-    rel(a) = replace(relpath(a, outdir), '\\' => '/')
+    rel(a) = _rel_url(a, outdir)
     for a in fig.assets
         _ext(a) in ("svg", "png", "jpg", "jpeg", "gif", "webp", "apng", "avif") &&
             return (:img, rel(a))
@@ -1347,11 +1347,8 @@ function emit_view(theme::GalleryBase, ::Val{:grid}, figs, assetdir, layout, ctx
     fmts = figure_formats(theme)
     for fig in figs
         base = joinpath(assetdir, fig.anchor)
-        try
-            materialize!(fig, base, fmts, ctx.cache)   # cache hit skips gen (notes 10)
-        catch e
-            e isa InterruptException && rethrow()
-            push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+        # a cache hit skips gen (notes 10)
+        if !_try_materialize!(fig, base, fmts, ctx.cache, ctx.rdiag)
             _emit_placeholder(theme, fig, "figure failed", ctx)
             continue
         end
@@ -1625,7 +1622,7 @@ function emit_figure(theme::GalleryBase, fig, ctx)
     io = ctx.io
     println(io, "<figure id=\"", fig.anchor, "\">")
     for a in fig.assets
-        rel = replace(relpath(a, ctx.outdir), '\\' => '/')   # forward slashes for URLs (Windows-safe)
+        rel = _rel_url(a, ctx.outdir)
         ext = _ext(a)
         if ext in ("svg", "png", "gif", "webp", "jpg", "jpeg", "apng", "avif")
             # Raster + animated raster (gif/apng/webp) render inline as <img> — the browser plays the

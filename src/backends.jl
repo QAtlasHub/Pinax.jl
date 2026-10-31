@@ -50,6 +50,10 @@ end
 
 _ext(p) = (e=splitext(p)[2]; isempty(e) ? "" : lowercase(e[2:end]))
 
+# A written file as a face names it: relative to the face's directory, with forward slashes (a URL,
+# and the same on Windows).
+_rel_url(path, outdir) = replace(relpath(path, outdir), '\\' => '/')
+
 # Pre-made file (first-class): same-format copy (v1 has no conversion, notes 04).
 function _copyfile(src::AbstractString, base)
     isfile(src) || error("Pinax: @figure file not found: $(src)")
