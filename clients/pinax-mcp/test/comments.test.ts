@@ -142,7 +142,7 @@ test("without --comments the write tools are absent (read-only by default)", { t
   }
 });
 
-test("set_bookmark marks only a section, and 'on' must be a boolean", { timeout: 20000 }, async () => {
+test("set_bookmark marks a section or a figure, and 'on' must be a boolean", { timeout: 20000 }, async () => {
   const cf = tmpToml();
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -160,10 +160,11 @@ test("set_bookmark marks only a section, and 'on' must be a boolean", { timeout:
     await call({ id: "s1", on: false });
     assert.deepEqual(bookmarks(), { s1: false });
 
-    // the gallery shows bookmarks on sections only: any other kind is refused, naming the kind
+    // a figure's bookmark picks its page's card thumbnail, so it is accepted
+    assert.match((await call({ id: "p1_fig1" }).then((r) => (r.content as any)[0].text)), /set to true/);
+    // any other kind is shown nowhere: refused, naming the kind
     for (const [id, kind] of [
       ["p1", "page"],
-      ["p1_fig1", "figure"],
       ["p1_tbl1", "table"],
     ]) {
       const res = await call({ id });
@@ -179,7 +180,7 @@ test("set_bookmark marks only a section, and 'on' must be a boolean", { timeout:
     const str = await call({ id: "s1", on: "false" });
     assert.equal(str.isError, true);
     assert.match((str.content as any)[0].text, /'on' must be a boolean/);
-    assert.deepEqual(bookmarks(), { s1: false });
+    assert.deepEqual(bookmarks(), { s1: false, p1_fig1: true });
   } finally {
     await client.close();
   }

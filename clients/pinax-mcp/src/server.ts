@@ -36,7 +36,7 @@ const MIME: Record<string, string> = {
 // shown nowhere (Conventions › Faces), so add_comment refuses it.
 const COMMENT_CARRIERS = new Set(["page", "section", "figure", "table"]);
 // The gallery shows a bookmark on a section only, so set_bookmark refuses every other kind.
-const BOOKMARK_CARRIERS = new Set(["section"]);
+const BOOKMARK_CARRIERS = new Set(["section", "figure"]);
 
 const mimeFor = (p: string): string => MIME[extname(p).toLowerCase()] ?? "application/octet-stream";
 const isTextual = (m: string): boolean =>
@@ -239,7 +239,7 @@ function setBookmark({ atlas, store }: Context, a: Args): Reply {
     atlas,
     id,
     BOOKMARK_CARRIERS,
-    (u) => `a bookmark on a ${u.kind} is shown nowhere: the gallery bookmarks sections only`,
+    (u) => `a bookmark on a ${u.kind} is shown nowhere: the gallery shows a section's, and a figure's as its page's card thumbnail`,
   );
   if (refused) return refused;
   if (a.on !== undefined && typeof a.on !== "boolean")

@@ -104,10 +104,11 @@ function _parse_turns(id, entries, bad)
     return turns
 end
 
-# The node kinds every face shows comments on (Conventions › Faces), and the one kind the gallery shows
-# a bookmark on. pinax-mcp's `add_comment` / `set_bookmark` refuse the other kinds by the same sets.
+# The node kinds every face shows comments on (Conventions › Faces), and the kinds a bookmark shows on
+# in the gallery: a section is marked, and a figure becomes its page's card thumbnail. pinax-mcp's
+# `add_comment` / `set_bookmark` refuse the other kinds by the same sets.
 const _COMMENT_CARRIERS = (:page, :section, :figure, :table)
-const _BOOKMARK_CARRIERS = (:section,)
+const _BOOKMARK_CARRIERS = (:section, :figure)
 const _KIND_NAMES = Dict(
     :part => "part",
     :page => "page",

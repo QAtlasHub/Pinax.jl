@@ -57,9 +57,9 @@ end
     _, bookmarks, rdiag = _store_diags(toml)
     @test Set([:s, :f, :p, :gone]) == bookmarks   # read as written; only the faces decide
     @test _said(rdiag, "gone", "bookmark", "names no node")
-    @test _said(rdiag, "f", "bookmark on a figure", "sections")
-    @test _said(rdiag, "p", "bookmark on a page", "sections")
-    @test !any(d -> d.item in ("s", "off"), rdiag)   # a shown one, and one that is off
+    @test _said(rdiag, "p", "bookmark on a page", "sections and figures")
+    # a section's bookmark is shown on it; a figure's picks its page's card thumbnail
+    @test !any(d -> d.item in ("s", "f", "off"), rdiag)   # shown ones, and one that is off
     @test !any(d -> occursin("feature is off", d.message), rdiag)
 
     # the :bookmarks feature off hides every bookmark, and is said once, like comments
