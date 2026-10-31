@@ -172,3 +172,33 @@ end
     Pinax.render(; out=out, theme=:agent)
     @test !isfile(csv)
 end
+
+# An errored check (the assertion threw) is not shown as a plain failure in the gallery: its own
+# badge and class, as agent.md and LaTeX already say ERROR.
+mutable struct _ErrIso <: Test.AbstractTestSet
+    description::String
+    results::Vector{Any}
+    _ErrIso(desc::AbstractString=""; kw...) = new(String(desc), Any[])
+end
+Test.record(r::_ErrIso, x) = (push!(r.results, x); x)
+Test.finish(r::_ErrIso) = r
+
+@testset "gallery: an errored check has its own badge" begin
+    Pinax.reset!()
+    @testset _ErrIso "iso" begin
+        @page :p "P" begin
+            @test error("boom")
+        end
+    end
+    out = joinpath(mktempdir(), "g")
+    try
+        Pinax.render(; out=out)
+    catch e
+        e isa Pinax.ChecksFailed || rethrow()
+    end
+    html = read(joinpath(out, "index.html"), String)
+    @test occursin("<tr class=\"pinax-fail pinax-error\">", html)
+    @test occursin(
+        "<td class=\"pinax-badge\" title=\"error: the assertion threw\">!</td>", html
+    )
+end

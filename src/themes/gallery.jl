@@ -1452,14 +1452,20 @@ function emit_table(theme::GalleryBase, tbl, ctx)
     return println(io, "</figure>")
 end
 
-# One check -> a check-table `<tr>`: badge ✓/✗ | id | label | got | want | Δ vs tol (kind).
-# The row is class pinax-pass / pinax-fail so CSS colours it green / red.
+# A check's row class and badge, by outcome: green ✓, red ✗, and an error (the assertion threw) red
+# with its own `!` badge, so it is not read as a plain failure.
+const _CHECK_ROW = Dict(
+    :pass => ("pinax-pass", "", "✓"),
+    :fail => ("pinax-fail", "", "✗"),
+    :error => ("pinax-fail pinax-error", " title=\"error: the assertion threw\"", "!"),
+)
+
+# One check -> a check-table `<tr>`: badge | id | label | got | want | Δ vs tol (kind).
 function emit_check(::GalleryBase, chk, ctx)
     io = ctx.io
-    cls = passed(chk) ? "pinax-pass" : "pinax-fail"
-    badge = passed(chk) ? "✓" : "✗"
+    cls, title, badge = _CHECK_ROW[chk.outcome]
     print(io, "<tr class=\"", cls, "\">")
-    print(io, "<td class=\"pinax-badge\">", badge, "</td>")
+    print(io, "<td class=\"pinax-badge\"", title, ">", badge, "</td>")
     print(io, "<td>", _esc(string(chk.id)), "</td>")
     print(io, "<td>", _esc(chk.label))
     isempty(chk.source) ||
