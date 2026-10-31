@@ -1,6 +1,7 @@
 using Pinax
 using Pinax: Check, CodeBlock, TestNode, render_test_report
 using Test
+using JSON
 
 const UbExt = Base.get_extension(Pinax, :PinaxTestExt)
 
@@ -186,5 +187,85 @@ _ub_diags() = [(d.item, d.message) for d in Pinax.current_document().diag.entrie
         @test first.(margin) == collect(6:n)           # the checks' own numbers, in order
         @test last.(margin) == [k / 100 for k in 6:n]  # each at its own margin
         @test startswith(csv, "series,check #,")
+    end
+
+    @testset "a sharded report is the unsharded report: counts, times, ignore, code" begin
+        ok(l) = Check(:t, l, 1.0, 1.0, 0.0, 0.5, :abs, true)
+        bad(l) = Check(:t, l, 2.0, 1.0, 1.0, 0.5, :abs, false)
+        code(tag) = CodeBlock(
+            Symbol("code_", tag),
+            "code_$(tag)",
+            "x = 1",
+            "OUT_$(tag)",
+            "CAP_$(tag)",
+            "python",
+            "",
+        )
+        # every field a shard must carry: elapsed, nbroken, nerror, ignore, a code block's
+        # output / caption / lang — at a file and at the root
+        file_a() = TestNode(
+            "test_a.jl";
+            elapsed=1.25,
+            nbroken=2,
+            nerror=1,
+            checks=[ok("a1"), bad("a2")],
+            codes=[code("a")],
+            content=[:code => 1, :check => 1, :check => 2],
+            children=[TestNode("ignored"; ignore=true, checks=[bad("IGN")])],
+        )
+        file_b() = TestNode(
+            "test_b.jl"; elapsed=2.5, nbroken=1, checks=[ok("b1")], codes=[code("b")]
+        )
+        shard_a() = TestNode(
+            "T";
+            elapsed=0.5,
+            nbroken=3,
+            nerror=1,
+            checks=[bad("ROOT_A")],
+            content=[:check => 1],
+            children=[file_a()],
+        )
+        shard_b() = TestNode(
+            "T"; elapsed=0.75, nbroken=4, checks=[ok("ROOT_B")], children=[file_b()]
+        )
+        whole = TestNode(
+            "T";
+            elapsed=1.25,
+            nbroken=7,
+            nerror=1,
+            checks=[bad("ROOT_A"), ok("ROOT_B")],
+            content=[:check => 1, :check => 2],
+            children=[file_a(), file_b()],
+        )
+        dir = mktempdir()
+        dumps = [
+            Pinax.dump_test_report(shard_a(), joinpath(dir, "a.toml")),
+            Pinax.dump_test_report(shard_b(), joinpath(dir, "b.toml")),
+        ]
+        render_test_report(whole; out=joinpath(dir, "one"), title="T")
+        render_test_report(dumps; out=joinpath(dir, "many"), title="T")
+        # the report minus its provenance table (a timestamp of the render itself)
+        function report(name)
+            aj = JSON.parsefile(joinpath(dir, name, "agent", "agent.json"))
+            ov = aj["pages"][1]
+            ov["tables"] = filter(t -> t["id"] != "provenance", ov["tables"])
+            ov["content"] = filter(e -> e["id"] != "provenance", ov["content"])
+            return aj
+        end
+        one, many = report("one"), report("many")
+        @test one["pages"][1]["summary"] ==
+            "3/16 passed · 1 failed · 2 errored · 10 broken · 1.25s"
+        @test many["pages"][1]["summary"] == one["pages"][1]["summary"]
+        @test [p["id"] for p in many["pages"]] == [p["id"] for p in one["pages"]]
+        for (pm, po) in zip(many["pages"], one["pages"])
+            @test pm["summary"] == po["summary"]
+            @test pm["verdict"] == po["verdict"]
+            @test pm["tables"] == po["tables"]      # the per-file rows: errored, seconds, …
+            @test pm["sections"] == po["sections"]  # the ignored testset stays out
+            @test pm["codes"] == po["codes"]        # output, caption, lang
+        end
+        @test many["pages"] == one["pages"]
+        a = only(c for p in many["pages"] for c in p["codes"] if c["id"] == "code_a")
+        @test (a["output"], a["caption"], a["lang"]) == ("OUT_a", "CAP_a", "python")
     end
 end
