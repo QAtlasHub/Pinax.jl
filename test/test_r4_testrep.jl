@@ -124,4 +124,25 @@ end
         @test only(n for n in ids if n.id === :root_tab).generated == false
     end
 
+    @testset "completeness names a disagreement, duplicates and plural positions" begin
+        w(shard, seen) = TestShards.ShardWindow(shard, 0.0, 1.0, 1, 1.0, seen)
+        # s1 saw 3 units and s2 saw 4; both ran unit 1; units 2, 3 and 4 never ran
+        c = TestShards.completeness(
+            [w("s1", 3), w("s2", 4)], [(1, "s1", "a"), (1, "s2", "a")]
+        )
+        @test c.disagreed && c.duplicated == [1] && c.missed == [2, 3, 4]
+        node = TestNode("f.jl"; checks=[Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)])
+        out = joinpath(mktempdir(), "rep")
+        render_test_report(
+            TestNode("T"; children=[node]); out=out, overview=Pinax.completeness_overview(c)
+        )
+        ov = _r4_page(_r4_agent(out), "overview")
+        @test only(ov["texts"])["text"] ==
+            "**Completeness FAILED.** The shards did not agree on how many units the suite " *
+              "has, so nothing downstream — the split, the indices, these merged records — " *
+              "means what it claims to. 3 units never ran: positions 2, 3, 4. The run is " *
+              "green and that part of the suite was not tested. 1 unit ran more than once: " *
+              "position 1 — so the timings are not a partition."
+    end
+
 end
