@@ -108,7 +108,7 @@ end
     @testset "check carries the margin, not just a verdict" begin
         pass = Test.Pass(:test, :x, :(isapprox(1.0, 1.0098; rtol=0.01)), nothing)
         c = _check_for(pass, 1)
-        @test c.pass
+        @test Pinax.passed(c)
         @test c.got == 1.0 && c.want == 1.0098 && c.tol == 0.01 && c.kind === :rel
         @test c.delta / c.tol > 0.9   # passed, but spent 97% of its budget
 
@@ -117,12 +117,12 @@ end
         atol_pass = Test.Pass(
             :test, :x, :(isapprox(0.0, 1.0e-9; atol=1.0e-8, rtol=0.01)), nothing
         )
-        @test _check_for(atol_pass, 1).pass
+        @test Pinax.passed(_check_for(atol_pass, 1))
 
         # A non-numeric assertion still becomes a check — every @test must show up somewhere — but
         # an indicator, with no numbers rather than made-up ones.
         b = _check_for(Test.Pass(:test, :x, :(1 + 1 == 2), nothing), 2)
-        @test b.pass && b.kind === :indicator && isnan(b.got)
+        @test Pinax.passed(b) && b.kind === :indicator && isnan(b.got)
     end
 
     @testset "atol governs when there is no usable reference" begin
@@ -875,7 +875,7 @@ end
             Test.record(root, fail)
         end
         @test root.node.checks[end].source == "test/test_x.jl:42" &&
-            !root.node.checks[end].pass
+            !Pinax.passed(root.node.checks[end])
 
         # …round-trips through a shard dump…
         dir = mktempdir()
@@ -990,7 +990,7 @@ end
 
         shown, hf, hp = Pinax._cap_gallery_checks(checks, Pinax._MAX_CHECK_ROWS)
         @test length(shown) == Pinax._MAX_CHECK_ROWS
-        @test count(c -> !c.pass, shown) == length(fails)          # every failure survives the cap
+        @test count(c -> !Pinax.passed(c), shown) == length(fails)          # every failure survives the cap
         @test hf == 0 && hp == 500 - Pinax._MAX_CHECK_ROWS
         small = checks[1:10]
         @test Pinax._cap_gallery_checks(small, Pinax._MAX_CHECK_ROWS) == (small, 0, 0)  # small = all

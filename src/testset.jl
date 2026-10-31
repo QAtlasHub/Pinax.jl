@@ -526,7 +526,7 @@ _tofloat(x::Any) = nothing
 # moved. Dumps carry the checks, so they carry this key material implicitly — no separate cache key.
 function _checks_fingerprint(checks)
     return string(
-        hash([(c.label, c.got, c.want, c.delta, c.tol, c.kind, c.pass) for c in checks])
+        hash([(c.label, c.got, c.want, c.delta, c.tol, c.kind, c.outcome) for c in checks])
     )
 end
 
@@ -536,18 +536,20 @@ end
 # anything else is an indicator check (no numbers) so that EVERY assertion still shows up in the
 # machine-readable verdict rather than silently vanishing.
 #
-# `passed` is the TEST RUNNER's verdict, never recomputed from delta<=tol: isapprox combines atol and
-# rtol in a way a single-kind Check cannot reproduce, and a report that disagrees with the test
-# runner is worse than no report.
-function _check_from(expr, label::AbstractString, passed::Bool, i::Int)
+# `outcome` is the TEST RUNNER's verdict (`:pass` / `:fail` / `:error`, or a Bool for pass/fail),
+# never recomputed from delta<=tol: isapprox combines atol and rtol in a way a single-kind Check cannot
+# reproduce, and a report that disagrees with the test runner is worse than no report. An error has
+# no numbers: it is an indicator.
+function _check_from(expr, label::AbstractString, outcome, i::Int)
     id = Symbol("t", i)
-    nums = _approx_numbers(expr)
-    nums === nothing && return _indicator_check(id, label, passed)
+    o = _outcome(outcome)
+    nums = o === :error ? nothing : _approx_numbers(expr)
+    nums === nothing && return _indicator_check(id, label, o)
     (; got, want, atol, rtol) = nums
     # No margin exists for a non-finite value or a zero tolerance: say so on the check, flagged as an
     # indicator, rather than emitting a non-finite delta or fabricated numbers (#116).
     (isfinite(got) && isfinite(want)) || return _indicator_check(
-        id, "$(label)  [got = $(got), want = $(want): no margin]", passed
+        id, "$(label)  [got = $(got), want = $(want): no margin]", o
     )
     # isapprox passes iff |x-y| <= max(atol, rtol*max(|x|,|y|)) (#115). Record the term that
     # governs, so `delta <= tol` is exactly that test: absolute when atol is the larger bound, else
@@ -555,16 +557,16 @@ function _check_from(expr, label::AbstractString, passed::Bool, i::Int)
     scale = max(abs(got), abs(want))
     atol <= 0 &&
         rtol * scale <= 0 &&
-        return _indicator_check(id, "$(label)  [zero tolerance: no margin]", passed)
+        return _indicator_check(id, "$(label)  [zero tolerance: no margin]", o)
     if atol >= rtol * scale
-        return Check(id, String(label), got, want, abs(got - want), atol, :abs, passed)
+        return Check(id, String(label), got, want, abs(got - want), atol, :abs, o)
     end
-    return Check(id, String(label), got, want, abs(got - want) / scale, rtol, :rel, passed)
+    return Check(id, String(label), got, want, abs(got - want) / scale, rtol, :rel, o)
 end
 
 # An indicator: every assertion still shows up in the verdict, but it has no numbers and no margin.
-function _indicator_check(id, label, passed)
-    return Check(id, String(label), NaN, NaN, NaN, NaN, :indicator, passed)
+function _indicator_check(id, label, outcome)
+    return Check(id, String(label), NaN, NaN, NaN, NaN, :indicator, outcome)
 end
 
 # ── the test tree (Test-free) ────────────────────────────────────────
@@ -593,7 +595,6 @@ mutable struct TestNode
     ignore::Bool                # @pinaxignore: ran and counted, but kept out of the document
     checks::Vector{Check}       # one per Pass / Fail / Error recorded directly here
     nbroken::Int                # @test_broken / skipped: counted, never a Check — see below
-    nerror::Int                 # how many of the failing checks were ERRORS rather than plain fails
     children::Vector{TestNode}
     figures::Vector{Figure}
     tables::Vector{Table}
@@ -611,7 +612,6 @@ function TestNode(
     ignore::Bool=false,
     checks::Vector{Check}=Check[],
     nbroken::Integer=0,
-    nerror::Integer=0,
     children::Vector{TestNode}=TestNode[],
     figures::Vector{Figure}=Figure[],
     tables::Vector{Table}=Table[],
@@ -631,7 +631,6 @@ function TestNode(
         ignore,
         checks,
         nbroken,
-        nerror,
         children,
         figures,
         tables,
@@ -648,11 +647,13 @@ end
 # it did not fail either, and encoding it as `pass=false` would paint the page red and flip the
 # benchmark verdict to FAIL — for a test the runner is perfectly happy about.
 _ntests(n) = length(n.checks) + n.nbroken + sum(_ntests, n.children; init=0)
-_nerror(n) = n.nerror + sum(_nerror, n.children; init=0)
+# Failed and errored are each read from the checks' own outcome, so they can never disagree with them.
+_nerror(n) = _noutcome(n, :error)
+_nfail(n) = _noutcome(n, :fail)
 _nbroken(n) = n.nbroken + sum(_nbroken, n.children; init=0)
-function _nfail(n)
-    here = count(c -> !c.pass, n.checks) - n.nerror
-    return here + sum(_nfail, n.children; init=0)
+function _noutcome(n, o::Symbol)
+    return count(c -> c.outcome === o, n.checks) +
+           sum(ch -> _noutcome(ch, o), n.children; init=0)
 end
 
 function _summary_line(n)
@@ -704,7 +705,7 @@ function _margin_svg(checks::Vector{Check}, path::AbstractString)
     for (i, c) in enumerate(checks)
         m = _margin(c)
         y = top + (i - 1) * _BAR_H
-        fill = if !c.pass
+        fill = if !passed(c)
             "#d9534f"
         elseif m > 0.75
             "#e8a33d"
@@ -986,7 +987,7 @@ function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, 
             ax.xvar,
             ax.labels,
             [
-                (_binding_str(b), c.got, c.want, c.delta, c.tol, c.kind, c.pass) for
+                (_binding_str(b), c.got, c.want, c.delta, c.tol, c.kind, c.outcome) for
                 (b, c) in pts
             ],
         )),
@@ -1034,7 +1035,7 @@ function _one_series(pts, ax, lg)
     # the pass boundary isapprox applies: rel is relative to max(|got|,|want|) (#115)
     tolabs = [c.kind === :rel ? c.tol * max(abs(c.got), abs(c.want)) : c.tol for c in cs]
     want = [c.want for c in cs]
-    ok = [c.pass for c in cs]
+    ok = [passed(c) for c in cs]
     conv = (;
         label=lg,
         xs=xs[perm],
@@ -1740,7 +1741,6 @@ function _merge_shards(roots, title)
         elapsed=sum(r -> isnan(r.elapsed) ? 0.0 : r.elapsed, roots; init=0.0),
         children=reduce(vcat, (r.children for r in roots); init=TestNode[]),
         nbroken=sum(r -> r.nbroken, roots; init=0),
-        nerror=sum(r -> r.nerror, roots; init=0),
         dropped=reduce(vcat, (r.dropped for r in roots); init=Pair{String,String}[]),
     )
     foreach(r -> _append_content!(m, r), roots)
@@ -1886,10 +1886,7 @@ load_test_dump(path::AbstractString) = _dict_to_node(TOML.parsefile(path)["root"
 
 function _node_to_dict(n)
     d = Dict{String,Any}(
-        "description" => n.description,
-        "ignore" => n.ignore,
-        "nbroken" => n.nbroken,
-        "nerror" => n.nerror,
+        "description" => n.description, "ignore" => n.ignore, "nbroken" => n.nbroken
     )
     # TOML has no NaN, so an unmeasured elapsed is simply absent.
     isnan(n.elapsed) || (d["elapsed"] = n.elapsed)
@@ -1995,7 +1992,9 @@ end
 # `id` is deliberately NOT dumped: it is assigned at render time (t1, t2, …) so that merging several
 # shards produces one clean numbering rather than N colliding ones.
 function _check_to_dict(c::Check)
-    d = Dict{String,Any}("label" => c.label, "kind" => String(c.kind), "pass" => c.pass)
+    d = Dict{String,Any}(
+        "label" => c.label, "kind" => String(c.kind), "outcome" => String(c.outcome)
+    )
     # an indicator has no numbers, and TOML has no NaN: they are absent
     if c.kind !== :indicator
         merge!(
@@ -2017,7 +2016,6 @@ function _dict_to_node(d::AbstractDict, path::AbstractString="")
         elapsed=get(d, "elapsed", NaN),
         ignore=get(d, "ignore", false),
         nbroken=get(d, "nbroken", 0),
-        nerror=get(d, "nerror", 0),
         checks=Check[_dict_to_check(c, at) for c in get(d, "check", Any[])],
         codes=CodeBlock[_dict_to_code(c) for c in get(d, "code", Any[])],
         tables=Table[_dict_to_table(t) for t in get(d, "table", Any[])],
@@ -2060,10 +2058,21 @@ function _dict_to_check(d::AbstractDict, at::AbstractString="a test dump")
         num("delta"),
         num("tol"),
         kind,
-        d["pass"],
+        _dumped_outcome(d, at),
         get(d, "source", ""),
         _dumped_code_id(d),
     )
+end
+
+# A dumped check's outcome, checked where it is read. An older dump wrote `pass` (and counted errors
+# apart, on the testset), so its errors read as fails.
+function _dumped_outcome(d::AbstractDict, at)
+    haskey(d, "outcome") || return _outcome(d["pass"] === true)
+    o = d["outcome"]
+    o in ("pass", "fail", "error") || error(
+        "Pinax: $(at): check \"$(d["label"])\" has outcome \"$(o)\" — a check passes, fails or errors",
+    )
+    return Symbol(o)
 end
 
 # A dumped check's kind, checked where it is read. An older dump wrote an indicator as kind "abs"

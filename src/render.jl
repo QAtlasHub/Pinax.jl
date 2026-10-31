@@ -101,7 +101,7 @@ function render(
     # the outermost testset throws at its end (#173). Checks a suite already counted are not repeated.
     unreported = [
         string(c.id) for pg in doc.pages for
-        c in _subtree_checks(pg) if !c.pass && !c.reported
+        c in _subtree_checks(pg) if !passed(c) && !c.reported
     ]
     isempty(unreported) || throw(ChecksFailed(unreported, String(path)))
     return path

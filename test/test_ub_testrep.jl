@@ -192,6 +192,7 @@ _ub_diags() = [(d.item, d.message) for d in Pinax.current_document().diag.entrie
     @testset "a sharded report is the unsharded report: counts, times, ignore, code" begin
         ok(l) = Check(:t, l, 1.0, 1.0, 0.0, 0.5, :abs, true)
         bad(l) = Check(:t, l, 2.0, 1.0, 1.0, 0.5, :abs, false)
+        err(l) = Check(:t, l, NaN, NaN, NaN, NaN, :indicator, :error)
         code(tag) = CodeBlock(
             Symbol("code_", tag),
             "code_$(tag)",
@@ -201,14 +202,13 @@ _ub_diags() = [(d.item, d.message) for d in Pinax.current_document().diag.entrie
             "python",
             "",
         )
-        # every field a shard must carry: elapsed, nbroken, nerror, ignore, a code block's
+        # every field a shard must carry: elapsed, nbroken, an error's outcome, ignore, a code block's
         # output / caption / lang — at a file and at the root
         file_a() = TestNode(
             "test_a.jl";
             elapsed=1.25,
             nbroken=2,
-            nerror=1,
-            checks=[ok("a1"), bad("a2")],
+            checks=[ok("a1"), err("a2")],
             codes=[code("a")],
             content=[:code => 1, :check => 1, :check => 2],
             children=[TestNode("ignored"; ignore=true, checks=[bad("IGN")])],
@@ -220,8 +220,7 @@ _ub_diags() = [(d.item, d.message) for d in Pinax.current_document().diag.entrie
             "T";
             elapsed=0.5,
             nbroken=3,
-            nerror=1,
-            checks=[bad("ROOT_A")],
+            checks=[err("ROOT_A")],
             content=[:check => 1],
             children=[file_a()],
         )
@@ -232,8 +231,7 @@ _ub_diags() = [(d.item, d.message) for d in Pinax.current_document().diag.entrie
             "T";
             elapsed=1.25,
             nbroken=7,
-            nerror=1,
-            checks=[bad("ROOT_A"), ok("ROOT_B")],
+            checks=[err("ROOT_A"), ok("ROOT_B")],
             content=[:check => 1, :check => 2],
             children=[file_a(), file_b()],
         )

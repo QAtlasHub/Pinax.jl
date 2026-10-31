@@ -145,7 +145,7 @@ end
 # The one place a Pass / Fail / Error enters the model as a `Check`, for a manuscript container and a
 # test node alike (#173).
 function _push_container_check!(c, res)
-    chk = _check_from(_result_data_expr(res), _label(res), res isa Test.Pass, 0)
+    chk = _check_from(_result_data_expr(res), _label(res), _outcome_of(res), 0)
     # a test node's ids are its own until the fold places them; a page's or section's are the document's
     chk.id = if c isa TestNode
         Pinax._check_id(c, chk.label)
@@ -162,6 +162,16 @@ function _push_container_check!(c, res)
     push!(c.content, :check => length(c.checks))
     return chk
 end
+
+# What Test recorded, as a check's outcome.
+_outcome_of(res) =
+    if res isa Test.Pass
+        :pass
+    elseif res isa Test.Error
+        :error
+    else
+        :fail
+    end
 
 # The probe `Pinax._current_container()` consults. Returns the innermost open Pinax test container,
 # `:inert` (inside a test whose set is NOT ours — the report is off, so content macros no-op), or
@@ -232,7 +242,6 @@ function Test.record(ts::PinaxTestSet, res)
         # about it, and `pass=false` would paint the page red and flip the verdict to FAIL. Counted.
         n.nbroken += 1
     elseif res isa Test.Result                        # Pass / Fail / Error
-        res isa Test.Error && (n.nerror += 1)
         _push_container_check!(n, res)
     end
     return res

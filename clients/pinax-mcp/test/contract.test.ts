@@ -90,6 +90,15 @@ const firstCheck = (doc: any): any => {
   return doc.pages.map(walk).find(Boolean);
 };
 
+test("every emitted check states its outcome, and pass is derived from it", () => {
+  const doc = AgentDocZ.parse(raw);
+  const all = (c: any): any[] => [...(c.checks ?? []), ...(c.sections ?? []).flatMap(all)];
+  const checks = doc.pages.flatMap(all);
+  assert.ok(checks.length > 0);
+  for (const c of checks) assert.equal(c.pass, c.outcome === "pass");
+  assert.equal(AgentDocZ.safeParse(changed((d) => (firstCheck(d).outcome = "maybe"))).success, false);
+});
+
 test("an indicator check carries no numbers", () => {
   const doc = AgentDocZ.parse(raw);
   const all = (c: any): any[] => [...(c.checks ?? []), ...(c.sections ?? []).flatMap(all)];

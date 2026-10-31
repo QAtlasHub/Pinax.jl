@@ -14,26 +14,26 @@ _chk(s::AbstractString, passed) = Pinax._check_from(Meta.parse(s), s, passed, 1)
         c = _chk(:(isapprox(1e-12, 1e-13; rtol=1e-6, atol=1e-9)))
         @test (c.kind, c.tol) == (:abs, 1e-9)
         @test c.delta ≈ 9e-13
-        @test c.pass && c.delta <= c.tol
+        @test Pinax.passed(c) && c.delta <= c.tol
     end
 
     @testset "a relative deviation is normalised by max(|got|, |want|) (#115)" begin
         c = _chk(:(isapprox(2.0, 1.0; rtol=0.6)))
         @test (c.kind, c.tol) == (:rel, 0.6)
         @test c.delta ≈ 0.5
-        @test c.pass && c.delta <= c.tol
+        @test Pinax.passed(c) && c.delta <= c.tol
     end
 
     @testset "≈ uses isapprox's default rtol" begin
         c = _chk(:(≈(1.0, $(1.0 + 1e-10))))
         @test (c.kind, c.tol) == (:rel, sqrt(eps(Float64)))
-        @test c.pass && c.delta <= c.tol
+        @test Pinax.passed(c) && c.delta <= c.tol
     end
 
     @testset "a zero reference with rtol gives a finite relative deviation (#116)" begin
         c = _chk(:(isapprox(5.0, 0.0; rtol=1e-3)))
         @test c.kind === :rel && isfinite(c.delta)
-        @test !c.pass && c.delta > c.tol
+        @test !Pinax.passed(c) && c.delta > c.tol
     end
 
     @testset "NaN and Inf survive the reparse and become a flagged indicator (#116)" begin
@@ -44,7 +44,7 @@ _chk(s::AbstractString, passed) = Pinax._check_from(Meta.parse(s), s, passed, 1)
         )
             c = _chk(s, false)
             @test c.kind === :indicator
-            @test !c.pass
+            @test !Pinax.passed(c)
             @test all(isnan, (c.got, c.want, c.delta, c.tol))   # no numbers: null in agent.json
             @test occursin(tok, c.label) && occursin("no margin", c.label)
         end
@@ -52,7 +52,7 @@ _chk(s::AbstractString, passed) = Pinax._check_from(Meta.parse(s), s, passed, 1)
 
     @testset "a zero tolerance has no margin either" begin
         c = _chk(:(isapprox(0.0, 0.0; atol=0.0, rtol=0.0)))
-        @test c.kind === :indicator && c.pass
+        @test c.kind === :indicator && Pinax.passed(c)
         @test occursin("no margin", c.label)
     end
 
@@ -71,7 +71,7 @@ _chk(s::AbstractString, passed) = Pinax._check_from(Meta.parse(s), s, passed, 1)
                     c = _chk(:(isapprox($x, $y; atol=($atol), rtol=($rtol))))
                     c.kind === :indicator && continue
                     n += 1
-                    disagree += ((c.delta <= c.tol) != c.pass)
+                    disagree += ((c.delta <= c.tol) != Pinax.passed(c))
                 end
             end
         end

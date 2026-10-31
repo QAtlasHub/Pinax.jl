@@ -185,9 +185,11 @@ value against a reference. `kind` says what the numbers are:
   tolerance): `got`, `want`, `delta` and `tol` are `NaN`, it has no margin, and it still counts in
   every verdict.
 
-The constructor refuses any other kind, an indicator with numbers and an `:abs` / `:rel` check
-without them. `pass` is what `Test` recorded for the assertion and is never recomputed from `delta`
-and `tol` (`isapprox` combines `atol` and `rtol` in a way one `kind` cannot reproduce). Renders to a
+`outcome` is what `Test` recorded for the assertion — `:pass`, `:fail`, or `:error` (it threw, so it
+has no numbers and is an indicator) — and is never recomputed from `delta` and `tol` (`isapprox`
+combines `atol` and `rtol` in a way one `kind` cannot reproduce); read it with `Pinax.passed(c)`.
+The constructor refuses any other kind or outcome, an indicator with numbers, an `:abs` / `:rel`
+check without them, and an error with numbers. Renders to a
 row of the container's check table, a LaTeX tabular row, and a native-typed JSON object in
 `agent.json` (the machine-readable verdict).
 """
@@ -199,7 +201,7 @@ mutable struct Check
     const delta::Float64     # resolved (rel or abs) deviation
     const tol::Float64
     const kind::Symbol       # :abs, :rel or :indicator (never :auto)
-    pass::Bool
+    const outcome::Symbol    # :pass, :fail or :error, as Test recorded it
     source::String     # "file:line" of the assertion (issue #69 I), for every recorded @test, so the
     # report says WHERE, not just what; "" when Test gives no location.
     code_id::Union{Symbol,Nothing}   # id of the `CodeBlock` holding the code that produced this
@@ -207,21 +209,46 @@ mutable struct Check
     # reference to it, never a second copy of the source; nothing when there is none.
     reported::Bool        # already handed to an enclosing ordinary testset (#173): a failing check is
     # reported exactly once, by that suite when there is one, else by `render`.
-    function Check(id, label, got, want, delta, tol, kind, pass, source, code_id, reported)
-        _check_kind(kind, (got, want, delta, tol))
-        return new(id, label, got, want, delta, tol, kind, pass, source, code_id, reported)
+    # `outcome` may be given as a Bool (true = :pass, false = :fail), the form a test result has
+    function Check(
+        id, label, got, want, delta, tol, kind, outcome, source, code_id, reported
+    )
+        o = _outcome(outcome)
+        _check_kind(kind, o, (got, want, delta, tol))
+        return new(id, label, got, want, delta, tol, kind, o, source, code_id, reported)
     end
 end
 # The shorter positional forms: source defaults to "", code_id to nothing, reported to false.
-function Check(id, label, got, want, delta, tol, kind, pass, source="", code_id=nothing)
-    return Check(id, label, got, want, delta, tol, kind, pass, source, code_id, false)
+function Check(id, label, got, want, delta, tol, kind, outcome, source="", code_id=nothing)
+    return Check(id, label, got, want, delta, tol, kind, outcome, source, code_id, false)
+end
+
+"""
+    passed(c::Check) -> Bool
+
+Whether the check passed: its `outcome` is `:pass` (not `:fail`, not `:error`).
+"""
+passed(c::Check) = c.outcome === :pass
+
+const _CHECK_OUTCOMES = (:pass, :fail, :error)
+
+_outcome(pass::Bool) = pass ? :pass : :fail
+function _outcome(o::Symbol)
+    o in _CHECK_OUTCOMES || error(
+        "Pinax: check outcome $(repr(o)) is not one of ",
+        join(repr.(_CHECK_OUTCOMES), ", "),
+    )
+    return o
 end
 
 const _CHECK_KINDS = (:abs, :rel, :indicator)
 
-# A check's kind, and whether its numbers fit it: an indicator has none (all NaN), a margin check
-# has all four.
-function _check_kind(kind, nums)
+# A check's kind, and whether its numbers fit it and its outcome: an indicator has none (all NaN), a
+# margin check has all four, and an error — the assertion threw — has none.
+function _check_kind(kind, outcome, nums)
+    outcome === :error &&
+        kind !== :indicator &&
+        error("Pinax: an :error check has no numbers — its kind is :indicator")
     kind in _CHECK_KINDS || error(
         "Pinax: check kind $(repr(kind)) is not one of ",
         join(repr.(_CHECK_KINDS), ", "),
@@ -431,13 +458,13 @@ end
 
 # Single source of the verdict invariant — used by every backend so PASS/FAIL can never diverge.
 function _verdict_of(checks)
-    passed = count(c -> c.pass, checks)
+    npass = count(passed, checks)
     total = length(checks)
     return (
-        passed=passed,
+        passed=npass,
         total=total,
-        verdict=(passed == total ? "PASS" : "FAIL"),
-        failed=[string(c.id) for c in checks if !c.pass],
+        verdict=(npass == total ? "PASS" : "FAIL"),
+        failed=[string(c.id) for c in checks if !passed(c)],
     )
 end
 

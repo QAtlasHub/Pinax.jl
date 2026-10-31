@@ -11,6 +11,15 @@ function _ok(label; got=1.0, want=1.0)
 end
 _report_page(title) = only(p for p in Pinax.current_document().pages if p.title == title)
 
+# Absorbs the results a document records, so a deliberate error does not count in this suite.
+mutable struct _TreeIso <: Test.AbstractTestSet
+    description::String
+    results::Vector{Any}
+    _TreeIso(desc::AbstractString=""; kw...) = new(String(desc), Any[])
+end
+Test.record(r::_TreeIso, x) = (push!(r.results, x); x)
+Test.finish(r::_TreeIso) = r
+
 @testset "test-report tree (#130)" begin
     tmp = mktempdir()
 
@@ -97,6 +106,64 @@ _report_page(title) = only(p for p in Pinax.current_document().pages if p.title 
         @test_throws r"kind \"auto\"" Pinax._dict_to_check(
             merge(bad, Dict("kind" => "auto", "pass" => true))
         )
+    end
+
+    # One outcome per check, so failed and errored counts are read from the checks themselves and
+    # can never disagree with them (or go negative on a hand-built or merged node).
+    @testset "a check's outcome is pass, fail or error, and the counts come from it" begin
+        @test_throws r"outcome :maybe" Check(:t, "x", 1.0, 1.0, 0.0, 0.5, :abs, :maybe)
+        @test_throws r":error check has no numbers" Check(
+            :t, "x", 1.0, 1.0, 0.0, 0.5, :abs, :error
+        )
+        e = Check(:t, "boom", NaN, NaN, NaN, NaN, :indicator, :error)
+        @test e.outcome === :error && !Pinax.passed(e)
+        @test Check(:t, "x", 1.0, 1.0, 0.0, 0.5, :abs, true).outcome === :pass
+        @test Check(:t, "x", 1.0, 1.0, 0.0, 0.5, :abs, false).outcome === :fail
+        node = TestNode("f.jl"; checks=[e, _ok("a")])
+        @test (Pinax._nfail(node), Pinax._nerror(node)) == (0, 1)
+        @test startswith(Pinax._summary_line(node), "1/2 passed · 1 errored")
+        # a dump carries the outcome; an older one wrote `pass`
+        p = joinpath(tmp, "outcome.toml")
+        Pinax.dump_test_report(TestNode("root"; children=[node]), p)
+        back = Pinax.load_test_dump(p)
+        @test [c.outcome for c in only(back.children).checks] == [:error, :pass]
+        old = Dict{String,Any}(
+            "label" => "x",
+            "got" => 2.0,
+            "want" => 1.0,
+            "delta" => 1.0,
+            "tol" => 0.5,
+            "kind" => "abs",
+            "pass" => false,
+        )
+        @test Pinax._dict_to_check(old).outcome === :fail
+        @test_throws r"outcome \"maybe\"" Pinax._dict_to_check(
+            merge(old, Dict("outcome" => "maybe"))
+        )
+    end
+
+    @testset "a @test that throws is an error check, in every face" begin
+        Pinax.reset!()
+        @testset _TreeIso "iso" begin
+            @page :p "P" begin
+                @test error("boom")
+            end
+        end
+        chk = only(only(Pinax.current_document().pages).checks)
+        @test chk.outcome === :error && chk.kind === :indicator
+        out = joinpath(tmp, "err")
+        Pinax.render(; out=out, theme=:agent)
+        aj = read(joinpath(out, "agent.json"), String)
+        @test occursin("\"kind\":\"indicator\",\"outcome\":\"error\",\"pass\":false", aj)
+        @test occursin(
+            r"- \[ERROR\] \S+ — error\(\"boom\"\)", read(joinpath(out, "agent.md"), String)
+        )
+        Pinax.render(; out=joinpath(tmp, "errtex"), theme=:latex)
+        tex = read(
+            only(filter(endswith(".tex"), readdir(joinpath(tmp, "errtex"); join=true))),
+            String,
+        )
+        @test occursin("ERROR \\\\", tex)
     end
 
     # An indicator has no margin, so nothing drawn from margins shows it: not the page's margin

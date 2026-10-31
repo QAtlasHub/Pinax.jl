@@ -186,7 +186,8 @@ function emit_check(::AgentBase, chk, ctx)
         "delta" => num(chk.delta),
         "tol" => num(chk.tol),
         "kind" => _jsonstr(string(chk.kind)),
-        "pass" => _agent_jsonval(chk.pass),
+        "outcome" => _jsonstr(string(chk.outcome)),   # pass | fail | error
+        "pass" => _agent_jsonval(passed(chk)),        # derived from the outcome
         "defined_at" => _jsonstr(chk.source),   # where the @test was written, `path:line`
         # the code is ONE object in `codes` (kind "code"); a check REFERENCES it by id, or null
         "code_id" => chk.code_id === nothing ? "null" : _jsonstr(string(chk.code_id)),
@@ -415,10 +416,10 @@ function _agent_md_table(io, tbl)
     return nothing
 end
 
-# A single check as a markdown list line (the LLM read view): a PASS/FAIL badge + the numbers, or
-# none for an indicator, which has none.
+# A single check as a markdown list line (the LLM read view): a PASS/FAIL/ERROR badge + the numbers,
+# or none for an indicator, which has none.
 function _agent_md_check(io, chk)
-    badge = chk.pass ? "PASS" : "FAIL"
+    badge = uppercase(string(chk.outcome))
     println(
         io,
         "- [",
@@ -504,7 +505,7 @@ end
 function _agent_md_verdict(io, c)
     v = verdict(c)
     v === nothing && return nothing
-    failing = [chk.id for chk in _subtree_checks(c) if !chk.pass]
+    failing = [chk.id for chk in _subtree_checks(c) if !passed(chk)]
     println(
         io,
         "**",

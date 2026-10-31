@@ -97,6 +97,10 @@ function hitIn(u: Unit, [field, text]: Field, q: string): SearchHit[] {
 // ---- outline helpers ----
 
 // a container's verdict over its subtree ("" when it holds no checks — never a vacuous PASS)
+// A check's result as the outline states it (an agent.json from before 0.2 has `pass` alone).
+const checkResult = (n: any): string =>
+  typeof n.outcome === "string" ? n.outcome.toUpperCase() : n.pass ? "PASS" : "FAIL";
+
 const verdictOf = (node: any): string =>
   node.verdict ? `  [${node.verdict.verdict} ${node.verdict.passed}/${node.verdict.total}]` : "";
 
@@ -226,11 +230,11 @@ export class Atlas {
     out.push(`- [${kind} ${id}] ${this.refLabel(id)}`);
   }
 
-  // a check leads with its result, so a reader sees PASS/FAIL before the expression
+  // a check leads with its result, so a reader sees PASS/FAIL/ERROR before the expression
   private refLabel(id: string): string {
     const u = this.unit(id);
     if (!u) return "(missing)";
-    return u.kind === "check" ? `${u.node.pass ? "PASS" : "FAIL"} ${u.label}` : u.label;
+    return u.kind === "check" ? `${checkResult(u.node)} ${u.label}` : u.label;
   }
 
   /** Case-insensitive substring search over labels, descriptions, summaries, code, and comments. */

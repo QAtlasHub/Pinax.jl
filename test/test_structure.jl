@@ -113,7 +113,9 @@ Test.finish(r::_StructIso) = r
                 @caption "VAL_IS_THREE"
             end
         end
-        failed = only(c for c in Pinax.current_document().pages[1].checks if !c.pass)
+        failed = only(
+            c for c in Pinax.current_document().pages[1].checks if !Pinax.passed(c)
+        )
         out = joinpath(tmp, "fb")
         try
             Pinax.render(; out=out, theme=:agent)
