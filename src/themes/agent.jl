@@ -109,7 +109,6 @@ function emit_figure(theme::AgentBase, fig, ctx)
     return nothing
 end
 
-# The id-keyed comment thread of any node (a figure, a page, a section) as `[{author, text}]`.
 # A path in this face's directory, as `agent.json` / `agent.md` name it.
 _agent_rel(path, ctx) = replace(relpath(path, ctx.outdir), '\\' => '/')
 
@@ -127,6 +126,8 @@ function _agent_data_json(io, csv, ctx)
     return print(io, "}")
 end
 
+# The id-keyed comment thread of any node (a figure, a table, a page, a section) as
+# `[{author, text}]`.
 function _agent_comments!(anchor, ctx)
     return _json_array(ctx.io, get(ctx.comments, Symbol(anchor), Comment[])) do c
         return print(
@@ -593,9 +594,6 @@ function _agent_md_heading(depth::Int, title, anchor, rdiag)
     return string("**", title, "**")
 end
 
-# A container's verdict over its subtree as one bold line ("" when it holds no checks).
-# A container's verdict band over its subtree, then its own checks — the same place every face puts
-# them, ahead of the content (Conventions › Faces).
 # A container's verdict band in agent.md: the count over its subtree and which checks fail. The checks
 # themselves are blocks in the content, each where it was written, after its code.
 function _agent_md_verdict(io, c)

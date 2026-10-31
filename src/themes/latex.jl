@@ -294,10 +294,9 @@ function emit_table(theme::LaTeXBase, tbl, ctx)
     return nothing
 end
 
-# The one place a section's depth becomes a LaTeX heading. A page is `\\section` (depth 1), so a
-# top-level section is `\\subsection`; past `\\subparagraph` the level is kept as a bold run-in
+# The one place LaTeX turns depth into a heading, for parts (0), pages (1, `\\section`) and sections
+# (2…, a top-level one is `\\subsection`). Past `\\subparagraph` the level is kept as a bold run-in
 # heading, with a diagnostic (never flattened).
-# The one place LaTeX turns depth into a heading, for parts (0), pages (1) and sections (2…).
 const _LATEX_HEADINGS = (
     "part", "section", "subsection", "subsubsection", "paragraph", "subparagraph"
 )
