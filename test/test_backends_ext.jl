@@ -23,10 +23,6 @@ function Pinax._figure_table(::MockFig)
     )
 end
 
-# a theme variant that opts OUT of presenting figures as tables (figure_as_table = false)
-struct PlainAgent <: Pinax.AgentBase end
-Pinax.figure_as_table(::PlainAgent) = false
-
 _has_parse_error(ex) = ex isa Expr && (ex.head === :error || any(_has_parse_error, ex.args))
 
 @testset "backend extension contract" begin
@@ -89,20 +85,19 @@ _has_parse_error(ex) = ex isa Expr && (ex.head === :error || any(_has_parse_erro
     end
 end
 
-@testset "figure data table" begin
+# A figure's data file holds every plotted point and the agent face points at it, describing it
+# exactly; nothing is inlined as a cut copy (Conventions › The agent face).
+@testset "figure data file: every point, described exactly" begin
     tmp = mktempdir()
 
-    @testset ":table pseudo-format writes a CSV of the plotted data" begin
+    @testset ":table pseudo-format writes every point, columns named by the axes" begin
         fig = Pinax.Figure(
             :f, "f", "", nothing, () -> MockFig("z"), "code", false, String[], nothing
         )
         base = joinpath(tmp, "f")
         out = Pinax._materialize(fig, base, [:svg, :table])
-        @test out == [string(base, ".svg"), string(base, ".csv")]   # image + data table
-        csv = read(out[2], String)
-        @test occursin("series,x,y", csv)
-        @test occursin("s1,0.0,10.0", csv)
-        @test occursin("xlabel=t", csv)
+        @test out == [string(base, ".svg"), string(base, ".csv")]   # image + data file
+        @test read(out[2], String) == "series,t,v\ns1,0.0,10.0\ns1,1.0,11.0\ns1,2.0,12.0\n"
     end
 
     @testset "a pre-made file path exposes no data (no csv)" begin
@@ -113,151 +108,88 @@ end
         @test all(p -> !endswith(p, ".csv"), out)
     end
 
-    @testset "dense series is downsampled with a note" begin
+    @testset "a dense series is written whole, never cut" begin
         io = IOBuffer()
-        tbl = (;
-            xlabel="x",
-            ylabel="y",
-            series=[(; label="a", x=collect(0.0:9.0), y=collect(0.0:9.0))],
+        ys = [i == 373 ? 999.0 : 1.0 for i in 1:5000]
+        Pinax._print_csv_table(
+            io, (; xlabel="", ylabel="", series=[(; label="a", x=collect(1.0:5000), y=ys)])
         )
-        Pinax._print_csv_table(io, tbl, 3)   # 10 pts, budget 3, shape-preserving: keep min+max (the
-        s = String(take!(io))                #   endpoints for a monotonic series) -> 2 rows
-        @test occursin("downsampled", s)
-        @test count("a,", s) == 2
-        @test occursin("a,0.0,0.0", s) && occursin("a,9.0,9.0", s)   # the extrema are kept
+        s = String(take!(io))
+        @test startswith(s, "series,x,y\n")   # unlabelled axes fall back to x / y
+        @test count('\n', s) == 5001
+        @test occursin("a,373.0,999.0", s)
     end
 
-    @testset "agent backend emits the data table as a distinct `data` field" begin
+    @testset "the agent face points at the data file and describes it" begin
         out = joinpath(tmp, "agent")
         Pinax.reset!(; title="d")
         @page :p "P" begin
             @figure MockFig("a") caption = "m"
         end
-        ap = Pinax.render(; out=out, theme=:agent)
-        j = read(ap, String)
-        @test occursin("\"data\":\"", j)     # distinct field (not lumped into assets)
-        @test occursin(".csv\"", j)          # ...pointing at the csv
+        j = read(Pinax.render(; out=out, theme=:agent), String)
+        @test occursin(r"\"data\":\{\"path\":\"assets/figures/p/[^\"]+\.csv\"", j)
+        @test occursin(
+            "\"columns\":[\"series\",\"t\",\"v\"],\"series\":[{\"label\":\"s1\",\"points\":3}]",
+            j,
+        )
+        @test !occursin("\"table\":", j)
         md = read(joinpath(out, "agent.md"), String)
-        @test occursin("| series | x | y |", md)   # figure_as_table inlines the data (Phase B)
+        @test occursin(
+            r"- data: assets/figures/p/\S+\.csv — columns: series, t, v; s1 \(3 points\)",
+            md,
+        )
+        @test !occursin("| series |", md)
     end
 
-    @testset "figure_as_table (default agent): figure carries its data table inline" begin
-        out = joinpath(tmp, "fat")
-        Pinax.reset!(; title="x")
-        @page :p "P" begin
-            @figure MockFig("z") caption = "f"
-        end
-        Pinax.render(; out=out, theme=:agent)
-        j = read(joinpath(out, "agent.json"), String)
-        @test occursin("\"table\":{\"header\":[\"series\",\"x\",\"y\"]", j)   # the figure's data table
-        @test occursin("[\"s1\",0.0,10.0]", j)                                # native-typed rows
-        @test occursin("\"total\":3", j)
-        md = read(joinpath(out, "agent.md"), String)
-        @test occursin("| series | x | y |", md)
-        @test occursin("| s1 | 0.0 | 10.0 |", md)
-    end
-
-    @testset "figure_as_table=false keeps figure as figure (csv reference, no inline table)" begin
-        out = joinpath(tmp, "plain")
-        Pinax.reset!(; title="x")
-        @page :p "P" begin
-            @figure MockFig("z") caption = "f"
-        end
-        Pinax.render(; out=out, theme=PlainAgent())
-        j = read(joinpath(out, "agent.json"), String)
-        @test occursin("\"table\":null", j)
-        md = read(joinpath(out, "agent.md"), String)
-        @test occursin("- data table:", md)            # referenced, not inlined
-        @test !occursin("| series | x | y |", md)
-    end
-
-    @testset "_read_csv_table parses quoted fields + downsamples" begin
+    @testset "_data_descriptor: columns and per-series counts, in order" begin
         csv = joinpath(tmp, "t.csv")
-        write(csv, "# meta\nseries,x,y\n\"a,b\",0.0,1.5\nc,2.0,3.0\n")
-        t = Pinax._read_csv_table(csv)
-        @test t.header == ["series", "x", "y"]
-        @test t.rows[1] == ["a,b", 0.0, 1.5]   # quoted comma; numbers re-typed
-        @test t.total == 2
-        write(csv, "series,x,y\n" * join(["r$i,$i,$i" for i in 1:100], "\n") * "\n")
-        t2 = Pinax._read_csv_table(csv; maxrows=10)
-        @test t2.total == 100 && length(t2.rows) <= 10
+        write(csv, "series,x,y\n\"a,b\",0.0,1.5\nc,2.0,3.0\nc,3.0,4.0\n")
+        d = Pinax._data_descriptor(csv)
+        @test d.columns == ["series", "x", "y"]
+        @test d.series == ["a,b" => 1, "c" => 2]   # a quoted comma stays in the label
+        @test Pinax._data_descriptor(joinpath(tmp, "missing.csv")) === nothing
     end
 
-    @testset "csv round-trip edge cases (review fix)" begin
+    @testset "csv round-trip edge cases" begin
         @test Pinax._split_csv_line("a,b,") == ["a", "b", ""]                       # trailing empty field
         @test Pinax._split_csv_line("a,,c") == ["a", "", "c"]                       # empty middle field
         @test Pinax._split_csv_line("\"x,y\",z") == ["x,y", "z"]                    # quoted comma
         @test Pinax._split_csv_line("\"say \"\"hi\"\"\",z") == ["say \"hi\"", "z"]  # escaped quote
-
-        csv = joinpath(tmp, "edge.csv")
-        write(csv, "series,x,y\n8,0.0,\n8,1.0,2.5\n")   # numeric-looking label + a blank (NaN) y cell
-        t = Pinax._read_csv_table(csv)
-        @test t.rows[1][1] === "8"        # the series LABEL stays a String (not 8.0)
-        @test t.rows[1][3] === missing    # a blank y (a dropped NaN) -> missing, not ""
-        @test t.rows[2][3] === 2.5        # a real number is still re-typed
         @test !occursin('\n', Pinax._csv_field("a\nb"))   # writer flattens newlines (no line-spanning field)
     end
 end
 
-# `@figure … data=` carries the plotted data eagerly, so the agent backend emits the figure-as-table
-# from it WITHOUT calling gen() — i.e. agent.json is producible with no plotting backend. We prove
-# gen is never called by making it throw; render(:agent) must still succeed.
-@testset "figure data=: agent table without building the plot (Plots-free LLM face)" begin
+# `@figure … data=` carries the plotted data eagerly, so the agent face writes the figure's data file
+# from it WITHOUT calling gen() — agent.json is producible with no plotting backend. We prove gen is
+# never called by making it throw; render(:agent) must still succeed.
+@testset "figure data=: the data file without building the plot (Plots-free LLM face)" begin
     tmp = mktempdir()
     Pinax.reset!(; title="d")
     @page :p "P" begin
         @figure error("gen must not run for a data= figure") data = (
             x=[1.0, 2.0, 3.0], y=[10.0, 20.0, 30.0]
-        ) caption = "f"
+        ) caption = "f" id = :f
     end
-    ap = Pinax.render(; out=joinpath(tmp, "agent"), theme=:agent)   # must NOT throw (gen skipped)
-    j = read(ap, String)
-    @test occursin("\"table\":{\"header\":[\"series\",\"x\",\"y\"]", j)  # table from data=
-    @test occursin("[\"y\",1.0,10.0]", j)                                # native rows, no CSV round-trip
-    @test occursin("\"total\":3", j)
-    @test occursin("\"assets\":[]", j)                                   # never materialized → no asset
-    md = read(joinpath(tmp, "agent", "agent.md"), String)
-    @test occursin("| series | x | y |", md)                            # inline md table from data=
-    @test occursin("| y | 1.0 | 10.0 |", md)
+    out = joinpath(tmp, "agent")
+    j = read(Pinax.render(; out=out, theme=:agent), String)   # must NOT throw (gen skipped)
+    @test occursin("\"assets\":[]", j)                         # never materialized → no image
+    @test occursin("\"data\":{\"path\":\"assets/figures/p/f.csv\"", j)
+    @test read(joinpath(out, "assets", "figures", "p", "f.csv"), String) ==
+        "series,x,y\ny,1.0,10.0\ny,2.0,20.0\ny,3.0,30.0\n"
+    md = read(joinpath(out, "agent.md"), String)
+    @test occursin("- image: none", md)
 
-    # multi-series + the convenience reduces to the same long format
+    # several series, and axis labels name the columns
     Pinax.reset!(; title="d2")
     @page :q "Q" begin
-        @figure error("no gen") data = (
+        @figure error("no gen") data = (;
+            xlabel="N",
+            ylabel="gap",
             series=[(; label="a", x=[0, 1], y=[2, 3]), (; label="b", x=[0, 1], y=[4, 5])],
-        )
+        ) id = :g
     end
-    j2 = read(Pinax.render(; out=joinpath(tmp, "a2"), theme=:agent), String)
-    @test occursin("[\"a\",0,2]", j2) && occursin("[\"b\",1,5]", j2)
-end
-
-# gap ②: the figure-as-table downsample must PRESERVE SHAPE — a lone sharp peak survives the ≤20-row
-# preview (a uniform stride would step right over it, giving the LLM a wrong read of the data).
-@testset "shape-preserving downsample keeps peaks (gap ②)" begin
-    ys = [i == 373 ? 999.0 : 1.0 for i in 1:500]      # one sharp peak among 500 flat points
-    idx = Pinax._pick_indices(ys, 20)
-    @test 373 in idx                                   # the peak's index is kept
-    @test 1 in idx && 500 in idx                       # endpoints kept
-    @test length(idx) <= 22                            # ~budget (+ up to 2 endpoints)
-
-    # end-to-end through a data= figure (no backend) → agent.json must carry the peak value
-    Pinax.reset!(; title="peak")
-    @page :p "P" begin
-        @figure error("no gen") data = (x=collect(1.0:500), y=ys)
-    end
-    j = read(Pinax.render(; out=joinpath(mktempdir(), "a"), theme=:agent), String)
-    @test occursin("999.0", j)                         # uniform stride (every 25th) would drop index 373
-
-    # multi-series: each series keeps its OWN peak
-    Pinax.reset!(; title="peak2")
-    @page :q "Q" begin
-        @figure error("ng") data = (
-            series=[
-                (; label="a", x=collect(1.0:200), y=[i == 50 ? 88.0 : 0.0 for i in 1:200]),
-                (; label="b", x=collect(1.0:200), y=[i == 150 ? 77.0 : 0.0 for i in 1:200]),
-            ],
-        )
-    end
-    j2 = read(Pinax.render(; out=joinpath(mktempdir(), "b"), theme=:agent), String)
-    @test occursin("88.0", j2) && occursin("77.0", j2)
+    out2 = joinpath(tmp, "a2")
+    Pinax.render(; out=out2, theme=:agent)
+    @test read(joinpath(out2, "assets", "figures", "q", "g.csv"), String) ==
+        "series,N,gap\na,0,2\na,1,3\nb,0,4\nb,1,5\n"
 end

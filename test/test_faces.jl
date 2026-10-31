@@ -2,6 +2,8 @@ using Pinax
 using Test
 using JSON
 
+_pos(s, needle) = first(findfirst(needle, s))
+
 # Every node kind reaches every face (Conventions › Faces, #168). One document holds every kind;
 # it is rendered to the gallery, LaTeX and the agent face, and each node is looked for in each
 # one. `agent.json` is parsed, not substring-matched, so a node is found where the contract puts it.
@@ -192,5 +194,74 @@ using JSON
             d -> d["item"] == "pg_fig_gone" && occursin("names no node", d["message"]), ds
         )
         @test any(d -> d["item"] == "cd" && occursin("code block", d["message"]), ds)
+    end
+
+    # The agent face is the same compiled report: a figure sits in its block, between the prose
+    # written around it, and its data is pointed to, never inlined as a cut copy. What it inlines
+    # is exact (columns, series, point counts); where a node was written is a `path:line` pointer.
+    @testset "agent face: exact descriptors and pointers, never a cut copy" begin
+        x = collect(1.0:5000.0)
+        Pinax.reset!()
+        @page :p "P" begin
+            @desc "BEFORE_FIG"
+            @figure nothing data = (;
+                xlabel="beta",
+                ylabel="E/N",
+                series=[(; label="a", x=x, y=sin.(x)), (; label="b", x=x[1:10], y=x[1:10])],
+            ) id = :dat caption = "CAP"
+            @desc "AFTER_FIG"
+            @figure svg id = :img
+            @table (a=[1, 2],) id = :t
+            @code id = :c Q_VAL = 1
+        end
+        out = joinpath(tmp, "ptr")
+        Pinax.render(; out=out, theme=:agent)
+        aj = JSON.parse(read(joinpath(out, "agent.json"), String))
+        pg = only(aj["pages"])
+        f = only(f for f in pg["figures"] if f["id"] == "dat")
+        @test !haskey(f, "table")   # no inlined preview
+        d = f["data"]
+        @test d["columns"] == ["series", "beta", "E/N"]
+        @test [(s["label"], s["points"]) for s in d["series"]] == [("a", 5000), ("b", 10)]
+        @test countlines(joinpath(out, d["path"])) == 1 + 5010   # the header, then every point
+        at = r"^test/test_faces\.jl:\d+$"   # relative to the project that holds the file
+        @test occursin(at, f["defined_at"])
+        @test occursin(at, only(pg["tables"])["defined_at"])
+        @test occursin(at, only(pg["codes"])["defined_at"])
+        # a figure with no data form says so: an agent sees it only through its image
+        img = only(f for f in pg["figures"] if f["id"] == "img")
+        @test img["data"] === nothing
+        @test any(
+            e -> e["item"] == "img" && occursin("no data", e["message"]), aj["diagnostics"]
+        )
+
+        md = read(joinpath(out, "agent.md"), String)
+        @test !occursin("| series |", md)
+        @test occursin("a (5000 points), b (10 points)", md)
+        @test occursin("columns: series, beta, E/N", md)
+        @test _pos(md, "BEFORE_FIG") < _pos(md, "[fig: dat] CAP") < _pos(md, "AFTER_FIG")
+    end
+
+    # Each face is self-contained: rendering the gallery and then the agent face from the same
+    # document never leaves the agent face pointing into the gallery's directory.
+    @testset "each face points only into its own directory" begin
+        Pinax.reset!()
+        @page :p "P" begin
+            @figure svg data = (; x=[1.0, 2.0], y=[3.0, 4.0]) id = :d
+            @figure svg id = :i
+        end
+        out = joinpath(tmp, "both")
+        Pinax.render(; out=joinpath(out, "html"))
+        Pinax.render(; out=joinpath(out, "agent"), theme=:agent)
+        aj = JSON.parse(read(joinpath(out, "agent", "agent.json"), String))
+        figs = only(aj["pages"])["figures"]
+        paths = vcat(
+            (f["assets"] for f in figs)...,
+            (f["data"]["path"] for f in figs if f["data"] !== nothing)...,
+        )
+        @test !isempty(paths)
+        @test all(p -> !startswith(p, "..") && isfile(joinpath(out, "agent", p)), paths)
+        md = read(joinpath(out, "agent", "agent.md"), String)
+        @test !occursin("../", md)
     end
 end

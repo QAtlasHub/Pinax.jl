@@ -108,8 +108,12 @@ mutable struct Figure
     thumbnail::Bool       # thumbnail=true marker
     assets::Vector{String}
     data::Any             # eager plotted-data (`@figure … data=(; x, y[, series])`) | nothing.
-    # When set, the agent backend emits the figure's data table from THIS — no `gen()`, hence no
+    # When set, the agent backend writes the figure's data file from THIS — no `gen()`, hence no
     # plotting backend — so the LLM artifact (agent.json) is producible Plots/Makie-free.
+    defined_at::String    # where the `@figure` was written, `path:line` (see `_defined_at`), or ""
+end
+function Figure(id, anchor, caption, params, gen, code, thumbnail, assets, data)
+    return Figure(id, anchor, caption, params, gen, code, thumbnail, assets, data, "")
 end
 
 """
@@ -124,6 +128,10 @@ mutable struct Table
     rows::Vector{Vector{Any}}
     code::String          # @table data-expression source (provenance)
     params::Any
+    defined_at::String    # where the `@table` was written, `path:line`, or ""
+end
+function Table(id, anchor, caption, header, rows, code, params)
+    return Table(id, anchor, caption, header, rows, code, params, "")
 end
 
 # A table cell as display text (HTML/LaTeX backends; the agent backend keeps native JSON types).
@@ -218,6 +226,36 @@ mutable struct CodeBlock
     output::String        # captured value / printed output, or "" (show-only, or no result)
     caption::String
     lang::String          # syntax hint for the highlighter, e.g. "julia"
+    defined_at::String    # where the block was written, `path:line`, or ""
+end
+function CodeBlock(id, anchor, source, output, caption, lang)
+    return CodeBlock(id, anchor, source, output, caption, lang, "")
+end
+
+# Where a node was written, as `path:line` — the pointer an agent follows to revise it. The path is
+# relative to the project that holds the file (the nearest enclosing directory with a Project.toml),
+# so it names the same file wherever Julia was started; outside any project it is relative to the
+# working directory, or absolute. "" where there is no file to point at (a REPL).
+function _defined_at(at)
+    at === nothing && return ""
+    file, line = at
+    (isempty(file) || file == "none" || startswith(file, "REPL")) && return ""
+    p = abspath(file)
+    root = _project_root(dirname(p))
+    rel = relpath(p, something(root, pwd()))
+    path = root === nothing && startswith(rel, "..") ? p : rel
+    return string(replace(path, '\\' => '/'), ":", line)
+end
+
+# The nearest directory at or above `dir` that holds a Project.toml (or JuliaProject.toml), or nothing.
+function _project_root(dir)
+    while true
+        any(f -> isfile(joinpath(dir, f)), ("Project.toml", "JuliaProject.toml")) &&
+            return dir
+        up = dirname(dir)
+        up == dir && return nothing
+        dir = up
+    end
 end
 
 """
@@ -933,6 +971,7 @@ macro figure(args...)
     allk = vcat(
         Expr(:kw, :gen, Expr(:(->), Expr(:tuple), esc(expr))),
         Expr(:kw, :code, _code_str(expr)),
+        Expr(:kw, :at, (String(string(__source__.file)), __source__.line)),
         _kwspecs(kws),
     )
     return _call(:_push_figure!, (), allk)
@@ -960,7 +999,14 @@ function _current_container()
 end
 
 function _push_figure!(;
-    gen, code, params=nothing, caption="", id=nothing, thumbnail=false, data=nothing
+    gen,
+    code,
+    at=nothing,
+    params=nothing,
+    caption="",
+    id=nothing,
+    thumbnail=false,
+    data=nothing,
 )
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
@@ -968,7 +1014,16 @@ function _push_figure!(;
     base = Symbol(c.id, "_fig_", _stable_hash(string(code, "|", _params_key(params))))
     fid = _node_id!(c, id, base, "figure")
     fig = Figure(
-        fid, _anchor(fid), string(caption), params, gen, code, thumbnail, String[], data
+        fid,
+        _anchor(fid),
+        string(caption),
+        params,
+        gen,
+        code,
+        thumbnail,
+        String[],
+        data,
+        _defined_at(at),
     )
     push!(c.figures, fig)
     push!(c.content, :figure => length(c.figures))
@@ -998,12 +1053,17 @@ macro table(args...)
     end
     data === nothing && error("@table needs a data expression")
     allk = vcat(
-        Expr(:kw, :data, esc(data)), Expr(:kw, :code, _code_str(data)), _kwspecs(kws)
+        Expr(:kw, :data, esc(data)),
+        Expr(:kw, :code, _code_str(data)),
+        Expr(:kw, :at, (String(string(__source__.file)), __source__.line)),
+        _kwspecs(kws),
     )
     return _call(:_push_table!, (), allk)
 end
 
-function _push_table!(; data, code, caption="", id=nothing, header=nothing, params=nothing)
+function _push_table!(;
+    data, code, at=nothing, caption="", id=nothing, header=nothing, params=nothing
+)
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@table outside of a @section or @page")
@@ -1016,7 +1076,9 @@ function _push_table!(; data, code, caption="", id=nothing, header=nothing, para
         )
     end
     tid = _node_id!(c, id, Symbol(c.id, "_tbl_", _stable_hash(string(code))), "table")
-    tbl = Table(tid, _anchor(tid), string(caption), hdr, rows, code, params)
+    tbl = Table(
+        tid, _anchor(tid), string(caption), hdr, rows, code, params, _defined_at(at)
+    )
     push!(c.tables, tbl)
     push!(c.content, :table => length(c.tables))
     return tbl
@@ -1183,7 +1245,15 @@ function _push_code!(;
         v === nothing || (src = v)
     end
     cid = _node_id!(c, id, Symbol(c.id, "_code_", _stable_hash(src)), "code block")
-    blk = CodeBlock(cid, _anchor(cid), src, string(output), string(caption), string(lang))
+    blk = CodeBlock(
+        cid,
+        _anchor(cid),
+        src,
+        string(output),
+        string(caption),
+        string(lang),
+        _defined_at(at),
+    )
     push!(c.codes, blk)
     push!(c.content, :code => length(c.codes))
     return blk

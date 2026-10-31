@@ -362,7 +362,8 @@ function _test_code_block(file::AbstractString, line::Integer)
     hdr == 0 || (src = string(src, "\nend"))
     # keyed on the code itself, not its line span, so shifting lines never changes it (#123)
     id = Symbol("code_", _slug(basename(String(file))), "_", _stable_hash(src))
-    return CodeBlock(id, _anchor(id), src, "", "", "julia")
+    at = _defined_at((String(file), hdr == 0 ? pieces[1][1] : hdr))
+    return CodeBlock(id, _anchor(id), src, "", "", "julia", at)
 end
 
 _strip_lnn(x) = x
@@ -1707,6 +1708,7 @@ function _table_to_dict(t::Table)
         "header" => collect(t.header),
         "rows" => [[_toml_cell(c) for c in row] for row in t.rows],
         "code" => t.code,
+        "defined_at" => t.defined_at,
     )
 end
 function _dict_to_table(d::AbstractDict)
@@ -1719,6 +1721,7 @@ function _dict_to_table(d::AbstractDict)
         Vector{Any}[Any[c for c in row] for row in get(d, "rows", Any[])],
         get(d, "code", ""),
         nothing,
+        get(d, "defined_at", ""),
     )
 end
 function _code_to_dict(c::CodeBlock)
@@ -1728,6 +1731,7 @@ function _code_to_dict(c::CodeBlock)
         "output" => c.output,
         "caption" => c.caption,
         "lang" => c.lang,
+        "defined_at" => c.defined_at,
     )
 end
 function _dict_to_code(d::AbstractDict)
@@ -1738,6 +1742,7 @@ function _dict_to_code(d::AbstractDict)
         get(d, "output", ""),
         get(d, "caption", ""),
         get(d, "lang", "julia"),
+        get(d, "defined_at", ""),
     )
 end
 

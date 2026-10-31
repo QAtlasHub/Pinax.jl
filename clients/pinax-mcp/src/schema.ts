@@ -20,6 +20,7 @@ export const TableNodeZ = z
   .object({
     id: z.string(),
     caption: z.string(),
+    defined_at: z.string().optional(), // where the @table was written, "path:line", or ""
     code: z.string(),
     header: z.array(z.string()),
     rows: z.array(z.array(z.unknown())),
@@ -27,12 +28,14 @@ export const TableNodeZ = z
   })
   .passthrough();
 
-// A figure's inline data table (figure_as_table) — a downsampled preview of the plotted data.
-export const FigureTableZ = z
+// A figure's data file, described exactly: the path, its columns (the series label, then the x and y
+// axes named by the plot's axis labels) and each series with its point count. The file holds every
+// plotted point; nothing of it is inlined (Conventions › The agent face).
+export const FigureDataZ = z
   .object({
-    header: z.array(z.string()),
-    rows: z.array(z.array(z.unknown())),
-    total: z.number(),
+    path: z.string(),
+    columns: z.array(z.string()),
+    series: z.array(z.object({ label: z.string(), points: z.number() }).passthrough()),
   })
   .passthrough();
 
@@ -40,11 +43,11 @@ export const FigureZ = z
   .object({
     id: z.string(),
     caption: z.string(),
+    defined_at: z.string().optional(), // where the @figure was written, "path:line", or ""
     code: z.string(),
     params: Params,
     assets: z.array(z.string()),
-    data: z.string().nullable().optional(), // path to the full plotted-data CSV
-    table: FigureTableZ.nullable().optional(), // inline data-table preview (figure_as_table)
+    data: FigureDataZ.nullable().optional(), // null when the figure has no data form
     comments: z.array(CommentZ),
   })
   .passthrough();
@@ -54,6 +57,7 @@ export const CodeZ = z
   .object({
     id: z.string(),
     caption: z.string().optional(),
+    defined_at: z.string().optional(), // where the block was written, "path:line", or ""
     lang: z.string(),
     source: z.string(),
     output: z.string(),

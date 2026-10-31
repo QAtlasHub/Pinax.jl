@@ -225,11 +225,11 @@ export class Atlas {
     }));
   }
 
-  /** The figure's full plotted-data CSV (its `data` field), resolved to an absolute path, or null. */
+  /** The figure's data file (every plotted point; `data.path`), resolved to an absolute path, or null. */
   figureData(id: string): { rel: string; abs: string } | null {
     const u = this.units.get(id);
-    if (!u || u.kind !== "figure" || typeof u.node.data !== "string") return null;
-    const rel = u.node.data as string;
+    if (!u || u.kind !== "figure" || typeof u.node.data?.path !== "string") return null;
+    const rel = u.node.data.path as string;
     return { rel, abs: isAbsolute(rel) ? rel : resolve(this.baseDir, rel) };
   }
 }

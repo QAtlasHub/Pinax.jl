@@ -156,7 +156,7 @@ export function createServer(atlas: Atlas, opts: ServerOptions = {}): Server {
       {
         name: "get_unit",
         description:
-          "Fetch one unit (part / page / section / figure / table) by its id. A figure returns its verification substrate (caption, generating code, params, asset paths, comments) plus an inline data-table preview when the theme presents figures as tables; a table returns its header + native-typed rows.",
+          "Fetch one unit by its id. A figure returns what it claims and what is behind it: caption, where it was defined, generating code, params, image paths, comments, and its data file described exactly (path, columns, points per series) — read the file with get_figure_data. A table returns its header + native-typed rows.",
         inputSchema: {
           type: "object",
           properties: { id: { type: "string", description: "the unit id, e.g. a figure or table id" } },
@@ -178,7 +178,7 @@ export function createServer(atlas: Atlas, opts: ServerOptions = {}): Server {
       {
         name: "get_figure_data",
         description:
-          "Read a figure's full plotted-data CSV (the complete data behind the plot; a figure's inline `table` field is only a downsampled preview). Returns the CSV text.",
+          "Read a figure's data file: every plotted point as CSV, the columns named by the plot's axis labels. Returns the CSV text.",
         inputSchema: {
           type: "object",
           properties: { id: { type: "string", description: "a figure id" } },

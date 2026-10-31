@@ -31,12 +31,12 @@ test("indexes every unit by id and kind, including @table nodes", () => {
   ]);
 });
 
-test("a figure carries its inline data table + a full-data csv (figure_as_table)", () => {
-  const fig = loadAtlas(fixture).unit("p1_fig1")!.node;
-  assert.deepEqual(fig.table.header, ["series", "x", "y"]);
-  assert.equal(fig.table.rows[0][0], "N=8");
-  assert.equal(fig.table.total, 3);
-  assert.match(fig.data, /p1_fig1\.csv$/);
+test("a figure points at its data file and describes it exactly (no inlined copy)", () => {
+  const fig = loadAtlas(fixture).unit("p1_fig1")!.node as any;
+  assert.equal(fig.table, undefined);
+  assert.match(fig.data.path, /p1_fig1\.csv$/);
+  assert.deepEqual(fig.data.columns, ["series", "T", "M"]);
+  assert.deepEqual(fig.data.series, [{ label: "N=8", points: 3 }]);
 });
 
 test("outline interleaves figures and tables in declaration order", () => {

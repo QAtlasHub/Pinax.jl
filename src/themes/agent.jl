@@ -3,11 +3,12 @@
 # or :agent (machine) by switching the theme — the backend abstraction's real stress test, since the
 # output here is JSON/text, not a "document".
 #
-# Per figure it carries the verification substrate so an agent can reconcile a claim against evidence
-# ("data reconciliation"): the deferred CODE that produced it, the PARAMS / DataKey it is bound to,
-# the rendered ASSET path (for vision models), the human CAPTION/claim, and the id-keyed COMMENT
-# thread. Output: `agent.json` (machine / MCP-resource-shaped, every unit id-addressable) and
-# `agent.md` (token-lean read view to paste to an LLM).
+# It is the same compiled report as the gallery, in the same reading order, for an agent that discusses
+# it or drives a revision (Conventions › The agent face). Per figure it carries what is claimed (the
+# caption), where and how it was made (`defined_at`, the code, the params / DataKey) and pointers to
+# what is behind it: its image and its data file, described exactly and never inlined as a cut copy.
+# Output: `agent.json` (every unit id-addressable, the index tools read) and `agent.md` (the report an
+# agent reads).
 
 """
 Abstract base for the agent / MCP backend: its `emit_*` methods are defined on `AgentBase`, so a
@@ -20,9 +21,8 @@ abstract type AgentBase <: Theme end
 struct AgentTheme <: AgentBase end
 
 output_format(::AgentBase) = :agent
-figure_formats(::AgentBase) = Symbol[:svg, :table]   # svg (vision) + a CSV of the plotted data (text
-# view for LLM reconciliation); pre-made file paths copy as-is and produce no table.
-figure_as_table(::AgentBase) = true   # an LLM reads a figure's data as a table, not its pixels (Phase B)
+figure_formats(::AgentBase) = Symbol[:svg, :table]   # svg (vision) + a CSV of every plotted point;
+# pre-made file paths copy as-is and have no data file.
 
 # ---------- JSON emit (the machine / MCP substrate) ----------
 
@@ -37,6 +37,11 @@ struct AgentCtx
     comments::Dict{Symbol,Vector{Comment}}
     cache::RenderCache
     rdiag::Vector{DiagEntry}
+    # figure id => (its images, its data file or nothing), all in THIS face's directory
+    files::Dict{Symbol,Tuple{Vector{String},Union{String,Nothing}}}
+end
+function AgentCtx(io, outdir, comments, cache, rdiag)
+    return AgentCtx(io, outdir, comments, cache, rdiag, Dict{Symbol,Any}())
 end
 
 # A JSON scalar for a param/cell value: numbers/bools stay native (a tool reads 16, not "16");
@@ -65,76 +70,32 @@ function _agent_params_json(io, params)
     return print(io, "}")
 end
 
-# A figure's plotted data as an inline table preview (header + native-typed rows + total row count),
-# parsed from its CSV — the "figure presented as a table" for an LLM (figure_as_table).
-_emit_figure_table(io, csvpath) = _emit_table_obj(io, _read_csv_table(csvpath))
-
-# Emit a `(header, rows, total)` table object as JSON (the CSV path and the eager-`data=` path
-# share this). `nothing` -> JSON null.
-function _emit_table_obj(io, t)
-    t === nothing && return print(io, "null")
-    print(io, "{\"header\":[")
-    for (i, h) in enumerate(t.header)
-        i == 1 || print(io, ",")
-        print(io, _jsonstr(h))
-    end
-    print(io, "],\"rows\":[")
-    for (i, row) in enumerate(t.rows)
-        i == 1 || print(io, ",")
-        print(io, "[")
-        for (j, cell) in enumerate(row)
-            j == 1 || print(io, ",")
-            print(io, _agent_jsonval(cell))
-        end
-        print(io, "]")
-    end
-    print(io, "],\"total\":", t.total, "}")
-    return nothing
-end
-
-# One figure → its JSON object (verification substrate: caption/code/params/assets/data/table/comments).
+# One figure → its JSON object: what it claims (caption), where and how it was made (`defined_at`,
+# code, params) and pointers to what is behind it — its images and its data file, described exactly
+# (columns, points per series) and never inlined (Conventions › The agent face).
 function emit_figure(theme::AgentBase, fig, ctx)
     io = ctx.io
+    imgs, csv = get(ctx.files, fig.id, (String[], nothing))
     print(
         io,
         "{\"id\":",
         _jsonstr(string(fig.id)),
         ",\"caption\":",
         _jsonstr(fig.caption),
+        ",\"defined_at\":",
+        _jsonstr(fig.defined_at),
         ",\"code\":",
         _jsonstr(fig.code),
         ",\"params\":",
     )
     _agent_params_json(io, fig.params)
-    # split the rendered images from the plotted-data CSV (the `:table` pseudo-format): images are the
-    # vision channel, `data` is the cheap text channel an LLM reads to reconcile a claim against numbers.
     print(io, ",\"assets\":[")
-    datacsv = nothing
-    imgs = String[]
-    for a in fig.assets
-        endswith(lowercase(a), ".csv") ? (datacsv = a) : push!(imgs, a)
-    end
     for (i, a) in enumerate(imgs)
         i == 1 || print(io, ",")
-        print(io, _jsonstr(replace(relpath(a, ctx.outdir), '\\' => '/')))
+        print(io, _jsonstr(_agent_rel(a, ctx)))
     end
-    print(
-        io,
-        "],\"data\":",
-        if datacsv === nothing
-            "null"
-        else
-            _jsonstr(replace(relpath(datacsv, ctx.outdir), '\\' => '/'))
-        end,
-        ",\"table\":",
-    )
-    if figure_as_table(theme) && fig.data !== nothing
-        _emit_table_obj(io, _table_from_data(fig.data))   # from eager data — no plot built
-    elseif figure_as_table(theme) && datacsv !== nothing
-        _emit_figure_table(io, datacsv)
-    else
-        print(io, "null")
-    end
+    print(io, "],\"data\":")
+    _agent_data_json(io, csv, ctx)
     print(io, ",\"comments\":")
     _agent_comments!(fig.anchor, ctx)
     print(io, "}")
@@ -142,6 +103,24 @@ function emit_figure(theme::AgentBase, fig, ctx)
 end
 
 # The id-keyed comment thread of any node (a figure, a page, a section) as `[{author, text}]`.
+# A path in this face's directory, as `agent.json` / `agent.md` name it.
+_agent_rel(path, ctx) = replace(relpath(path, ctx.outdir), '\\' => '/')
+
+# A figure's data file as a pointer and an exact description of what it holds — its columns (named by
+# the axis labels) and each series with its point count — or `null` when the figure has none.
+function _agent_data_json(io, csv, ctx)
+    d = csv === nothing ? nothing : _data_descriptor(csv)
+    d === nothing && return print(io, "null")
+    print(io, "{\"path\":", _jsonstr(_agent_rel(csv, ctx)), ",\"columns\":[")
+    join(io, (_jsonstr(c) for c in d.columns), ",")
+    print(io, "],\"series\":[")
+    for (i, (label, n)) in enumerate(d.series)
+        i == 1 || print(io, ",")
+        print(io, "{\"label\":", _jsonstr(label), ",\"points\":", n, "}")
+    end
+    return print(io, "]}")
+end
+
 function _agent_comments!(anchor, ctx)
     print(ctx.io, "[")
     for (i, c) in enumerate(get(ctx.comments, Symbol(anchor), Comment[]))
@@ -163,6 +142,8 @@ function emit_table(::AgentBase, tbl, ctx)
         _jsonstr(string(tbl.id)),
         ",\"caption\":",
         _jsonstr(tbl.caption),
+        ",\"defined_at\":",
+        _jsonstr(tbl.defined_at),
         ",\"code\":",
         _jsonstr(tbl.code),
         ",\"header\":[",
@@ -207,6 +188,8 @@ function emit_code(::AgentBase, blk, ctx)
         _jsonstr(string(blk.id)),
         ",\"caption\":",
         _jsonstr(blk.caption),
+        ",\"defined_at\":",
+        _jsonstr(blk.defined_at),
         ",\"lang\":",
         _jsonstr(blk.lang),
         ",\"source\":",
@@ -313,16 +296,39 @@ end
 function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
     fmts = figure_formats(theme)
     for fig in figs
-        # A figure carrying eager `data=` needs no materialize — its table comes from the data, so
-        # `gen()` (and thus the plotting backend) is never touched. This is what makes agent.json
-        # producible Plots/Makie-free.
-        fig.data === nothing || continue
+        base = joinpath(assetdir, fig.anchor)
+        if fig.data !== nothing
+            # Eager `data=`: the data file is written from it and `gen()` — the plotting backend — is
+            # never touched, so agent.json stays producible Plots/Makie-free. No image in this face.
+            csv = _write_csv(_table_of_data(fig.data), base)
+            ctx.cache.new[_manifest_key(base, ctx.cache.outdir)] = Dict{String,Any}(
+                "key" => "data", "assets" => [relpath(csv, ctx.cache.outdir)]
+            )
+            ctx.files[fig.id] = (String[], csv)
+            continue
+        end
         try
-            materialize!(fig, joinpath(assetdir, fig.anchor), fmts, ctx.cache)
+            materialize!(fig, base, fmts, ctx.cache)   # into this face's directory
         catch e
             e isa InterruptException && rethrow()
             push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+            ctx.files[fig.id] = (String[], nothing)
+            continue
         end
+        imgs = filter(a -> !endswith(lowercase(a), ".csv"), fig.assets)
+        i = findfirst(a -> endswith(lowercase(a), ".csv"), fig.assets)
+        csv = i === nothing ? nothing : fig.assets[i]
+        ctx.files[fig.id] = (imgs, csv)
+        # an agent reads a figure through its data; one without data is said to be so, never silent
+        csv === nothing && push!(
+            ctx.rdiag,
+            DiagEntry(
+                WARNING,
+                fig.anchor,
+                "this figure has no data form (a pre-made image, or a plot the loaded extension " *
+                "cannot read): an agent sees it only through its image",
+            ),
+        )
     end
     io = ctx.io
     print(io, "[")
@@ -489,46 +495,25 @@ function _params_inline(params)
     return join(("$k=$v" for (k, v) in desc), ", ")
 end
 
-# Inline a figure's data as a markdown-table preview (figure_as_table), from its CSV asset or its
-# eager `data=` (the latter needs no plot materialized).
-_agent_md_data_table(io, csvpath) = _agent_md_table_obj(io, _read_csv_table(csvpath))
-function _agent_md_table_obj(io, t)
-    t === nothing && return nothing
-    println(io)
-    println(io, "| ", join(t.header, " | "), " |")
-    println(io, "|", repeat(" --- |", length(t.header)))
-    for row in t.rows
-        println(io, "| ", join((_cellstr(c) for c in row), " | "), " |")
-    end
-    length(t.rows) < t.total && println(
-        io, "_(", length(t.rows), " of ", t.total, " rows; full data in the CSV asset)_"
-    )
-    return nothing
-end
-
-function _agent_md_fig(io, fig, outdir, comments, as_table)
+# A figure in agent.md, inside its block: what it claims, where and how it was made, and pointers to
+# what is behind it — the data file described exactly (columns, points per series), and its image.
+function _agent_md_fig(io, fig, outdir, comments, files)
+    imgs, csv = get(files, fig.id, (String[], nothing))
+    rel(p) = replace(relpath(p, outdir), '\\' => '/')
     println(io, "- [fig: ", fig.id, "] ", fig.caption)
+    isempty(fig.defined_at) || println(io, "  - defined at: ", fig.defined_at)
     isempty(fig.code) || println(io, "  - code: `", fig.code, "`")
-    fig.params === nothing || println(io, "  - data: ", _params_inline(fig.params))
-    imgs = filter(a -> !endswith(lowercase(a), ".csv"), fig.assets)
-    isempty(imgs) ||
-        println(io, "  - asset: ", replace(relpath(imgs[1], outdir), '\\' => '/'))
-    csv = nothing
-    for a in fig.assets
-        endswith(lowercase(a), ".csv") && (csv = a)
-    end
-    tbl = if fig.data !== nothing
-        _table_from_data(fig.data)
+    fig.params === nothing || println(io, "  - params: ", _params_inline(fig.params))
+    d = csv === nothing ? nothing : _data_descriptor(csv)
+    if d === nothing
+        println(io, "  - data: none — this figure can be read only through its image")
     else
-        (csv !== nothing ? _read_csv_table(csv) : nothing)
+        series = join(("$(l) ($(n) points)" for (l, n) in d.series), ", ")
+        println(
+            io, "  - data: ", rel(csv), " — columns: ", join(d.columns, ", "), "; ", series
+        )
     end
-    if tbl !== nothing
-        if as_table
-            _agent_md_table_obj(io, tbl)   # present the figure AS its data table
-        elseif csv !== nothing
-            println(io, "  - data table: ", replace(relpath(csv, outdir), '\\' => '/'))
-        end
-    end
+    println(io, "  - image: ", isempty(imgs) ? "none" : rel(imgs[1]))
     for c in get(comments, Symbol(fig.anchor), Comment[])
         println(io, "  - note (", c.author, "): ", c.text)
     end
@@ -586,16 +571,16 @@ function _agent_md_code(io, blk)
 end
 
 # A container's content in agent.md, in declaration order: one method per node type, so a type
-# agent.md has no form for is an error naming it. `env` is (outdir, comments, as_table, rdiag).
-function _agent_md_content(io, c, outdir, comments, as_table, rdiag)
-    env = (; outdir, comments, as_table, rdiag)
+# agent.md has no form for is an error naming it. `env` is (outdir, comments, files, rdiag).
+function _agent_md_content(io, c, outdir, comments, files, rdiag)
+    env = (; outdir, comments, files, rdiag)
     foreach(((_, node),) -> _agent_md_node(io, node, env), _content_items(c))
     return nothing
 end
 _agent_md_node(io, node, env) = _unhandled_node("agent.md", node)
 _agent_md_node(io, p::Prose, env) = println(io, p.source)
 function _agent_md_node(io, f::Figure, env)
-    return _agent_md_fig(io, f, env.outdir, env.comments, env.as_table)
+    return _agent_md_fig(io, f, env.outdir, env.comments, env.files)
 end
 function _agent_md_node(io, t::Table, env)
     _agent_md_table(io, t)
@@ -604,7 +589,7 @@ end
 _agent_md_node(io, ::Check, env) = nothing   # listed under the container's verdict band, ahead
 _agent_md_node(io, b::CodeBlock, env) = _agent_md_code(io, b)
 function _agent_md_node(io, s::Section, env)   # a nested section, in declaration order
-    return _agent_md_section(io, s, env.outdir, env.comments, env.as_table, env.rdiag)
+    return _agent_md_section(io, s, env.outdir, env.comments, env.files, env.rdiag)
 end
 _agent_md_node(io, r::RawBlock, env) = println(io, "```html\n", r.html, "\n```")   # @raw, as written
 
@@ -644,7 +629,7 @@ function _agent_md_notes(io, anchor, comments)
     return nothing
 end
 
-function _agent_md_section(io, sec, outdir, comments, as_table, rdiag)
+function _agent_md_section(io, sec, outdir, comments, files, rdiag)
     println(
         io,
         "\n",
@@ -655,12 +640,12 @@ function _agent_md_section(io, sec, outdir, comments, as_table, rdiag)
     )
     _agent_md_verdict(io, sec)
     sec.summary === nothing || println(io, "_", sec.summary, "_")
-    _agent_md_content(io, sec, outdir, comments, as_table, rdiag)
+    _agent_md_content(io, sec, outdir, comments, files, rdiag)
     _agent_md_notes(io, sec.anchor, comments)
     return nothing
 end
 
-function _agent_markdown(doc::Document, outdir, comments, as_table, rdiag)
+function _agent_markdown(doc::Document, outdir, comments, files, rdiag)
     io = IOBuffer()
     isempty(doc.meta.title) || println(io, "# ", doc.meta.title)
     curpart = :__start__
@@ -687,7 +672,7 @@ function _agent_markdown(doc::Document, outdir, comments, as_table, rdiag)
         )
         _agent_md_verdict(io, pg)
         pg.summary === nothing || println(io, "_", pg.summary, "_")
-        _agent_md_content(io, pg, outdir, comments, as_table, rdiag)   # sections included, in order
+        _agent_md_content(io, pg, outdir, comments, files, rdiag)   # sections included, in order
         _agent_md_notes(io, pg.anchor, comments)
     end
     return String(take!(io))
@@ -717,7 +702,7 @@ function emit_document(
     # agent.json first: it materializes the figures agent.md then reads. agent.md ends with every
     # diagnostic, its own (a fallback heading) included.
     write(joinpath(outdir, "agent.json"), _agent_json(theme, doc, ctx))
-    md = _agent_markdown(doc, outdir, comments, figure_as_table(theme), rdiag)
+    md = _agent_markdown(doc, outdir, comments, ctx.files, rdiag)
     write(joinpath(outdir, "agent.md"), string(md, _agent_md_diagnostics(doc, rdiag)))
     return joinpath(outdir, "agent.json")
 end

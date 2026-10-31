@@ -86,6 +86,8 @@ end
         "\"depth\":1",                      # a page carries depth like a section
         "\"summary\":\"\"",                  # text the author did not write is the empty string
         "\"code_id\":\"",                    # a check points at its code block by id
+        "\"defined_at\":\"test/test_contract.jl:",   # where a node was written, from the project root
+        "\"data\":{\"path\":\"assets/figures/p1/",       # a figure's data file, described not inlined
         "\"kind\":\"raw\"",
         "\"raws\":[{\"id\":\"p2_raw_",
         "\"diagnostics\":[{\"severity\":\"ERROR\",\"item\":\"p2_fig_",
@@ -93,7 +95,13 @@ end
         @test occursin(token, emitted)
     end
     # one naming scheme: no anchor beside the id, and no null standing in for unwritten text
-    for token in ("\"anchor\":", "\"code_anchor\":", "\"summary\":null", "\"desc\":null")
+    for token in (
+        "\"anchor\":",
+        "\"code_anchor\":",
+        "\"summary\":null",
+        "\"desc\":null",
+        "\"table\":{",
+    )
         @test !occursin(token, emitted)
     end
 end

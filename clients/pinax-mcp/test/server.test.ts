@@ -36,17 +36,17 @@ test("tools list and run end-to-end over MCP (figures + tables)", { timeout: 200
     assert.match(outline, /Demo Atlas/);
     assert.match(outline, /\[table p1_tbl1\]/); // tables in the outline
 
-    // a figure now carries an inline data table (figure_as_table)
+    // a figure describes its data file; the points themselves come from get_figure_data
     const fig = JSON.parse(text(await client.callTool({ name: "get_unit", arguments: { id: "p1_fig1" } })));
     assert.equal(fig.caption, "magnetization vs temperature");
-    assert.deepEqual(fig.table.header, ["series", "x", "y"]);
+    assert.deepEqual(fig.data.columns, ["series", "T", "M"]);
 
     // a @table node is addressable the same way
     const tbl = JSON.parse(text(await client.callTool({ name: "get_unit", arguments: { id: "p1_tbl1" } })));
     assert.deepEqual(tbl.header, ["N", "Tc"]);
 
     // get_figure_data returns the full CSV behind the plot
-    assert.match(text(await client.callTool({ name: "get_figure_data", arguments: { id: "p1_fig1" } })), /series,x,y/);
+    assert.match(text(await client.callTool({ name: "get_figure_data", arguments: { id: "p1_fig1" } })), /series,T,M/);
     // error path: a unit with no figure data (a @table) -> isError
     const noData = await client.callTool({ name: "get_figure_data", arguments: { id: "p1_tbl1" } });
     assert.equal(noData.isError, true);
