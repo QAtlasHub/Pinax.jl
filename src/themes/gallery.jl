@@ -973,7 +973,7 @@ end
 function _emit_cards(doc::Document, io, outdir, bookmarks; rich::Bool=false)
     card(pg) = begin
         nfig = _page_nfigs(pg)
-        nsec = length(pg.sections)
+        nsec = length(_all_sections(pg))
         print(io, "<a class=\"pinax-card\" href=\"", pg.anchor, ".html\">")
         _card_thumb!(io, pg, outdir, bookmarks)
         print(
@@ -987,10 +987,12 @@ function _emit_cards(doc::Document, io, outdir, bookmarks; rich::Bool=false)
             print(io, "<div class=\"card-summary\">", _esc(pg.summary), "</div>")
         if rich && !isempty(pg.sections)
             print(io, "<div class=\"card-sections\">")
-            for sec in pg.sections
+            for sec in _all_sections(pg)
                 print(
                     io,
-                    "<div class=\"sec-item\"><span class=\"sec-name\">",
+                    "<div class=\"sec-item\"",
+                    _toc_indent(sec, 0),
+                    "><span class=\"sec-name\">",
                     _esc(sec.title),
                     "</span>",
                 )
@@ -1033,7 +1035,7 @@ end
 function _emit_toc_index(doc::Document, io)
     item(pg) = begin
         nfig = _page_nfigs(pg)
-        nsec = length(pg.sections)
+        nsec = length(_all_sections(pg))
         print(
             io,
             "<li><a href=\"",

@@ -69,3 +69,31 @@ Pinax.figure_formats(::_TableOnlyTeX) = Symbol[:table]
         end
     end
 end
+
+# The index counts a page's whole section tree, as its Contents nav and figure count do: a nested
+# section is a section, and the :rich card lists it.
+@testset "index: section counts and the :rich card cover nested sections" begin
+    tmp = mktempdir()
+    svg = joinpath(tmp, "f.svg")
+    write(svg, "<svg xmlns='http://www.w3.org/2000/svg'><rect/></svg>")
+    function doc!(level)
+        Pinax.reset!(; title="Nested")
+        @pinaxsetup index = level
+        @page :a "A" begin
+            @section :outer "OUTER_T" begin
+                @section :inner "INNER_T" begin
+                    @figure svg id = :f
+                end
+            end
+        end
+        @page :b "B" begin
+            @desc "b"
+        end
+    end
+    for level in (:toc, :cards, :rich)
+        doc!(level)
+        idx = read(Pinax.render(; out=joinpath(tmp, string(level))), String)
+        @test occursin("2 sections · 1 figure", idx)
+        level === :rich && @test occursin("INNER_T", idx)
+    end
+end
