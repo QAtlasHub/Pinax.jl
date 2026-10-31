@@ -4,7 +4,7 @@ using Test
 # A check's margin from `@test isapprox(…)` (#115, #116). The deviation and tolerance reproduce the
 # bound isapprox actually applies, |x-y| <= max(atol, rtol*max(|x|,|y|)), recorded as whichever term
 # governs, so `delta <= tol` agrees with the runner's verdict. Values with no margin (non-finite,
-# zero tolerance) become a flagged 1/0 indicator — never a fabricated number or a JSON string.
+# zero tolerance) become an indicator check with no numbers — never a fabricated number.
 
 _chk(ex) = Pinax._check_from(ex, string(ex), Base.eval(ex), 1)
 _chk(s::AbstractString, passed) = Pinax._check_from(Meta.parse(s), s, passed, 1)
@@ -43,16 +43,16 @@ _chk(s::AbstractString, passed) = Pinax._check_from(Meta.parse(s), s, passed, 1)
             ("isapprox(1.0, Inf; rtol = 0.1)", "Inf"),
         )
             c = _chk(s, false)
-            @test c.indicator
+            @test c.kind === :indicator
             @test !c.pass
-            @test all(isfinite, (c.got, c.want, c.delta, c.tol))   # JSON numbers, never "NaN"
+            @test all(isnan, (c.got, c.want, c.delta, c.tol))   # no numbers: null in agent.json
             @test occursin(tok, c.label) && occursin("no margin", c.label)
         end
     end
 
     @testset "a zero tolerance has no margin either" begin
         c = _chk(:(isapprox(0.0, 0.0; atol=0.0, rtol=0.0)))
-        @test c.indicator && c.pass
+        @test c.kind === :indicator && c.pass
         @test occursin("no margin", c.label)
     end
 
@@ -69,7 +69,7 @@ _chk(s::AbstractString, passed) = Pinax._check_from(Meta.parse(s), s, passed, 1)
 
                     atol == 0 && rtol == 0 && continue
                     c = _chk(:(isapprox($x, $y; atol=($atol), rtol=($rtol))))
-                    c.indicator && continue
+                    c.kind === :indicator && continue
                     n += 1
                     disagree += ((c.delta <= c.tol) != c.pass)
                 end

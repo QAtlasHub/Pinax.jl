@@ -177,21 +177,28 @@ _cellstr(x) = x === missing ? "" : string(x)
 
 """
 A single PASS/FAIL check (a `Test` `@test` recorded into a container) — one assertion of a computed
-value against a reference. `delta` is the deviation under the term that governs the bound — `:abs`
-is `|got - want|`, `:rel` is `|got - want| / max(|got|, |want|)`, as `isapprox` defines them. `pass`
-is what `Test` recorded for the assertion and is never recomputed from `delta` and `tol` (`isapprox`
-combines `atol` and `rtol` in a way one `kind` cannot reproduce). An `indicator` check (no recoverable numbers) is a 1/0 and carries no
-margin. Renders to a row of the container's check table, a LaTeX tabular row, and a native-typed
-JSON object in `agent.json` (the machine-readable verdict).
+value against a reference. `kind` says what the numbers are:
+
+- `:abs` — `delta` is `|got - want|`;
+- `:rel` — `delta` is `|got - want| / max(|got|, |want|)`, as `isapprox` defines it;
+- `:indicator` — the assertion has no recoverable numbers (`@test x == 1`, a non-finite value, a zero
+  tolerance): `got`, `want`, `delta` and `tol` are `NaN`, it has no margin, and it still counts in
+  every verdict.
+
+The constructor refuses any other kind, an indicator with numbers and an `:abs` / `:rel` check
+without them. `pass` is what `Test` recorded for the assertion and is never recomputed from `delta`
+and `tol` (`isapprox` combines `atol` and `rtol` in a way one `kind` cannot reproduce). Renders to a
+row of the container's check table, a LaTeX tabular row, and a native-typed JSON object in
+`agent.json` (the machine-readable verdict).
 """
 mutable struct Check
     id::Symbol
     label::String
-    got::Float64
-    want::Float64
-    delta::Float64     # resolved (rel or abs) deviation
-    tol::Float64
-    kind::Symbol       # :rel or :abs (resolved; never :auto in the struct)
+    const got::Float64
+    const want::Float64
+    const delta::Float64     # resolved (rel or abs) deviation
+    const tol::Float64
+    const kind::Symbol       # :abs, :rel or :indicator (never :auto)
     pass::Bool
     source::String     # "file:line" of the assertion (issue #69 I), for every recorded @test, so the
     # report says WHERE, not just what; "" when Test gives no location.
@@ -200,17 +207,39 @@ mutable struct Check
     # reference to it, never a second copy of the source; nothing when there is none.
     reported::Bool        # already handed to an enclosing ordinary testset (#173): a failing check is
     # reported exactly once, by that suite when there is one, else by `render`.
-    indicator::Bool       # a 1/0 pass indicator (a `@test` with no recoverable numbers), not a margin
+    function Check(id, label, got, want, delta, tol, kind, pass, source, code_id, reported)
+        _check_kind(kind, (got, want, delta, tol))
+        return new(id, label, got, want, delta, tol, kind, pass, source, code_id, reported)
+    end
 end
 # The shorter positional forms: source defaults to "", code_id to nothing, reported to false.
-# `indicator` is the full form's alone.
-function Check(
-    id, label, got, want, delta, tol, kind, pass, source="", code_id=nothing, reported=false
-)
-    return Check(
-        id, label, got, want, delta, tol, kind, pass, source, code_id, reported, false
-    )
+function Check(id, label, got, want, delta, tol, kind, pass, source="", code_id=nothing)
+    return Check(id, label, got, want, delta, tol, kind, pass, source, code_id, false)
 end
+
+const _CHECK_KINDS = (:abs, :rel, :indicator)
+
+# A check's kind, and whether its numbers fit it: an indicator has none (all NaN), a margin check
+# has all four.
+function _check_kind(kind, nums)
+    kind in _CHECK_KINDS || error(
+        "Pinax: check kind $(repr(kind)) is not one of ",
+        join(repr.(_CHECK_KINDS), ", "),
+    )
+    if kind === :indicator
+        all(isnan, nums) || error(
+            "Pinax: an :indicator check has no numbers — got, want, delta and tol are NaN",
+        )
+    elseif any(isnan, nums)
+        error("Pinax: a $(repr(kind)) check needs got, want, delta and tol; one is NaN")
+    end
+    return kind
+end
+
+# How much of its tolerance a check spent (`delta / tol`), or nothing for an indicator, which has no
+# numbers. Every margin view — the page's margin figure, a sweep's figures, the per-file worst
+# margin — reads it through here, so none of them draws an indicator.
+_margin(c::Check) = c.kind === :indicator ? nothing : (c.tol > 0 ? c.delta / c.tol : 0.0)
 
 # FNV-1a (32-bit) in base 36: the same on every machine and Julia version (unlike `Base.hash`), so the
 # ids built from it are stable across runs (#123).

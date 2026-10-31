@@ -173,16 +173,18 @@ function emit_code(::AgentBase, blk, ctx)
     return nothing
 end
 
-# One check -> a JSON object with native-typed numerics (a tool reads 4.6e-5, not "4.6e-5").
+# One check -> a JSON object with native-typed numerics (a tool reads 4.6e-5, not "4.6e-5"); an
+# indicator has no numbers, so they are null.
 function emit_check(::AgentBase, chk, ctx)
+    num(x) = chk.kind === :indicator ? "null" : _agent_jsonval(x)
     _json_object(
         ctx.io,
         "id" => _jsonstr(string(chk.id)),
         "label" => _jsonstr(chk.label),
-        "got" => _agent_jsonval(chk.got),
-        "want" => _agent_jsonval(chk.want),
-        "delta" => _agent_jsonval(chk.delta),
-        "tol" => _agent_jsonval(chk.tol),
+        "got" => num(chk.got),
+        "want" => num(chk.want),
+        "delta" => num(chk.delta),
+        "tol" => num(chk.tol),
         "kind" => _jsonstr(string(chk.kind)),
         "pass" => _agent_jsonval(chk.pass),
         "defined_at" => _jsonstr(chk.source),   # where the @test was written, `path:line`
@@ -413,7 +415,8 @@ function _agent_md_table(io, tbl)
     return nothing
 end
 
-# A single check as a markdown list line (the LLM read view): a ✓/✗ badge + the numbers.
+# A single check as a markdown list line (the LLM read view): a PASS/FAIL badge + the numbers, or
+# none for an indicator, which has none.
 function _agent_md_check(io, chk)
     badge = chk.pass ? "PASS" : "FAIL"
     println(
@@ -424,6 +427,15 @@ function _agent_md_check(io, chk)
         chk.id,
         " — ",
         chk.label,
+        _agent_md_numbers(chk),
+        isempty(chk.source) ? "" : string(" — defined at ", chk.source),
+    )
+    return nothing
+end
+# A check's numbers in agent.md, or a note that an indicator has none.
+function _agent_md_numbers(chk)
+    chk.kind === :indicator && return " (pass/fail only)"
+    return string(
         ": got ",
         chk.got,
         ", want ",
@@ -435,9 +447,7 @@ function _agent_md_check(io, chk)
         " ",
         chk.kind,
         ")",
-        isempty(chk.source) ? "" : string(" — defined at ", chk.source),
     )
-    return nothing
 end
 
 # A @code block in agent.md: a line naming it (id, caption, where it was written), the fenced source,

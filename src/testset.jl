@@ -519,8 +519,6 @@ function _tofloat(x::Expr)
 end
 _tofloat(x::Any) = nothing
 
-_margin(c::Check) = c.tol > 0 ? c.delta / c.tol : 0.0
-
 # A stable fingerprint of the data a DERIVED figure (the margin / convergence SVGs) draws, folded into
 # the figure's `code` so the render cache (which keys on code+params, computed without calling `gen`)
 # re-materializes the SVG iff the underlying checks changed (issue #69 L). Without it, `code=""` gives
@@ -535,7 +533,7 @@ end
 # ── the checks ───────────────────────────────────────────────────────
 
 # One Check per @test. A numeric `isapprox` keeps its real got/want/tol (that is the whole point);
-# anything else is encoded as a 1/0 indicator so that EVERY assertion still shows up in the
+# anything else is an indicator check (no numbers) so that EVERY assertion still shows up in the
 # machine-readable verdict rather than silently vanishing.
 #
 # `passed` is the TEST RUNNER's verdict, never recomputed from delta<=tol: isapprox combines atol and
@@ -564,23 +562,9 @@ function _check_from(expr, label::AbstractString, passed::Bool, i::Int)
     return Check(id, String(label), got, want, abs(got - want) / scale, rtol, :rel, passed)
 end
 
-# A 1/0 pass indicator: every assertion still shows up in the verdict, but carries no margin.
+# An indicator: every assertion still shows up in the verdict, but it has no numbers and no margin.
 function _indicator_check(id, label, passed)
-    got = passed ? 1.0 : 0.0
-    return Check(
-        id,
-        String(label),
-        got,
-        1.0,
-        abs(got - 1.0),
-        0.5,
-        :abs,
-        passed,
-        "",
-        nothing,
-        false,
-        true,
-    )
+    return Check(id, String(label), NaN, NaN, NaN, NaN, :indicator, passed)
 end
 
 # ── the test tree (Test-free) ────────────────────────────────────────
@@ -681,19 +665,15 @@ function _summary_line(n)
            t
 end
 
-# The largest delta/tol among this subtree's NUMERIC checks — how close the file came to red.
+# The largest delta/tol among this subtree's checks — how close the file came to red — or nothing
+# when none has a margin (an indicator has none).
 function _worst_margin(n)
-    worst = nothing
-    for c in n.checks
-        c.indicator && continue   # a 1/0 pass indicator carries no margin
-        m = _margin(c)
-        worst = worst === nothing ? m : max(worst, m)
-    end
+    ms = Float64[m for m in (_margin(c) for c in n.checks) if m !== nothing]
     for ch in n.children
         m = _worst_margin(ch)
-        m === nothing || (worst = worst === nothing ? m : max(worst, m))
+        m === nothing || push!(ms, m)
     end
-    return worst
+    return isempty(ms) ? nothing : maximum(ms)
 end
 
 # ── the margin profile figure ────────────────────────────────────────
@@ -764,15 +744,18 @@ _fmt_margin(m) = m >= 10 ? "$(round(Int, m))×" : "$(round(m; digits=2))"
 # and the caption says how many of how many are shown. The full per-check data is still in `agent.json`.
 const _MAX_MARGIN_BARS = 40
 
-# The figure for one page's checks: how far each assertion sat from its own tolerance.
+# The figure for one page's checks: how far each assertion sat from its own tolerance. An indicator
+# has no margin and is not drawn; a page of indicators alone has no margin figure.
 function _push_margin_figure!(page_id::Symbol, checks::Vector{Check})
-    isempty(checks) && return nothing
-    total = length(checks)
+    numbered = [i for (i, c) in enumerate(checks) if _margin(c) !== nothing]
+    isempty(numbered) && return nothing
+    total = length(numbered)
     # the checks drawn, by their number on the page, in that order — capped or not
     xs = if total <= _MAX_MARGIN_BARS
-        collect(1:total)
+        numbered
     else
-        sort(partialsortperm(checks, 1:_MAX_MARGIN_BARS; by=_margin, rev=true))
+        worst = partialsortperm(checks[numbered], 1:_MAX_MARGIN_BARS; by=_margin, rev=true)
+        sort(numbered[worst])
     end
     shown = checks[xs]
     capped = length(shown) < total
@@ -792,6 +775,9 @@ function _push_margin_figure!(page_id::Symbol, checks::Vector{Check})
     else
         ""
     end
+    total < length(checks) && (
+        cap_note *= " A check with no numbers (pass/fail only) has no margin and is not drawn."
+    )
     _push_figure!(;
         gen=() -> _margin_svg(shown, tempname() * ".svg"),
         code=_checks_fingerprint(shown),   # data-keyed so a rebuild re-draws iff the checks moved (L)
@@ -976,7 +962,9 @@ function _emit_sweep!(n, page_when::Function, acc::Vector{Check})
     end
     qi = Ref(0)
     for (label, pts) in _group_quantities(samples)
-        _push_sweep_figures!(c.id, qi, label, pts)
+        # an indicator has no value to plot and no margin: only the samples with numbers are drawn
+        drawn = filter(p -> _margin(p[2]) !== nothing, pts)
+        isempty(drawn) || _push_sweep_figures!(c.id, qi, label, drawn)
     end
     for (bind, chk) in samples
         tagged = _copy_check(chk; label=string(chk.label, "  [", _binding_str(bind), "]"))
@@ -2007,19 +1995,16 @@ end
 # `id` is deliberately NOT dumped: it is assigned at render time (t1, t2, …) so that merging several
 # shards produces one clean numbering rather than N colliding ones.
 function _check_to_dict(c::Check)
-    d = Dict{String,Any}(
-        "label" => c.label,
-        "got" => c.got,
-        "want" => c.want,
-        "delta" => c.delta,
-        "tol" => c.tol,
-        "kind" => String(c.kind),
-        "pass" => c.pass,
-    )
+    d = Dict{String,Any}("label" => c.label, "kind" => String(c.kind), "pass" => c.pass)
+    # an indicator has no numbers, and TOML has no NaN: they are absent
+    if c.kind !== :indicator
+        merge!(
+            d, Dict("got" => c.got, "want" => c.want, "delta" => c.delta, "tol" => c.tol)
+        )
+    end
     isempty(c.source) || (d["source"] = c.source)   # carry WHERE it failed across a shard dump
     # …and the REFERENCE to the code block that produced it (the block itself rides `n.codes`).
     c.code_id === nothing || (d["code_id"] = String(c.code_id))
-    c.indicator && (d["indicator"] = true)
     return d
 end
 
@@ -2065,24 +2050,31 @@ function _dump_entry(n::TestNode, e::AbstractDict, j::Int, at)
 end
 
 function _dict_to_check(d::AbstractDict, at::AbstractString="a test dump")
-    kind = d["kind"]
-    kind in ("abs", "rel") || error(
-        "Pinax: $(at): check \"$(d["label"])\" has kind \"$(kind)\" — a check is abs or rel",
-    )
+    kind = _dumped_kind(d, at)
+    num(k) = kind === :indicator ? NaN : Float64(d[k])
     return Check(
         :t0,                        # renumbered on render
         d["label"],
-        Float64(d["got"]),
-        Float64(d["want"]),
-        Float64(d["delta"]),
-        Float64(d["tol"]),
-        Symbol(kind),
+        num("got"),
+        num("want"),
+        num("delta"),
+        num("tol"),
+        kind,
         d["pass"],
         get(d, "source", ""),
         _dumped_code_id(d),
-        false,
-        get(d, "indicator", false),
     )
+end
+
+# A dumped check's kind, checked where it is read. An older dump wrote an indicator as kind "abs"
+# with `indicator = true` beside made-up numbers, which are dropped.
+function _dumped_kind(d::AbstractDict, at)
+    get(d, "indicator", false) === true && return :indicator
+    kind = d["kind"]
+    kind in ("abs", "rel", "indicator") || error(
+        "Pinax: $(at): check \"$(d["label"])\" has kind \"$(kind)\" — a check is abs, rel or indicator",
+    )
+    return Symbol(kind)
 end
 
 # A dumped check's code reference: `code_id`, or the anchor an older dump wrote (`code_anchor`,

@@ -1473,6 +1473,16 @@ function emit_check(::GalleryBase, chk, ctx)
         "\" title=\"the code that produced this check\">code</a>",
     )
     print(io, "</td>")
+    _emit_check_numbers(io, chk)
+    println(io, "</tr>")
+    return nothing
+end
+
+# A check row's number cells: got | want | Δ vs tol (kind), or a dash in each for an indicator, which
+# has no numbers.
+function _emit_check_numbers(io, chk)
+    chk.kind === :indicator &&
+        return print(io, "<td>—</td><td>—</td><td>— (pass/fail only)</td>")
     print(io, "<td>", _esc(_cellstr(chk.got)), "</td>")
     print(io, "<td>", _esc(_cellstr(chk.want)), "</td>")
     print(
@@ -1485,7 +1495,6 @@ function emit_check(::GalleryBase, chk, ctx)
         _esc(string(chk.kind)),
         ")</td>",
     )
-    println(io, "</tr>")
     return nothing
 end
 

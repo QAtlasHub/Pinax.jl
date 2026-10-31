@@ -119,9 +119,10 @@ end
         )
         @test _check_for(atol_pass, 1).pass
 
-        # A non-numeric assertion still becomes a check — every @test must show up somewhere.
+        # A non-numeric assertion still becomes a check — every @test must show up somewhere — but
+        # an indicator, with no numbers rather than made-up ones.
         b = _check_for(Test.Pass(:test, :x, :(1 + 1 == 2), nothing), 2)
-        @test b.pass && b.got == 1.0
+        @test b.pass && b.kind === :indicator && isnan(b.got)
     end
 
     @testset "atol governs when there is no usable reference" begin

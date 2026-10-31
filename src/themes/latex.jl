@@ -208,6 +208,9 @@ function emit_code(::LaTeXBase, blk, ctx)
     return nothing
 end
 
+# A check's number as a cell: empty for an indicator, which has no numbers.
+_latex_check_num(chk, x) = chk.kind === :indicator ? "" : _texesc(_cellstr(x))
+
 # One check -> a tabular row: id, label, got, want, Δ, tol, PASS/FAIL (cells escaped as text).
 function emit_check(::LaTeXBase, chk, ctx)
     io = ctx.io
@@ -219,10 +222,10 @@ function emit_check(::LaTeXBase, chk, ctx)
                 _texesc(
                     isempty(chk.source) ? chk.label : string(chk.label, " @ ", chk.source)
                 ),
-                _texesc(_cellstr(chk.got)),
-                _texesc(_cellstr(chk.want)),
-                _texesc(_cellstr(chk.delta)),
-                _texesc(_cellstr(chk.tol)),
+                (
+                    _latex_check_num(chk, x) for
+                    x in (chk.got, chk.want, chk.delta, chk.tol)
+                )...,
                 chk.pass ? "PASS" : "FAIL",
             ),
             " & ",
