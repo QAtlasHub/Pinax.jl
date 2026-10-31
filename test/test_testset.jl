@@ -945,6 +945,33 @@ end
         @test count(f -> occursin("test_foo_jl", f) && endswith(f, ".html"), files) == 2
         @test occursin("1/1 PASS", md) && occursin("0/1 FAIL", md)   # per-cell verdict, not merged
 
+        # a cell sharded into several dumps is one part: its shards merge as shards do, then the
+        # cell is a part (two cells × two shards, each shard holding one file)
+        shard(file, pass) = TestNode(
+            "root";
+            children=[
+                TestNode(file; checks=[Check(:t, "c", 1.0, 1.0, 0.0, 0.5, :abs, pass)])
+            ],
+        )
+        dumps = String[]
+        for (cell, pass) in (("cell A", true), ("cell B", false)),
+            (k, file) in enumerate(("t1.jl", "t2.jl"))
+
+            withenv("PINAX_TEST_MATRIX" => cell) do
+                push!(
+                    dumps,
+                    Pinax.dump_test_report(
+                        shard(file, pass), joinpath(dir, "$(cell)_$(k).toml")
+                    ),
+                )
+            end
+        end
+        render_test_report(dumps; out=joinpath(dir, "m2"), title="Matrix")
+        doc = Pinax.current_document()
+        @test [first(p) for p in doc.parts] == [:cell_cell_a, :cell_cell_b]
+        @test count(pg -> pg.part === :cell_cell_a, doc.pages) == 2   # both of cell A's files
+        @test allunique(n.id for n in Pinax.node_ids(doc))
+
         # a single-cell (non-matrix) run is self-identifying: the cell is a provenance row
         withenv("PINAX_TEST_MATRIX" => "julia 1.11 · ubuntu") do
             @test any(

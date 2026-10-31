@@ -1540,17 +1540,20 @@ function render_test_report(
     if length(unique(c for c in cells if !isempty(c))) >= 2
         return _render_matrix(roots, cells; title=title, kwargs...)
     end
-    # SHARDS: the shards partition the test FILES, so their children are disjoint and concatenating is
-    # the whole merge (invariant VI). Elapsed time is summed, not maxed: CPU time spent, not wall clock.
-    merged = TestNode(
+    return render_test_report(_merge_shards(roots, title); title=title, kwargs...)
+end
+
+# SHARDS partition the test FILES, so their children are disjoint and concatenating is the whole merge
+# (invariant VI). Elapsed time is summed, not maxed: CPU time spent, not wall clock.
+function _merge_shards(roots, title)
+    return TestNode(
         title;
         elapsed=sum(r -> isnan(r.elapsed) ? 0.0 : r.elapsed, roots; init=0.0),
-        children=reduce(vcat, (r.children for r in roots)),
-        checks=reduce(vcat, (r.checks for r in roots)),
+        children=reduce(vcat, (r.children for r in roots); init=TestNode[]),
+        checks=reduce(vcat, (r.checks for r in roots); init=Check[]),
         nbroken=sum(r -> r.nbroken, roots; init=0),
         nerror=sum(r -> r.nerror, roots; init=0),
     )
-    return render_test_report(merged; title=title, kwargs...)
 end
 
 # A CI matrix merge (issue #69 K): each cell is a `@part` holding that cell's file pages (ids qualified
@@ -1565,7 +1568,13 @@ function _render_matrix(
     page_when::Function=_looks_like_a_file,
     overview=nothing,
 )
-    pairs = [(r, c) for (r, c) in zip(roots, cells) if !isempty(c)]
+    # A cell may arrive as several shard dumps: merge each cell's shards first (they partition its
+    # files), so every cell is one part.
+    order = unique(c for c in cells if !isempty(c))
+    pairs = [
+        (_merge_shards([r for (r, rc) in zip(roots, cells) if rc == c], c), c) for
+        c in order
+    ]
     reset!(; title=title)
     seen = Set{Symbol}((:overview, :per_file, :provenance))
     allfiles = reduce(vcat, (r.children for (r, _) in pairs); init=TestNode[])
