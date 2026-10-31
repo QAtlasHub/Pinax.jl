@@ -97,15 +97,15 @@ function _read_comments(doc, path::AbstractString, rdiag)
     comments, bookmarks, problems = _parse_comments(path)
     append!(rdiag, problems)
     kinds = Dict(n.id => n.kind for n in node_ids(doc))
-    # A comment is stored under a node's id (the API, pinax-mcp) or its anchor (the gallery writes
-    # what it shows); the faces look a node's comments up by its anchor, so key them all that way.
+    # A comment or bookmark is stored under a node's id (the API, pinax-mcp) or its anchor (the
+    # gallery writes what it shows); the faces look a node up by its anchor, so key them all that way.
     byanchor = Dict{Symbol,Symbol}(Symbol(_anchor(id)) => id for id in keys(kinds))
+    askey(k) = haskey(kinds, k) ? Symbol(_anchor(k)) : k
+    bookmarks = Set{Symbol}(askey(k) for k in bookmarks)
     stored = comments
     comments = Dict{Symbol,Vector{Comment}}()
     for k in sort!(collect(keys(stored)))   # a node's turns under both keys are kept, id's first
-        append!(
-            get!(comments, haskey(kinds, k) ? Symbol(_anchor(k)) : k, Comment[]), stored[k]
-        )
+        append!(get!(comments, askey(k), Comment[]), stored[k])
     end
     for key in sort!(collect(keys(comments)))
         id = get(byanchor, key, key)

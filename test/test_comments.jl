@@ -65,6 +65,17 @@ using Test
         @test occursin("class=\"section bookmarked\"", html)
     end
 
+    @testset "a bookmark reaches its section by id, whatever characters the id has" begin
+        f = joinpath(tmp, "cm4u.toml")
+        Pinax.set_bookmark!(f, :α_sec, true)   # stored under the id; its anchor is hashed
+        Pinax.reset!()
+        @page :p "P" begin
+            @section :α_sec "Alpha" begin end
+        end
+        html = read(Pinax.render(; out=site("s4u"), comments_file=f), String)
+        @test occursin("class=\"section bookmarked\"", html)
+    end
+
     @testset "no comments file -> no comment markup" begin
         Pinax.reset!()
         @page :p "P" begin
