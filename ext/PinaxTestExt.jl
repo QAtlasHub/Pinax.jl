@@ -387,9 +387,20 @@ function _finalize_test_capture!(root::PinaxTestSet)
     # do nothing (no render, no print, no exit) so their stdout stays clean for `Pkg` to parse.
     n = root.node
     (isempty(n.children) && isempty(n.checks)) && return nothing
-    _emit_root(root)
-    nfail, nerr = _nfail(n), _nerror(n)
-    (nfail + nerr > 0) && exit(1)   # red suite → nonzero exit (finish's throw can't fire in atexit)
+    # Counted BEFORE the render: a red suite exits nonzero even when its report cannot be written
+    # (finish's throw can't fire in atexit, and an error raised in an atexit hook leaves the code 0).
+    red = _nfail(n) + _nerror(n) > 0
+    try
+        _emit_root(root)
+    catch err
+        red || rethrow()
+        # the exit below would discard the error: say it first
+        @error "Pinax: the test report could not be written" exception = (
+            err, catch_backtrace()
+        )
+    finally
+        red && exit(1)
+    end
     return nothing
 end
 

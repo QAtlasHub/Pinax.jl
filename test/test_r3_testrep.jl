@@ -134,4 +134,27 @@ const R3Ext = Base.get_extension(Pinax, :PinaxTestExt)
         @test [c.outcome for c in node.checks[2:end]] == [:error]
         @test !any(c -> c.label == "RELABELED", node.checks)
     end
+
+    @testset "a red suite exits nonzero even when its report cannot be written" begin
+        dir = mktempdir()
+        blocker = joinpath(dir, "not-a-dir")
+        write(blocker, "")   # `out` under a file: the render throws
+        script = joinpath(dir, "run.jl")
+        write(
+            script,
+            """
+            using Pinax, Test
+            Ext = Base.get_extension(Pinax, :PinaxTestExt)
+            root = Ext.PinaxTestSet("T"; out=$(repr(joinpath(blocker, "rep"))))
+            bad = Pinax.Check(:t, "c", 2.0, 1.0, 1.0, 0.5, :abs, :fail)
+            push!(root.node.children, Pinax.TestNode("test_red.jl"; checks=[bad]))
+            atexit(() -> Ext._finalize_test_capture!(root))
+            """,
+        )
+        cmd = `$(Base.julia_cmd()) --startup-file=no --project=$(dirname(Base.active_project())) $script`
+        log = tempname()
+        p = run(pipeline(ignorestatus(cmd); stdout=log, stderr=log))
+        @test p.exitcode != 0
+        @test occursin("could not be written", read(log, String))   # and says why
+    end
 end
