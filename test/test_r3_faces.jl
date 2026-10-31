@@ -1,5 +1,6 @@
 using Pinax
 using Test
+using JSON: JSON
 
 # Round-3 review findings on the faces: each testset pins one finding.
 
@@ -47,4 +48,37 @@ end
     # agent.json already says so; the two faces agree
     aj = read(joinpath(tmp, "agent.json"), String)
     @test occursin("\"id\":\"after\",\"title\":\"After\",\"depth\":1,\"part\":null", aj)
+end
+
+@testset "agent.json: a number JSON cannot write bare is a string" begin
+    tmp = mktempdir()
+    Pinax.reset!(; title="T")
+    @page :p "P" begin
+        @table [(1 // 3, π, Float32(0.5), Float32(1.0e10), 2, 0.25)] header = [
+            "q", "pi", "f32", "f32e", "int", "f64"
+        ]
+    end
+    Pinax.render(; out=joinpath(tmp, "a"), theme=:agent)
+    aj = read(joinpath(tmp, "a", "agent.json"), String)
+    doc = JSON.parse(aj)                                   # parses at all
+    row = doc["pages"][1]["tables"][1]["rows"][1]
+    @test row[1] == "1//3"                                 # a Rational: its Julia form, quoted
+    @test row[2] == "π"                                    # an Irrational: likewise
+    @test row[3] == 0.5                                    # a Float32 is still a number…
+    @test row[4] == 1.0e10                                 # …with no `f0` suffix
+    @test row[5] == 2
+    @test row[6] == 0.25
+    # the human faces show the same text for the cells agent.json quotes
+    g = read(Pinax.render(; out=joinpath(tmp, "g"), theme=:gallery), String)
+    @test occursin("<td>1//3</td>", g) && occursin("<td>π</td>", g)
+    lx = read(Pinax.render(; out=joinpath(tmp, "l"), theme=:latex), String)
+    @test occursin("1//3 & π", lx)
+end
+
+@testset "agent.json: every float is written as a JSON number" begin
+    for v in (Float32(0.5), Float32(1.0e10), Float16(0.5), 0.1, big"1.5", -0.0)
+        @test JSON.parse(Pinax._agent_jsonval(v)) == v
+    end
+    @test Pinax._agent_jsonval(NaN) == "\"NaN\""          # not a JSON number: quoted
+    @test Pinax._agent_jsonval(1 // 3) == "\"1//3\""
 end

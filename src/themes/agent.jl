@@ -44,16 +44,22 @@ function AgentCtx(io, outdir, comments, cache, rdiag)
     return AgentCtx(io, outdir, comments, cache, rdiag, Dict{Symbol,Any}())
 end
 
-# A JSON scalar for a param/cell value: numbers/bools stay native (a tool reads 16, not "16");
+# A JSON scalar for a param/cell value: integers and floats stay native (a tool reads 16, not "16");
 # missing/nothing map to JSON null; NaN/Inf are not valid JSON numbers so they're quoted; anything
-# else is stringified.
+# else is stringified — a `Rational` or an `Irrational` too (`1//3` and `π` are not JSON numbers),
+# which is the text the gallery and LaTeX cells show.
 _agent_jsonval(::Missing) = "null"
 _agent_jsonval(::Nothing) = "null"
 _agent_jsonval(v::Bool) = v ? "true" : "false"
 _agent_jsonval(v::Integer) = string(v)
-_agent_jsonval(v::Real) = isfinite(v) ? string(v) : _jsonstr(string(v))
+_agent_jsonval(v::AbstractFloat) = isfinite(v) ? _json_float(v) : _jsonstr(string(v))
 _agent_jsonval(v::AbstractString) = _jsonstr(v)
 _agent_jsonval(v) = _jsonstr(string(v))
+
+# A finite float as a JSON number. Julia prints a `Float64` or a `BigFloat` as one; a narrower float
+# (`0.5f0`, `Float16(0.5)`) is printed through `Float64`, which holds its value exactly.
+_json_float(v::Union{Float64,BigFloat}) = string(v)
+_json_float(v::AbstractFloat) = string(Float64(v))
 
 # A JSON array on `io`: `[`, then each element as `f(x)` prints it, comma-separated, then `]`.
 function _json_array(f, io, xs)
