@@ -324,14 +324,10 @@ function _file_ast(file::AbstractString)
     end
 end
 
-"""
-    _test_code_block(file, line) -> CodeBlock | nothing
-
-The `@code` artifact for the assertion at `file:line` — the code that produced it. The id hashes
-the code text (#123), so shifted lines never move it, and every sample of a `@testset for` (the same
-code, N iterations) maps to ONE block: the sweep shows its specification once, not once per point.
-"""
-function _test_code_block(file::AbstractString, line::Integer)
+# The statement written at `file:line`: the innermost block holding a statement there, that
+# statement's index in it, and the file's lines — or `nothing` when the file is not readable (a REPL,
+# a Documenter `@example`) or no statement starts at that line.
+function _code_site(file, line)
     fa = _file_ast(file)
     fa === nothing && return nothing
     lines, ast = fa
@@ -340,35 +336,65 @@ function _test_code_block(file::AbstractString, line::Integer)
     cands = filter(b -> any(s -> s[1] == line, b.stmts), blks)
     isempty(cands) && return nothing
     b = argmin(x -> x.hi - x.lo, cands)          # the innermost block holding a statement at `line`
-    idx = findlast(s -> s[1] == line, b.stmts)
-    from = 1
-    for i in 1:(idx - 1)
-        _is_assertion_stmt(b.stmts[i][2]) && (from = i + 1)
-    end
-    keep = [i for i in from:idx if !_is_self_rendering_stmt(b.stmts[i][2])]
-    isempty(keep) && return nothing
-    pieces = [(b.stmts[i][1], _stmt_hi(b, i, lines)) for i in keep]
-    out = String[]
-    for (lo, hi) in pieces
-        append!(out, lines[lo:min(hi, length(lines))])
-    end
-    # a trailing blank / comment line introduces whatever comes NEXT, not this region
-    while !isempty(out) && (isempty(strip(out[end])) || startswith(strip(out[end]), "#"))
-        pop!(out)
-    end
+    return (; lines, b, idx=findlast(s -> s[1] == line, b.stmts))
+end
+
+"""
+    _test_code_block(file, line) -> CodeBlock | nothing
+
+The `@code` artifact for the assertion at `file:line` — the code that produced it. The id hashes
+the code text (#123), so shifted lines never move it, and every sample of a `@testset for` (the same
+code, N iterations) maps to ONE block: the sweep shows its specification once, not once per point.
+"""
+function _test_code_block(file::AbstractString, line::Integer)
+    site = _code_site(file, line)
+    site === nothing && return nothing
+    (; lines, b, idx) = site
+    pieces = _region_pieces(b, idx, lines)
+    out = _region_lines(pieces, lines)
     isempty(out) && return nothing
     hdr = _sweep_header_line(b)
-    head = hdr == 0 ? String[] : String[lines[l] for l in hdr:(b.lo - 1)]
-    budget = _MAX_CODE_LINES - length(head) - (hdr == 0 ? 0 : 1)
-    # never silently truncate: an elided region says so (the full file is a click away in CI)
-    length(out) > budget && (out = vcat(["#   …"], out[(end - budget + 2):end]))
-    body = vcat(head, out)
-    src = _dedent(body)
-    hdr == 0 || (src = string(src, "\nend"))
+    src = _snippet_source(out, lines, b, hdr)
     # keyed on the code itself, not its line span, so shifting lines never changes it (#123)
     id = Symbol("code_", _slug(basename(String(file))), "_", _stable_hash(src))
     at = _defined_at((String(file), hdr == 0 ? pieces[1][1] : hdr))
     return CodeBlock(id, _anchor(id), src, "", "", "julia", at)
+end
+
+# The `(first, last)` source lines of the statements behind assertion `idx` of block `b`: those after
+# the block's previous assertion, up to it, less the Pinax content macros (they render themselves).
+function _region_pieces(b::_CodeBlk, idx::Int, lines)
+    prev = findlast(i -> _is_assertion_stmt(b.stmts[i][2]), 1:(idx - 1))
+    from = prev === nothing ? 1 : prev + 1
+    return [
+        (b.stmts[i][1], _stmt_hi(b, i, lines)) for
+        i in from:idx if !_is_self_rendering_stmt(b.stmts[i][2])
+    ]
+end
+
+# The text of those statements. A trailing blank / comment line introduces whatever comes NEXT, not
+# this region, so it is left off.
+function _region_lines(pieces, lines)
+    out = String[]
+    for (lo, hi) in pieces
+        append!(out, lines[lo:min(hi, length(lines))])
+    end
+    while !isempty(out) && _blank_or_comment(out[end])
+        pop!(out)
+    end
+    return out
+end
+_blank_or_comment(l) = (t=strip(l); isempty(t) || startswith(t, "#"))
+
+# The snippet: a sweep's header (line `hdr`, 0 when none) ahead of the region and its `end` after,
+# within `_MAX_CODE_LINES`. Never silently truncated: an elided region says so (the full file is a
+# click away in CI).
+function _snippet_source(out, lines, b::_CodeBlk, hdr::Int)
+    head = hdr == 0 ? String[] : lines[hdr:(b.lo - 1)]
+    budget = _MAX_CODE_LINES - length(head) - (hdr == 0 ? 0 : 1)
+    length(out) > budget && (out = vcat(["#   …"], out[(end - budget + 2):end]))
+    src = _dedent(vcat(head, out))
+    return hdr == 0 ? src : string(src, "\nend")
 end
 
 _strip_lnn(x) = x
@@ -393,35 +419,38 @@ remainder parses to the very expression the macro was handed. `nothing` when the
 (a REPL, a Documenter `@example`), where the deparsed form is all there is.
 """
 function _verbatim_code(file, line, expr)
-    fa = _file_ast(file)
-    fa === nothing && return nothing
-    lines, ast = fa
-    blks = _CodeBlk[]
-    _walk_code_blocks!(blks, ast, Any[])
-    cands = filter(b -> any(s -> s[1] == line, b.stmts), blks)
-    isempty(cands) && return nothing
-    b = argmin(x -> x.hi - x.lo, cands)
-    i = findlast(s -> s[1] == line, b.stmts)
-    lo = b.stmts[i][1]
-    hi = min(_stmt_hi(b, i, lines), length(lines))
-    text = _dedent(lines[lo:hi])
+    site = _code_site(file, line)
+    site === nothing && return nothing
+    (; lines, b, idx) = site
+    hi = min(_stmt_hi(b, idx, lines), length(lines))
+    text = _dedent(lines[b.stmts[idx][1]:hi])
     target = _strip_lnn(expr)
+    for s in _first_line_starts(text)
+        _parses_to(text, s, target) && return _dedent(split(SubString(text, s), '\n'))
+    end
+    return nothing
+end
+
+# Where each token of `text`'s first line starts: where a peeled-off macro call may end.
+function _first_line_starts(text)
     nl = something(findfirst('\n', text), length(text) + 1)
     starts = Int[1]
     for (j, ch) in enumerate(text)
         j >= nl && break
         isspace(ch) && j < length(text) && push!(starts, j + 1)
     end
-    for s in starts
-        e = try
-            Meta.parse(SubString(text, s))
-        catch
-            continue
-        end
-        e isa Expr && e.head === :incomplete && continue
-        _strip_lnn(e) == target && return _dedent(split(SubString(text, s), '\n'))
+    return starts
+end
+
+# Whether `text` from `s` on parses, completely, to `target` (line numbers aside).
+function _parses_to(text, s, target)
+    e = try
+        Meta.parse(SubString(text, s))
+    catch
+        return false
     end
-    return nothing
+    e isa Expr && e.head === :incomplete && return false
+    return _strip_lnn(e) == target
 end
 
 """
