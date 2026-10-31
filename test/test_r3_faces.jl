@@ -25,3 +25,26 @@ end
     @test rows[2] == ["x\\|y", "\\|0⟩"]
     @test rows[3] == ["two<br>lines", "plain"]         # the row stays on one line
 end
+
+@testset "agent.md: a page after a part's pages is not read as inside it" begin
+    tmp = mktempdir()
+    Pinax.reset!(; title="T")
+    @page :intro "Intro" begin end
+    @part :a "Part A" begin
+        @page :inpart "In part" begin end
+    end
+    @page :after "After" begin end
+    Pinax.render(; out=tmp, theme=:agent)
+    md = read(joinpath(tmp, "agent.md"), String)
+    heads = [l for l in split(md, '\n') if startswith(l, "## ") || startswith(l, "### ")]
+    @test heads == [
+        "### Intro  [id: intro]",          # before any part: no part heading is needed
+        "## Part A",
+        "### In part  [id: inpart]",
+        "## Other  [no part]",             # the part ended: a part-level heading says so
+        "### After  [id: after]",
+    ]
+    # agent.json already says so; the two faces agree
+    aj = read(joinpath(tmp, "agent.json"), String)
+    @test occursin("\"id\":\"after\",\"title\":\"After\",\"depth\":1,\"part\":null", aj)
+end

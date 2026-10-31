@@ -551,11 +551,13 @@ function _agent_md_container(io, c, depth, badge, ctx)
     return nothing
 end
 
-# agent.md's body: the title, then each page under the heading of the part it opens.
+# agent.md's body: the title, then each page under the heading of the part it opens. Pages before
+# any part need no heading; pages outside any part that follow one get their own, so they never
+# read as inside it.
 function _agent_markdown(doc::Document, ctx)
     io = IOBuffer()
     isempty(doc.meta.title) || println(io, "# ", doc.meta.title)
-    curpart = :__start__
+    curpart = nothing
     for pg in doc.pages
         pg.part === curpart || _agent_md_part(io, doc, pg.part, ctx)
         curpart = pg.part
@@ -565,10 +567,12 @@ function _agent_markdown(doc::Document, ctx)
     return String(take!(io))
 end
 
-# A part's heading and description in agent.md, where its first page begins (nothing for the pages
-# outside any part).
+# A part's heading and description in agent.md, where its first page begins; for pages outside any
+# part, a part-level "Other" heading (the gallery index's name for them) that ends the part before.
 function _agent_md_part(io, doc, pid, ctx)
-    pid === nothing && return nothing
+    pid === nothing && return println(
+        io, "\n", _agent_md_heading(0, "Other", "", ctx.rdiag), "  [no part]"
+    )
     println(io, "\n", _agent_md_heading(0, _part_title(doc, pid), _anchor(pid), ctx.rdiag))
     d = get(doc.part_descs, pid, nothing)
     d === nothing || println(io, d.source)
