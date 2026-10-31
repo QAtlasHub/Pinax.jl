@@ -1217,7 +1217,14 @@ function _emit_node!(
     acc::Vector{Check}=Check[];
     id_prefix::AbstractString="",
 )
-    _emit_own_content!(n, acc)
+    if _ctx_container() === nothing && _has_own_content(n)
+        # content written at the top level (the usual `@testset "MyPkg"` wrapper holds checks and
+        # prose of its own) has no page to land on, so it gets one — never folded away while the
+        # overview counts it
+        _emit_page_node!(n, n, page_when, seen, acc; id_prefix, recurse=false)
+    else
+        _emit_own_content!(n, acc)
+    end
     # A level whose children are all canonical `@testset for` samples is a SWEEP, not a stack of
     # sections: fold it into convergence + margin figures (issue #69 C). Only inside an open container
     # (a page/section) — never at the root, where children are files and the grouping-flatten runs.
@@ -1235,19 +1242,7 @@ function _emit_node!(
             # Page ids are GLOBAL. Under a CI matrix (issue #69 K) the same file appears in every cell,
             # so `id_prefix` qualifies the id per cell — distinct pages under distinct `@part`s, no
             # spurious duplicate-id collisions.
-            pid = _unique_id!(
-                seen, Symbol(id_prefix, _slug(ch.description)), ch.description
-            )
-            _enter_page!(pid, ch.description; summary=_summary_line(ch))
-            try
-                page_checks = Check[]
-                _emit_node!(ch, page_when, seen, page_checks; id_prefix=id_prefix)
-                append!(acc, page_checks)
-                # Back at page level (every section closed), so the figure lands on the page.
-                _push_margin_figure!(pid, page_checks)
-            finally
-                _exit_page!()
-            end
+            _emit_page_node!(ch, ch, page_when, seen, acc; id_prefix)
         elseif _ctx_container() === nothing
             # At the root with no page open, a non-file testset is a GROUPING (e.g. the top-level
             # `@testset "MyPkg"` that most runtests wrap everything in) → flatten it: its children
@@ -1365,6 +1360,33 @@ function _repoint_code!(c, chk)
     id = get(_ensure_document!().fold_codes, (c.id, Symbol(chk.code_anchor)), nothing)
     id === nothing || (chk.code_anchor = _anchor(id))
     return chk
+end
+
+function _has_own_content(n::TestNode)
+    return !isempty(n.checks) || !isempty(n.content) || !isempty(n.codes)
+end
+
+# `n` as a page of its own: its content and (with `recurse`) its subtree, then its margin figure.
+# `summary_of` is the node whose verdict the page header states.
+function _emit_page_node!(
+    n::TestNode, summary_of, page_when, seen, acc; id_prefix="", recurse=true
+)
+    pid = _unique_id!(seen, Symbol(id_prefix, _slug(n.description)), n.description)
+    _enter_page!(pid, n.description; summary=_summary_line(summary_of))
+    try
+        page_checks = Check[]
+        if recurse
+            _emit_node!(n, page_when, seen, page_checks; id_prefix=id_prefix)
+        else
+            _emit_own_content!(n, page_checks)
+        end
+        append!(acc, page_checks)
+        # Back at page level (every section closed), so the figure lands on the page.
+        _push_margin_figure!(pid, page_checks)
+    finally
+        _exit_page!()
+    end
+    return acc
 end
 
 # Assign the render-time id (t1, t2, … so a merge renumbers cleanly rather than N shards colliding at
@@ -1600,15 +1622,38 @@ end
 
 # SHARDS partition the test FILES, so their children are disjoint and concatenating is the whole merge
 # (invariant VI). Elapsed time is summed, not maxed: CPU time spent, not wall clock.
+# A root's own content (checks, prose, tables, … written at its top level) is kept too, each root's
+# after the last, in its own order.
 function _merge_shards(roots, title)
-    return TestNode(
+    m = TestNode(
         title;
         elapsed=sum(r -> isnan(r.elapsed) ? 0.0 : r.elapsed, roots; init=0.0),
         children=reduce(vcat, (r.children for r in roots); init=TestNode[]),
-        checks=reduce(vcat, (r.checks for r in roots); init=Check[]),
         nbroken=sum(r -> r.nbroken, roots; init=0),
         nerror=sum(r -> r.nerror, roots; init=0),
     )
+    foreach(r -> _append_content!(m, r), roots)
+    return m
+end
+
+# `r`'s own content after `m`'s: its nodes appended to `m`'s, its `content` indices shifted past them.
+function _append_content!(m::TestNode, r::TestNode)
+    # a node with no `content` order (a legacy dump) reads as its checks, then its codes
+    order = if isempty(r.content)
+        vcat(
+            [:check => i for i in eachindex(r.checks)],
+            [:code => i for i in eachindex(r.codes)],
+        )
+    else
+        r.content
+    end
+    for (k, i) in order
+        nodes = getfield(m, _content_field(m, k))
+        push!(nodes, getfield(r, _content_field(r, k))[i])
+        push!(m.content, k => length(nodes))
+    end
+    union!(m.written, r.written)
+    return m
 end
 
 # A CI matrix merge (issue #69 K): each cell is a `@part` holding that cell's file pages (ids qualified

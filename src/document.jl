@@ -1335,29 +1335,24 @@ end
 
 # A container's content as `(kind, item)` in declaration order — the ONE registry of node kinds every
 # backend walks. A kind not listed here is an error, never misread as another kind's index (#168).
+# Where each content kind's nodes live in a container: `content` holds `kind => index into that field`.
+const _CONTENT_FIELDS = (;
+    text=:texts,
+    figure=:figures,
+    table=:tables,
+    check=:checks,
+    code=:codes,
+    section=:sections,
+    raw=:raws,
+)
+function _content_field(c, k::Symbol)
+    haskey(_CONTENT_FIELDS, k) ||
+        error("Pinax: unknown content kind :$(k) in \"$(c.anchor)\"")
+    return _CONTENT_FIELDS[k]
+end
+
 function _content_items(c)
-    return [
-        (
-            k,
-            if k === :text
-                c.texts[i]
-            elseif k === :figure
-                c.figures[i]
-            elseif k === :table
-                c.tables[i]
-            elseif k === :check
-                c.checks[i]
-            elseif k === :code
-                c.codes[i]
-            elseif k === :section
-                c.sections[i]
-            elseif k === :raw
-                c.raws[i]
-            else
-                error("Pinax: unknown content kind :$(k) in \"$(c.anchor)\"")
-            end,
-        ) for (k, i) in c.content
-    ]
+    return [(k, getfield(c, _content_field(c, k))[i]) for (k, i) in c.content]
 end
 
 # A node (or content kind) a face has no form for: every content walk ends in this, so a node type

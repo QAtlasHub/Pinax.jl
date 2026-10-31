@@ -893,6 +893,37 @@ end
         @test occursin("\"defined_at\":\"test_x.jl:42\"", aj)
     end
 
+    @testset "content written at the top level has a page; a merge keeps every root's content" begin
+        # the usual top-level wrapper `@testset "MyPkg"` holds checks and prose of its own: they
+        # are shown on a page of their own, never folded away while the overview counts them
+        failing = Check(:t, "TOP_CHECK", 2.0, 1.0, 1.0, 0.5, :abs, false)
+        root(tag) = TestNode(
+            "MyPkg";
+            checks=[failing],
+            texts=[
+                Pinax.Prose(Symbol(tag, "_tx"), string(tag, "_tx"), "TOP_PROSE_$tag", ""),
+            ],
+            content=[:text => 1, :check => 1],
+            children=[
+                TestNode(
+                    "test_$(tag).jl";
+                    checks=[Check(:t, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)],
+                ),
+            ],
+        )
+        dir = mktempdir()
+        render_test_report(root("a"); out=joinpath(dir, "one"))
+        aj = read(joinpath(dir, "one", "agent", "agent.json"), String)
+        @test occursin("TOP_CHECK", aj) && occursin("TOP_PROSE_a", aj)
+        # two shards, each with content at its root: the merged report shows both
+        da = Pinax.dump_test_report(root("a"), joinpath(dir, "a.toml"))
+        db = Pinax.dump_test_report(root("b"), joinpath(dir, "b.toml"))
+        render_test_report([da, db]; out=joinpath(dir, "two"))
+        md = read(joinpath(dir, "two", "agent", "agent.md"), String)
+        @test occursin("TOP_PROSE_a", md) && occursin("TOP_PROSE_b", md)
+        @test count("TOP_CHECK", md) >= 2
+    end
+
     @testset "a shard dump keeps where each node was written and what each check points at" begin
         at = "test/test_x.jl:7"
         blk = CodeBlock(:code_x, "code_x", "y = 1", "", "", "julia", at)
