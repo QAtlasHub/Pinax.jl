@@ -405,7 +405,10 @@ end
 function _dedent(ls)
     indents = [length(l) - length(lstrip(l)) for l in ls if !isempty(strip(l))]
     ind = isempty(indents) ? 0 : minimum(indents)
-    return rstrip(join((isempty(strip(l)) ? "" : l[(ind + 1):end] for l in ls), "\n"))
+    # `ind` counts characters (an indent may hold a multi-byte space), so cut by characters
+    return rstrip(
+        join((isempty(strip(l)) ? "" : chop(l; head=ind, tail=0) for l in ls), "\n")
+    )
 end
 
 """
@@ -711,7 +714,7 @@ function _margin_svg(checks::Vector{Check}, path::AbstractString)
         else
             "#4c9f70"
         end
-        lab = length(c.label) > 34 ? c.label[1:31] * "…" : c.label
+        lab = _trunc(c.label, 34)
         w = max(x_of(m) - left, 1.0)
         print(
             io,

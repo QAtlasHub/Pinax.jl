@@ -403,8 +403,7 @@ _result_data_expr(::Any) = nothing
 function _label(r::Test.Result)
     e = hasproperty(r, :orig_expr) ? getproperty(r, :orig_expr) : nothing
     s = e === nothing ? string(typeof(r)) : Pinax._expr_str(e)
-    length(s) > 110 && (s = s[1:107] * "…")
-    return s
+    return Pinax._trunc(s, 110)   # at most 110 characters, cut at a character
 end
 
 end # module
