@@ -1271,7 +1271,7 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     heading *= _nfig_span(length(sec.figures))
     bookmarked && (heading *= " <span class=\"pinax-bm-on\" title=\"bookmarked\">★</span>")
     cls = bookmarked ? "section bookmarked" : "section"
-    open_h, close_h = _gallery_heading(sec, ctx)
+    open_h, close_h = _gallery_heading(sec.depth, sec.anchor, ctx)
     println(
         io,
         "<section class=\"",
@@ -1308,7 +1308,6 @@ end
 # The one place the gallery turns depth into a heading: `<h1>` for a page, `<h2>` for a top-level
 # section down to `<h6>`; deeper sections keep their level as an ARIA heading, with a diagnostic
 # (never flattened). A part is a `<details>` group on the index, not a heading.
-_gallery_heading(sec, ctx) = _gallery_heading(sec.depth, sec.anchor, ctx)
 function _gallery_heading(d::Int, anchor, ctx)
     d <= 6 && return ("<h$(d)>", "</h$(d)>")
     push!(

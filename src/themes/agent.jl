@@ -40,9 +40,6 @@ struct AgentCtx
     # figure id => (its images, its data file or nothing), all in THIS face's directory
     files::Dict{Symbol,Tuple{Vector{String},Union{String,Nothing}}}
 end
-function AgentCtx(io, outdir, comments, cache, rdiag)
-    return AgentCtx(io, outdir, comments, cache, rdiag, Dict{Symbol,Any}())
-end
 
 # A JSON scalar for a param/cell value: integers and floats stay native (a tool reads 16, not "16");
 # missing/nothing map to JSON null; NaN/Inf are not valid JSON numbers so they're quoted; anything
@@ -603,7 +600,7 @@ function emit_document(
     rdiag = DiagEntry[]
     comments, _bm = _read_comments(doc, comments_file, rdiag)
     mkpath(outdir)
-    ctx = AgentCtx(IOBuffer(), String(outdir), comments, cache, rdiag)
+    ctx = AgentCtx(IOBuffer(), String(outdir), comments, cache, rdiag, Dict())
     # agent.json's body first: it materializes the figures agent.md then reads. Both files end with
     # the same diagnostics, agent.md's own (a fallback heading) included.
     body = _agent_json(theme, doc, ctx)

@@ -297,7 +297,6 @@ end
 const _LATEX_HEADINGS = (
     "part", "section", "subsection", "subsubsection", "paragraph", "subparagraph"
 )
-_latex_heading(sec, ctx) = _latex_heading(sec.depth, sec.title, sec.anchor, ctx)
 function _latex_heading(depth::Int, title, anchor, ctx)
     t = _texesc(title)
     depth < length(_LATEX_HEADINGS) &&
@@ -324,7 +323,7 @@ function _latex_body!(theme::LaTeXBase, c, pg, assetdir, ctx)
 end
 
 function emit_section(theme::LaTeXBase, sec, pg, ctx)
-    println(ctx.io, _latex_heading(sec, ctx))
+    println(ctx.io, _latex_heading(sec.depth, sec.title, sec.anchor, ctx))
     assetdir = joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor)
     return _latex_body!(theme, sec, pg, assetdir, ctx)
 end
