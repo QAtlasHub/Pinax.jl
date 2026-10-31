@@ -519,7 +519,6 @@ end
 function _agent_md_verdict(io, c)
     v = verdict(c)
     v === nothing && return nothing
-    failing = [chk.id for chk in _subtree_checks(c) if !passed(chk)]
     println(
         io,
         "**",
@@ -531,7 +530,7 @@ function _agent_md_verdict(io, c)
         " ",
         v.verdict,
         "**",
-        isempty(failing) ? "" : string(" — failing: ", join(failing, ", ")),
+        isempty(v.failed) ? "" : string(" — failing: ", join(v.failed, ", ")),
     )
     return nothing
 end
