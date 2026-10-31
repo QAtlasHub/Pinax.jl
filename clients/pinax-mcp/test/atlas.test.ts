@@ -184,6 +184,21 @@ test("outline: status, part headings, unresolvable refs, and the no-content fall
   assert.equal(o.split("[part grp]").length, 2); // one heading per run of pages in a part
 });
 
+test("consecutive pages in one part share one part heading, before the first of them", () => {
+  // the sample's p1 and p2 are both in part grp
+  const o = loadAtlas(fixture).outline();
+  assert.equal(o.split("[part grp]").length, 2);
+  assert.match(o, /^# Demo Atlas\n\n## \[part grp\] Group A\n\n### \[page p1\]/);
+  assert.ok(o.indexOf("[part grp]") < o.indexOf("[page p2]"));
+});
+
+test("a table with no caption is labelled by its id, in the index and the outline", () => {
+  const atlas = loadAtlas(writeVariant((doc) => (doc.pages[1].tables[0].caption = "")));
+  assert.equal(atlas.unit("p2_tbl1")!.label, "p2_tbl1");
+  assert.match(atlas.outline(), /\n- \[table p2_tbl1\] p2_tbl1$/m);
+  assert.equal(atlas.search("p2_tbl1")[0].field, "label");
+});
+
 // A file outside any agent directory, and a variant whose first figure's data and asset point at it
 // by the path `point` returns.
 function outsideVariant(point: (secret: string, dir: string) => string): string {
@@ -241,4 +256,23 @@ test("a figure's assets and data are asked of a figure: any other id has none", 
     assert.deepEqual(atlas.figureAssets(id), [], id);
     assert.equal(atlas.figureData(id), null, id);
   }
+});
+
+test("a figure without a data form has no data file", () => {
+  const atlas = loadAtlas(
+    writeVariant((doc) => {
+      doc.pages[0].figures[0].data = null;
+    }),
+  );
+  assert.equal(atlas.figureData("p1_fig1"), null);
+});
+
+test("an outline names a part by its title as written, even an empty one", () => {
+  const atlas = loadAtlas(
+    writeVariant((doc) => {
+      doc.parts[0].title = "";
+    }),
+  );
+  const pid = atlas.doc.parts[0].id;
+  assert.ok(atlas.outline().split("\n").includes(`## [part ${pid}] `));
 });

@@ -11,6 +11,8 @@ test("parseArgs: a flag with no value leaves the setting as it was; another argu
   const env = { PINAX_AGENT: "from-env", PINAX_COMMENTS: "env.toml" };
   assert.deepEqual(parseArgs(["--agent"], env), { agent: "from-env", comments: "env.toml" });
   assert.deepEqual(parseArgs(["--comments"], env), { agent: "from-env", comments: "env.toml" });
+  // a trailing --comments after other flags has no value either: the environment's store stays
+  assert.deepEqual(parseArgs(["--agent", "out", "--comments"], env), { agent: "out", comments: "env.toml" });
   // an unrelated argument followed by a value is not --comments
   assert.deepEqual(parseArgs(["--other", "x.toml"], {}), { agent: "", comments: undefined });
   // the value after --agent is taken as its value, not read as a flag of its own

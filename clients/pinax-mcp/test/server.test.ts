@@ -100,6 +100,16 @@ test("resources list and read end-to-end over MCP", { timeout: 20000 }, async ()
   });
 });
 
+test("pinax://document reads as the outline, in markdown", { timeout: 20000 }, async () => {
+  await withClient(async (client) => {
+    const doc = (await client.readResource({ uri: "pinax://document" })).contents[0] as any;
+    assert.equal(doc.uri, "pinax://document");
+    assert.equal(doc.mimeType, "text/markdown");
+    assert.match(doc.text, /^# Demo Atlas\n/);
+    assert.equal(doc.text, text(await client.callTool({ name: "outline", arguments: {} })));
+  });
+});
+
 test("a binary asset reads as base64; a bad resource uri is refused, saying why", { timeout: 20000 }, async () => {
   const dir = writeVariant((doc) => doc.pages[0].figures[0].assets.push("p1_fig1.png"));
   writeFileSync(join(dir, "p1_fig1.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
@@ -114,6 +124,22 @@ test("a binary asset reads as base64; a bad resource uri is refused, saying why"
     await refused("pinax://asset/p1_fig1/9", /no asset 9 for figure p1_fig1$/);
     await refused("pinax://figure/ghost", /unknown figure: ghost/);
     await refused("file:///etc/passwd", /unsupported resource uri/);
+  }, dir);
+});
+
+test("an asset's mime follows its extension, any case: pdf, json, else octet-stream", { timeout: 20000 }, async () => {
+  const files: Record<string, string> = { "a.PDF": "%PDF-1.7", "a.json": '{"k":1}', "a.dat": "raw" };
+  const dir = writeVariant((doc, d) => {
+    doc.pages[0].figures[0].assets = Object.keys(files);
+    for (const [name, body] of Object.entries(files)) writeFileSync(join(d, name), body);
+  });
+  await withClient(async (client) => {
+    const read = async (i: number) => (await client.readResource({ uri: `pinax://asset/p1_fig1/${i}` })).contents[0] as any;
+    const blob = (s: string) => Buffer.from(s).toString("base64");
+    const [pdf, json, dat] = [await read(0), await read(1), await read(2)];
+    assert.deepEqual([pdf.mimeType, pdf.blob, pdf.text], ["application/pdf", blob("%PDF-1.7"), undefined]);
+    assert.deepEqual([json.mimeType, json.text, json.blob], ["application/json", '{"k":1}', undefined]);
+    assert.deepEqual([dat.mimeType, dat.blob, dat.text], ["application/octet-stream", blob("raw"), undefined]);
   }, dir);
 });
 
