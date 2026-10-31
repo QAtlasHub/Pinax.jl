@@ -91,3 +91,86 @@ end
     @test !any(id -> endswith(string(id), "-2"), ab)
     @test ab[3] === :p_fig_0zfg0yp   # a figure without data= keeps the id it had
 end
+
+# Pins for behavior-preserving refactors of the structure and content macros.
+function _expand_error(ex)
+    try
+        macroexpand(@__MODULE__, ex)
+    catch e
+        return sprint(showerror, e isa LoadError ? e.error : e)
+    end
+    return ""
+end
+
+@testset "structure macros: arity, keywords and the written id" begin
+    for (m, ex) in (
+        ("@page", :(@page :p "T")),
+        ("@part", :(@part :g "G")),
+        ("@section", :(@section :s "S")),
+    )
+        @test occursin("$(m) needs :id, \"title\", and a begin…end body", _expand_error(ex))
+    end
+    Pinax.reset!()
+    @part :g "G" status = :draft desc = md"overview" begin
+        @page :p "P" summary = "sum" layout = :wide begin
+            @section :s "S" by = "L" summary = "ss" begin end
+        end
+    end
+    @page :q "Q" status = :final begin end
+    doc = Pinax.current_document()
+    p, q = doc.pages
+    @test (p.part, p.status, p.summary, p.layout) == (:g, :draft, "sum", :wide)
+    @test (q.part, q.status) == (nothing, :final)
+    s = p.sections[1]
+    @test (s.facet, s.summary, s.depth) == ("L", "ss", 2)
+    @test doc.part_descs[:g].source == "overview"
+    @test issubset([:g, :p, :s, :q], doc.written)
+end
+
+@testset "@raw: one expression, an optional id, in any order" begin
+    Pinax.reset!()
+    @page :p "P" begin
+        @raw "<i>a</i>"
+        @raw id = :r "<i>b</i>"
+        @raw "<i>c</i>" id = :r2
+    end
+    raws = Pinax.current_document().pages[1].raws
+    @test [r.html for r in raws] == ["<i>a</i>", "<i>b</i>", "<i>c</i>"]
+    @test raws[1].id === :p_raw_18o6f69
+    @test raws[2].id === :r && raws[3].id === :r2
+    @test endswith(raws[1].defined_at, "test_r3_doc.jl:$(@__LINE__() - 8)")
+    @test occursin("@raw", _expand_error(:(@raw "a" "b")))
+    @test occursin("@raw needs", _expand_error(:(@raw id = :x)))
+end
+
+@testset "content order, captions and subtree checks" begin
+    Pinax.reset!()
+    @page :p "P" begin
+        @test 1 == 1
+        @caption "pd"
+        @desc md"text"
+        @section :s1 "S1" begin
+            @test 2 == 2
+            @caption "a"
+            @section :s2 "S2" begin
+                @test 3 == 3
+                @caption "b"
+            end
+            @test 4 == 4
+            @caption "c"
+        end
+        @figure "x.svg" id = :f
+        @caption "fig"
+        @section :s3 "S3" begin
+            @test 5 == 5
+            @caption "d"
+        end
+    end
+    pg = Pinax.current_document().pages[1]
+    @test [k for (k, _) in Pinax._content_items(pg)] == [:code, :check, :text, :section, :figure, :section]   # a @test brings its code
+    @test Pinax._content_items(pg)[5][2].caption == "fig"
+    labels(c) = [chk.label for chk in Pinax._subtree_checks(c)]
+    @test labels(pg) == ["pd", "a", "c", "b", "d"]   # own checks, then each section's subtree
+    @test labels(pg.sections[1]) == ["a", "c", "b"]
+    @test Pinax.verdict(pg.sections[1]).total == 3
+end
