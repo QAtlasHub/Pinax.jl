@@ -57,4 +57,44 @@ using Test
         @test_throws "outside of a @page" @section :never "S" begin end
         @test !(:never in doc.written) && !haskey(doc.ids, :never)
     end
+    @testset "settings are validated where they enter; comments the gallery hides are said" begin
+        @test_throws r"features=.*:comment\b.*:comments, :bookmarks, :export" Pinax.reset!(;
+            features=[:comment]
+        )
+        @test_throws "katex= must be :cdn or :local (got :foo)" Pinax.DocMeta(; katex=:foo)
+        @test_throws "index= must be :toc" Pinax.DocMeta(; index=:nope)
+        @test_throws "unknown feature" Pinax.DocMeta(; features=[:export, :bogus])
+        @test Pinax.DocMeta(; features=Symbol[]).features == Symbol[]
+
+        dir = mktempdir()
+        store = joinpath(dir, "comments.toml")
+        write(
+            store,
+            """
+            [[comment.p]]
+            author = "a"
+            text = "hello"
+
+            [bookmark]
+            p = "yes"
+            q = false
+            """,
+        )
+        _, bookmarks, problems = Pinax._parse_comments(store)
+        @test isempty(bookmarks)
+        @test only(problems).item == "p"
+        @test occursin("\"yes\"", only(problems).message)
+
+        Pinax.reset!(; features=[:bookmarks])
+        @page :p "P" begin end
+        rdiag = Pinax.DiagEntry[]
+        Pinax._read_comments(Pinax.current_document(), store, rdiag)
+        hidden = filter(d -> occursin("hides", d.message), rdiag)
+        @test length(hidden) == 1 && only(hidden).severity == Pinax.WARNING
+        Pinax.reset!()   # :comments on (the default): nothing to say
+        @page :p "P" begin end
+        rdiag = Pinax.DiagEntry[]
+        Pinax._read_comments(Pinax.current_document(), store, rdiag)
+        @test !any(d -> occursin("hides", d.message), rdiag)
+    end
 end

@@ -80,21 +80,54 @@ function DocMeta(;
     assets=:default,
     appearance=:system,
 )
+    # Every choice is checked here, where the value enters, so no path builds a DocMeta that
+    # `@pinaxsetup` would have refused.
     return DocMeta(
         title,
         theme,
         bib_sources,
         debug,
-        index,
-        numbering,
+        _setting(:index, index, (nothing, :toc, :cards, :rich)),
+        _setting(:numbering, numbering, (:global, :page, :part)),
         numberer,
-        collect(Symbol, features),
+        _features(features),
         collect(String, css),
         collect(String, js),
-        katex,
-        assets,
-        appearance,
+        _setting(:katex, katex, (:cdn, :local)),
+        _setting(:assets, assets, (:default, :inline)),
+        # `theme=` is which theme renders the page; `appearance=` is which of that theme's two
+        # palettes a reader sees before choosing. `:system` — the default, and what every page did
+        # before this setting existed — leaves the choice to the reader's operating system.
+        _setting(
+            :appearance,
+            appearance,
+            (:system, :light, :dark),
+            " It is the colour scheme, not the theme — `theme=` selects the theme.",
+        ),
     )
+end
+
+# A setting that takes one of `allowed` (`nothing` in it means "unset" and is not listed).
+function _setting(key::Symbol, value, allowed, note="")
+    any(a -> a === value, allowed) && return value
+    names = [repr(a) for a in allowed if a !== nothing]
+    list = length(names) == 2 ? join(names, " or ") : join(names, ", ", ", or ")
+    return error("Pinax: @pinaxsetup $(key)= must be $(list) (got $(repr(value))).$(note)")
+end
+
+# The gallery's interactive layers. A name outside these would switch nothing on, silently.
+const _FEATURES = (:comments, :bookmarks, :export)
+function _features(features)
+    fs = collect(Symbol, features)
+    unknown = setdiff(fs, _FEATURES)
+    isempty(unknown) || error(
+        "Pinax: @pinaxsetup features= names unknown feature(s) " *
+        join(repr.(unknown), ", ") *
+        " — the features are " *
+        join(repr.(_FEATURES), ", ") *
+        ".",
+    )
+    return fs
 end
 
 "A single figure (placeholder). `gen` is deferred; `code` is the expression source for change detection (notes 10)."
@@ -469,7 +502,6 @@ function _scoped_body(c, body)
     end
 end
 
-"Reset the implicit document (fresh, empty). The preamble `@pinaxsetup` calls this."
 # Every setting `reset!` reads. A keyword outside this set is refused rather than dropped: the
 # alternative is that `@pinaxsetup katx=:local` configures nothing and says nothing.
 const _SETUP_KEYS = (
@@ -487,63 +519,27 @@ const _SETUP_KEYS = (
     :appearance,
 )
 
+"Reset the implicit document (fresh, empty). The preamble `@pinaxsetup` calls this."
 function reset!(; kwargs...)
-    kw = Dict{Symbol,Any}(kwargs)
-    for k in sort!(collect(keys(kw)))
-        k in _SETUP_KEYS && continue
-        k === :format && error(
-            "Pinax: @pinaxsetup format= is not a setting — a theme decides which figure formats " *
-            "it requests, through `figure_formats(::Theme)`. Select a theme with `theme=`.",
-        )
-        error(
-            "Pinax: @pinaxsetup has no $(k)= setting. Known: " *
-            join(_SETUP_KEYS, ", ") *
-            ". Bibliography files are declared with `@bibliography`.",
-        )
-    end
-    idx = get(kw, :index, nothing)
-    idx === nothing ||
-        idx in (:toc, :cards, :rich) ||
-        error(
-            "Pinax: @pinaxsetup index= must be :toc, :cards, or :rich (got $(repr(idx)))."
-        )
-    num = get(kw, :numbering, :global)
-    num in (:global, :page, :part) || error(
-        "Pinax: @pinaxsetup numbering= must be :global, :page, or :part (got $(repr(num))).",
-    )
-    ktx = get(kw, :katex, :cdn)
-    ktx in (:cdn, :local) ||
-        error("Pinax: @pinaxsetup katex= must be :cdn or :local (got $(repr(ktx))).")
-    ast = get(kw, :assets, :default)
-    ast in (:default, :inline) ||
-        error("Pinax: @pinaxsetup assets= must be :default or :inline (got $(repr(ast))).")
-    # `theme=` is which theme renders the page; `appearance=` is which of that theme's two palettes
-    # a reader sees before choosing. `:system` — the default, and what every page did before this
-    # setting existed — leaves the choice to the reader's operating system.
-    app = get(kw, :appearance, :system)
-    app in (:system, :light, :dark) || error(
-        "Pinax: @pinaxsetup appearance= must be :system, :light, or :dark (got $(repr(app))). " *
-        "It is the colour scheme, not the theme — `theme=` selects the theme.",
-    )
-    meta = DocMeta(;
-        title=get(kw, :title, ""),
-        theme=get(kw, :theme, :gallery),
-        debug=get(kw, :debug, false),
-        index=idx,
-        numbering=num,
-        numberer=get(kw, :numberer, _default_numberer),
-        features=get(kw, :features, Symbol[:comments, :bookmarks, :export]),
-        css=get(kw, :css, String[]),
-        js=get(kw, :js, String[]),
-        katex=ktx,
-        assets=ast,
-        appearance=app,
-    )
-    CTX.document = Document(meta)
+    foreach(_setup_key, sort!(collect(keys(kwargs))))
+    CTX.document = Document(DocMeta(; kwargs...))   # DocMeta checks each value
     CTX.part = nothing
     CTX.page = nothing
     CTX.section = nothing
     return CTX.document
+end
+
+function _setup_key(k::Symbol)
+    k in _SETUP_KEYS && return k
+    k === :format && error(
+        "Pinax: @pinaxsetup format= is not a setting — a theme decides which figure formats " *
+        "it requests, through `figure_formats(::Theme)`. Select a theme with `theme=`.",
+    )
+    return error(
+        "Pinax: @pinaxsetup has no $(k)= setting. Known: " *
+        join(_SETUP_KEYS, ", ") *
+        ". Bibliography files are declared with `@bibliography`.",
+    )
 end
 
 _ensure_document!() = (CTX.document === nothing && reset!(); CTX.document)

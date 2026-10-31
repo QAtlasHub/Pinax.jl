@@ -54,30 +54,40 @@ function _parse_comments(path::AbstractString)
     end
     bad(id, msg) = push!(problems, DiagEntry(WARNING, string(id), msg))
     for (id, entries) in get(data, "comment", Dict{String,Any}())
-        if !(entries isa AbstractVector)
-            bad(
-                id,
-                "`[comment.$(id)]` is one table, not a list of turns: write each turn as `[[comment.$(id)]]`",
-            )
-            continue
-        end
-        turns = Comment[]
-        for (i, e) in enumerate(entries)
-            if e isa AbstractDict && haskey(e, "text")
-                push!(turns, Comment(string(get(e, "author", "")), string(e["text"])))
-            else
-                bad(
-                    id,
-                    "turn $(i) is not a comment (a table with a `text`), so it is not shown",
-                )
-            end
-        end
+        turns = _parse_turns(id, entries, bad)
         isempty(turns) || (comments[Symbol(id)] = turns)
     end
     for (id, on) in get(data, "bookmark", Dict{String,Any}())
         on === true && push!(bookmarks, Symbol(id))
+        on isa Bool || bad(
+            id,
+            "the bookmark is $(repr(on)), not `true` or `false`, so it is not set: write " *
+            "`$(id) = true`",
+        )
     end
     return comments, bookmarks, problems
+end
+
+# The turns of one `[[comment.<id>]]` list; an entry in the wrong shape is reported through `bad`.
+function _parse_turns(id, entries, bad)
+    turns = Comment[]
+    if !(entries isa AbstractVector)
+        bad(
+            id,
+            "`[comment.$(id)]` is one table, not a list of turns: write each turn as `[[comment.$(id)]]`",
+        )
+        return turns
+    end
+    for (i, e) in enumerate(entries)
+        if e isa AbstractDict && haskey(e, "text")
+            push!(turns, Comment(string(get(e, "author", "")), string(e["text"])))
+        else
+            bad(
+                id, "turn $(i) is not a comment (a table with a `text`), so it is not shown"
+            )
+        end
+    end
+    return turns
 end
 
 # The node kinds every face shows comments on (Conventions › Faces).
@@ -96,6 +106,17 @@ const _KIND_NAMES = Dict(
 function _read_comments(doc, path::AbstractString, rdiag)
     comments, bookmarks, problems = _parse_comments(path)
     append!(rdiag, problems)
+    isempty(comments) ||
+        :comments in doc.meta.features ||
+        push!(
+            rdiag,
+            DiagEntry(
+                WARNING,
+                basename(path),
+                "the comment store holds comments, but the :comments feature is off " *
+                "(`@pinaxsetup features=`), so the gallery hides them",
+            ),
+        )
     kinds = Dict(n.id => n.kind for n in node_ids(doc))
     # A comment or bookmark is stored under a node's id (the API, pinax-mcp) or its anchor (the
     # gallery writes what it shows); the faces look a node up by its anchor, so key them all that way.
