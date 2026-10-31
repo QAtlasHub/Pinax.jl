@@ -419,8 +419,10 @@ mutable struct BuildContext
     page::Union{Page,Nothing}
     section::Union{Section,Nothing}
     captioned::Any                   # the node the latest `@caption` named (a node takes one caption)
+    nonode::Any                      # (container, content length) where a result that records no
+    # check (`@test_broken`, `@test_skip`) was written: a `@caption` right after it names nothing
 end
-const CTX = BuildContext(nothing, nothing, nothing, nothing, nothing)
+const CTX = BuildContext(nothing, nothing, nothing, nothing, nothing, nothing)
 
 current_document() = CTX.document
 current_page() = CTX.page
@@ -1417,6 +1419,19 @@ macro caption(x)
         _set_caption!($(esc(x)))
     end
 end
+# A `@test_broken` / `@test_skip` written at `where` in container `c`: it records no check (only the
+# suite counts it), so the document says so, and a `@caption` right after it names nothing.
+function _record_no_check!(c, where::AbstractString)
+    CTX.nonode = (c, length(c.content))
+    at = isempty(where) ? "" : " at $(where)"
+    _diag!(
+        INFO,
+        c.anchor,
+        "a @test_broken / @test_skip$(at) records no check: only the suite counts it",
+    )
+    return nothing
+end
+
 function _set_caption!(s)
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
@@ -1424,6 +1439,10 @@ function _set_caption!(s)
     isempty(c.content) && error(
         "Pinax: @caption in \"$(c.anchor)\" has nothing before it to name — write it directly " *
         "after a @figure, @table, @code or @test, or pass `caption=` to that node",
+    )
+    CTX.nonode == (c, length(c.content)) && error(
+        "Pinax: @caption in \"$(c.anchor)\" follows a @test_broken / @test_skip, which records no " *
+        "check — @caption names only the node written immediately before it",
     )
     kind, i = c.content[end]
     kind in (:check, :figure, :table, :code) || error(

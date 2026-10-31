@@ -132,7 +132,9 @@ function Test.record(ts::PinaxContainerSet, child::AbstractTestSet)
     return child
 end
 function Test.record(ts::PinaxContainerSet, res::Test.Result)
-    if !(res isa Test.Broken)
+    if res isa Test.Broken
+        Pinax._record_no_check!(ts.node, _source_str(res))
+    else
         chk = _push_container_check!(ts.node, res)
         chk.reported = ts.outer !== nothing   # the suite counts it; `render` will not repeat it
     end

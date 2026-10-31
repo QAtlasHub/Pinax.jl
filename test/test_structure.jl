@@ -133,6 +133,34 @@ Test.finish(r::_StructIso) = r
         @test first(findfirst("VAL_IS_TWO", md)) < first(findfirst("VAL_IS_THREE", md))
     end
 
+    @testset "@test_broken records no check: @caption after it names nothing, a diagnostic says so" begin
+        Pinax.reset!()
+        ts = @testset _StructIso "iso" begin
+            @page :p "P" begin
+                @test 1 == 1
+                @test_broken 1 == 2
+                @caption "never reaches back to the first check"
+            end
+        end
+        @test any(
+            r -> r isa Test.Error && occursin("records no check", sprint(show, r)),
+            ts.results,
+        )
+        @test only(Pinax.current_document().pages[1].checks).label !=
+            "never reaches back to the first check"
+        Pinax.reset!()
+        @page :q "Q" begin
+            @test_broken 1 == 2
+        end
+        pg = Pinax.current_document().pages[1]
+        @test isempty(pg.checks) && Pinax.verdict(pg) === nothing   # not a failing check
+        out = joinpath(tmp, "broken")
+        Pinax.render(; out=out, theme=:agent)                     # and nothing to throw for
+        @test occursin(
+            r"@test_broken.*records no check", read(joinpath(out, "agent.md"), String)
+        )
+    end
+
     @testset "@caption after a page's section names nothing" begin
         Pinax.reset!()
         @test_throws "follows a section" @page :p "P" begin
