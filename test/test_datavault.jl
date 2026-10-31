@@ -59,6 +59,21 @@ using ParamIO: ParamIO
         @test calls[] == 2                   # data changed -> cache MISS -> re-materialized
     end
 
+    @testset "data that cannot be fingerprinted is said, and never served from the cache" begin
+        # a vault that holds no `.done` for the key: nothing says when its data changes, so a cache
+        # hit could show a stale figure — the figure re-renders every time, and a warning says why
+        empty = DataVault.Vault(cfg; run="never_done")
+        calls[] = 0
+        out3 = joinpath(tmp, "site3")
+        for n in 1:2
+            build()
+            @test_logs (:warn, r"cannot fingerprint the data") match_mode = :any Pinax.render(;
+                out=out3, vault=empty
+            )
+            @test calls[] == n
+        end
+    end
+
     @testset "without a vault, data changes are not detected (prior behavior)" begin
         calls[] = 0
         out2 = joinpath(tmp, "site2")

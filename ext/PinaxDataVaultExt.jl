@@ -15,23 +15,29 @@ const _READS = Ref{Union{Nothing,Dict{String,String}}}(nothing)
 
 # The cache key's data component for a figure tagged `params`: inside a report, the digest of the
 # bytes that report read; otherwise the digest the `.done` marker recorded when the key was
-# computed; for a marker older than that, the marker's content (notes 10). "" when there is none,
-# or DataVault's layout changes.
+# computed; for a marker older than that, the marker's content (notes 10). With none of these (no
+# marker, or DataVault's layout changed), a key that never matches, and a warning.
 function Pinax._data_fingerprint(vault::DataVault.Vault, params::ParamIO.DataKey)
     reads = _READS[]
     if reads !== nothing
         digest = get(reads, ParamIO.canonical(params), nothing)
         digest === nothing || return digest
     end
-    try
+    why = try
         recorded = get(DataVault.read_done(vault, params), "result_sha256", "unknown")
         recorded == "unknown" || return recorded
         df = DataVault._done_file(vault, params)
-        return isfile(df) ? string(hash(read(df, String))) : ""
+        isfile(df) && return string(hash(read(df, String)))
+        "the vault holds no .done marker for it"
     catch e
         e isa InterruptException && rethrow()
-        return ""
+        sprint(showerror, e)
     end
+    # Nothing says when this data changes, so a cache hit could show a stale figure: a key that never
+    # matches makes the figure re-render on every render, and the warning says why.
+    @warn "Pinax: cannot fingerprint the data of $(ParamIO.canonical(params)) ($why); its figure \
+           re-renders on every render"
+    return string("unfingerprinted-", time_ns())
 end
 
 # Record study-level figure provenance via DataVault (non-fatal).
