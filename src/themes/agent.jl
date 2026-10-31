@@ -55,21 +55,6 @@ _agent_jsonval(v::Real) = isfinite(v) ? string(v) : _jsonstr(string(v))
 _agent_jsonval(v::AbstractString) = _jsonstr(v)
 _agent_jsonval(v) = _jsonstr(string(v))
 
-# A figure's `params` binding as JSON: null, a structured {axis: value} object when the params object
-# is introspectable (a NamedTuple/Dict, or a ParamIO.DataKey via the extension's `_params_describe`),
-# else a string fallback (an opaque params value is still recorded for provenance).
-function _agent_params_json(io, params)
-    params === nothing && return print(io, "null")
-    desc = _params_describe(params)
-    desc === nothing && return print(io, _jsonstr(string(params)))
-    print(io, "{")
-    for (i, (k, v)) in enumerate(desc)
-        i == 1 || print(io, ",")
-        print(io, _jsonstr(k), ":", _agent_jsonval(v))
-    end
-    return print(io, "}")
-end
-
 # A JSON array on `io`: `[`, then each element as `f(x)` prints it, comma-separated, then `]`.
 function _json_array(f, io, xs)
     print(io, "[")
@@ -80,57 +65,78 @@ function _json_array(f, io, xs)
     return print(io, "]")
 end
 
+# A JSON array of strings on `io`.
+_json_strings(io, xs) = _json_array(x -> print(io, _jsonstr(x)), io, xs)
+
+# A JSON object on `io`, the counterpart of `_json_array`: `{`, then each `"key":value`,
+# comma-separated, then `}`. A value is JSON text already rendered (a string or an integer), or a
+# zero-argument function that prints it on `io` — so a nested array streams in key order (a figure is
+# materialized when its key is reached).
+function _json_object(io, kvs...)
+    print(io, "{")
+    for (i, (k, v)) in enumerate(kvs)
+        i == 1 || print(io, ",")
+        print(io, _jsonstr(k), ":")
+        _json_value(io, v)
+    end
+    return print(io, "}")
+end
+_json_value(io, v::Union{AbstractString,Integer}) = print(io, v)
+_json_value(io, f) = f()
+
+# A figure's `params` binding as JSON: null, a structured {axis: value} object when the params object
+# is introspectable (a NamedTuple/Dict, or a ParamIO.DataKey via the extension's `_params_describe`),
+# else a string fallback (an opaque params value is still recorded for provenance).
+function _agent_params_json(io, params)
+    params === nothing && return print(io, "null")
+    desc = _params_describe(params)
+    desc === nothing && return print(io, _jsonstr(string(params)))
+    return _json_object(io, (k => _agent_jsonval(v) for (k, v) in desc)...)
+end
+
 # One figure → its JSON object: what it claims (caption), where and how it was made (`defined_at`,
 # code, params) and pointers to what is behind it — its images and its data file, described exactly
 # (columns, points per series) and never inlined (Conventions › The agent face).
 function emit_figure(theme::AgentBase, fig, ctx)
     io = ctx.io
     imgs, csv = get(ctx.files, fig.id, (String[], nothing))
-    print(
+    _json_object(
         io,
-        "{\"id\":",
-        _jsonstr(string(fig.id)),
-        ",\"caption\":",
-        _jsonstr(fig.caption),
-        ",\"defined_at\":",
-        _jsonstr(fig.defined_at),
-        ",\"code\":",
-        _jsonstr(fig.code),
-        ",\"params\":",
+        "id" => _jsonstr(string(fig.id)),
+        "caption" => _jsonstr(fig.caption),
+        "defined_at" => _jsonstr(fig.defined_at),
+        "code" => _jsonstr(fig.code),
+        "params" => () -> _agent_params_json(io, fig.params),
+        "assets" => () -> _json_strings(io, (_agent_rel(a, ctx) for a in imgs)),
+        "data" => () -> _agent_data_json(io, csv, ctx),
+        "comments" => () -> _agent_comments!(fig.anchor, ctx),
     )
-    _agent_params_json(io, fig.params)
-    print(io, ",\"assets\":")
-    _json_array(a -> print(io, _jsonstr(_agent_rel(a, ctx))), io, imgs)
-    print(io, ",\"data\":")
-    _agent_data_json(io, csv, ctx)
-    print(io, ",\"comments\":")
-    _agent_comments!(fig.anchor, ctx)
-    print(io, "}")
     return nothing
 end
 
-# The id-keyed comment thread of any node (a figure, a page, a section) as `[{author, text}]`.
 # A path in this face's directory, as `agent.json` / `agent.md` name it.
-_agent_rel(path, ctx) = replace(relpath(path, ctx.outdir), '\\' => '/')
+_agent_rel(path, ctx) = _rel_url(path, ctx.outdir)
 
 # A figure's data file as a pointer and an exact description of what it holds — its columns (named by
 # the axis labels) and each series with its point count — or `null` when the figure has none.
 function _agent_data_json(io, csv, ctx)
     d = csv === nothing ? nothing : _data_descriptor(csv)
     d === nothing && return print(io, "null")
-    print(io, "{\"path\":", _jsonstr(_agent_rel(csv, ctx)), ",\"columns\":")
-    _json_array(c -> print(io, _jsonstr(c)), io, d.columns)
-    print(io, ",\"series\":")
-    _json_array(io, d.series) do (label, n)
-        return print(io, "{\"label\":", _jsonstr(label), ",\"points\":", n, "}")
-    end
-    return print(io, "}")
+    series((label, n)) = _json_object(io, "label" => _jsonstr(label), "points" => n)
+    return _json_object(
+        io,
+        "path" => _jsonstr(_agent_rel(csv, ctx)),
+        "columns" => () -> _json_strings(io, d.columns),
+        "series" => () -> _json_array(series, io, d.series),
+    )
 end
 
+# The id-keyed comment thread of any node (a figure, a table, a page, a section) as
+# `[{author, text}]`.
 function _agent_comments!(anchor, ctx)
     return _json_array(ctx.io, get(ctx.comments, Symbol(anchor), Comment[])) do c
-        return print(
-            ctx.io, "{\"author\":", _jsonstr(c.author), ",\"text\":", _jsonstr(c.text), "}"
+        return _json_object(
+            ctx.io, "author" => _jsonstr(c.author), "text" => _jsonstr(c.text)
         )
     end
 end
@@ -139,114 +145,50 @@ end
 # LLM-native form.
 function emit_table(::AgentBase, tbl, ctx)
     io = ctx.io
-    print(
+    row(r) = _json_array(cell -> print(io, _agent_jsonval(cell)), io, r)
+    _json_object(
         io,
-        "{\"id\":",
-        _jsonstr(string(tbl.id)),
-        ",\"caption\":",
-        _jsonstr(tbl.caption),
-        ",\"defined_at\":",
-        _jsonstr(tbl.defined_at),
-        ",\"code\":",
-        _jsonstr(tbl.code),
-        ",\"header\":",
+        "id" => _jsonstr(string(tbl.id)),
+        "caption" => _jsonstr(tbl.caption),
+        "defined_at" => _jsonstr(tbl.defined_at),
+        "code" => _jsonstr(tbl.code),
+        "header" => () -> _json_strings(io, tbl.header),
+        "rows" => () -> _json_array(row, io, tbl.rows),
+        "comments" => () -> _agent_comments!(tbl.anchor, ctx),
     )
-    _json_array(h -> print(io, _jsonstr(h)), io, tbl.header)
-    print(io, ",\"rows\":")
-    _json_array(io, tbl.rows) do row
-        return _json_array(cell -> print(io, _agent_jsonval(cell)), io, row)
-    end
-    print(io, ",\"comments\":")
-    _agent_comments!(tbl.anchor, ctx)
-    print(io, "}")
-    return nothing
-end
-
-function _agent_tables!(theme::AgentBase, tables, ctx)
-    _json_array(tbl -> emit_table(theme, tbl, ctx), ctx.io, tables)
     return nothing
 end
 
 # One @code block → a JSON object: the source and its captured output (a tool reads the computation).
 function emit_code(::AgentBase, blk, ctx)
-    io = ctx.io
-    print(
-        io,
-        "{\"id\":",
-        _jsonstr(string(blk.id)),
-        ",\"caption\":",
-        _jsonstr(blk.caption),
-        ",\"defined_at\":",
-        _jsonstr(blk.defined_at),
-        ",\"lang\":",
-        _jsonstr(blk.lang),
-        ",\"source\":",
-        _jsonstr(blk.source),
-        ",\"output\":",
-        _jsonstr(blk.output),
-        "}",
+    _json_object(
+        ctx.io,
+        "id" => _jsonstr(string(blk.id)),
+        "caption" => _jsonstr(blk.caption),
+        "defined_at" => _jsonstr(blk.defined_at),
+        "lang" => _jsonstr(blk.lang),
+        "source" => _jsonstr(blk.source),
+        "output" => _jsonstr(blk.output),
     )
-    return nothing
-end
-
-function _agent_codes!(theme::AgentBase, codes, ctx)
-    _json_array(blk -> emit_code(theme, blk, ctx), ctx.io, codes)
-    return nothing
-end
-
-# A container's @raw blocks: each one's HTML, as written (an agent reads what the gallery shows).
-function _agent_raws!(raws, ctx)
-    io = ctx.io
-    _json_array(io, raws) do r
-        return print(
-            io,
-            "{\"id\":",
-            _jsonstr(string(r.id)),
-            ",\"html\":",
-            _jsonstr(r.html),
-            ",\"defined_at\":",
-            _jsonstr(r.defined_at),
-            "}",
-        )
-    end
     return nothing
 end
 
 # One check -> a JSON object with native-typed numerics (a tool reads 4.6e-5, not "4.6e-5").
 function emit_check(::AgentBase, chk, ctx)
-    io = ctx.io
-    print(
-        io,
-        "{\"id\":",
-        _jsonstr(string(chk.id)),
-        ",\"label\":",
-        _jsonstr(chk.label),
-        ",\"got\":",
-        _agent_jsonval(chk.got),
-        ",\"want\":",
-        _agent_jsonval(chk.want),
-        ",\"delta\":",
-        _agent_jsonval(chk.delta),
-        ",\"tol\":",
-        _agent_jsonval(chk.tol),
-        ",\"kind\":",
-        _jsonstr(string(chk.kind)),
-        ",\"pass\":",
-        _agent_jsonval(chk.pass),
-        ",\"defined_at\":",   # where the @test was written, `path:line`, as for every node
-        _jsonstr(chk.source),
+    _json_object(
+        ctx.io,
+        "id" => _jsonstr(string(chk.id)),
+        "label" => _jsonstr(chk.label),
+        "got" => _agent_jsonval(chk.got),
+        "want" => _agent_jsonval(chk.want),
+        "delta" => _agent_jsonval(chk.delta),
+        "tol" => _agent_jsonval(chk.tol),
+        "kind" => _jsonstr(string(chk.kind)),
+        "pass" => _agent_jsonval(chk.pass),
+        "defined_at" => _jsonstr(chk.source),   # where the @test was written, `path:line`
         # the code is ONE object in `codes` (kind "code"); a check REFERENCES it by id, or null
-        ",\"code_id\":",
-        isempty(chk.code_anchor) ? "null" : _jsonstr(chk.code_anchor),
-        "}",
+        "code_id" => isempty(chk.code_anchor) ? "null" : _jsonstr(chk.code_anchor),
     )
-    return nothing
-end
-
-# A container's own checks as a JSON array (each through the `emit_check` dispatch point), so the
-# `{kind:"check", id}` entries in its `content` resolve within the same object (#173).
-function _agent_checks!(theme::AgentBase, checks, ctx)
-    _json_array(c -> emit_check(theme, c, ctx), ctx.io, checks)
     return nothing
 end
 
@@ -257,13 +199,8 @@ function _agent_content!(c, ctx)
     _json_array(io, _content_items(c)) do (kind, item)
         item isa Union{Prose,Figure,Table,Check,CodeBlock,RawBlock,Section} ||
             _unhandled_node("agent.json", item)
-        return print(
-            io,
-            "{\"kind\":",
-            _jsonstr(string(kind)),
-            ",\"id\":",
-            _jsonstr(string(item.id)),
-            "}",
+        return _json_object(
+            io, "kind" => _jsonstr(string(kind)), "id" => _jsonstr(string(item.id))
         )
     end
     return nothing
@@ -271,7 +208,7 @@ end
 
 # Materialize each figure (the asset is the verifiable artifact), then emit them as a JSON array.
 # Inlined rather than a shared helper so formats come straight from `figure_formats(theme)` — keeps
-# the materialize-all-then-emit-all two-phase shape and mirrors `_latex_emit_figs!`.
+# the materialize-all-then-emit-all two-phase shape and mirrors `_latex_emit_fig!`.
 function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
     fmts = figure_formats(theme)
     for fig in figs
@@ -286,11 +223,7 @@ function _agent_figs!(theme::AgentBase, figs, assetdir, ctx)
             ctx.files[fig.id] = (String[], csv)
             continue
         end
-        try
-            materialize!(fig, base, fmts, ctx.cache)   # into this face's directory
-        catch e
-            e isa InterruptException && rethrow()
-            push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+        if !_try_materialize!(fig, base, fmts, ctx.cache, ctx.rdiag)   # into this face's directory
             ctx.files[fig.id] = (String[], nothing)
             continue
         end
@@ -316,101 +249,78 @@ end
 # A derived verdict as JSON (`null` when the subtree holds no checks — never a vacuous PASS).
 function _agent_verdict_json(v)
     v === nothing && return "null"
-    return string(
-        "{\"verdict\":",
-        _jsonstr(v.verdict),
-        ",\"passed\":",
-        v.passed,
-        ",\"total\":",
-        v.total,
-        ",\"failed\":[",
-        join((_jsonstr(f) for f in v.failed), ","),
-        "]}",
-    )
-end
-
-# A container's prose blocks: `[{id, text}]`, in the order written (their place among the other
-# nodes is in `content`).
-function _agent_texts!(texts, ctx)
-    return _json_array(ctx.io, texts) do t
-        return print(
-            ctx.io,
-            "{\"id\":",
-            _jsonstr(string(t.id)),
-            ",\"text\":",
-            _jsonstr(t.source),
-            ",\"defined_at\":",
-            _jsonstr(t.defined_at),
-            "}",
+    return sprint() do io
+        return _json_object(
+            io,
+            "verdict" => _jsonstr(v.verdict),
+            "passed" => v.passed,
+            "total" => v.total,
+            "failed" => () -> _json_strings(io, v.failed),
         )
     end
 end
 
 # Pages and sections are one kind of container, so they share one body and one set of keys: a page
-# adds only `part` and `status` (Conventions › Faces). Text the author did not write is "".
-function _agent_container!(theme::AgentBase, c, pg, assetdir, ctx)
+# adds only `part` and `status` (Conventions › Faces). Text the author did not write is "". Each
+# array is printed when its key is reached, in this order.
+function _agent_container_fields(theme::AgentBase, c, pg, assetdir, ctx)
     io = ctx.io
-    print(
+    # a container's prose blocks and @raw blocks (each one's HTML, as written: an agent reads what the
+    # gallery shows), in the order written; their place among the other nodes is in `content`
+    text(t) = _json_object(
         io,
-        ",\"summary\":",
-        _jsonstr(something(c.summary, "")),
-        ",\"verdict\":",
-        _agent_verdict_json(verdict(c)),
-        ",\"checks\":",
+        "id" => _jsonstr(string(t.id)),
+        "text" => _jsonstr(t.source),
+        "defined_at" => _jsonstr(t.defined_at),
     )
-    _agent_checks!(theme, c.checks, ctx)
-    print(io, ",\"texts\":")
-    _agent_texts!(c.texts, ctx)
-    print(io, ",\"figures\":")
-    _agent_figs!(theme, c.figures, assetdir, ctx)
-    print(io, ",\"tables\":")
-    _agent_tables!(theme, c.tables, ctx)
-    print(io, ",\"codes\":")
-    _agent_codes!(theme, c.codes, ctx)
-    print(io, ",\"raws\":")
-    _agent_raws!(c.raws, ctx)
-    print(io, ",\"content\":")
-    _agent_content!(c, ctx)
-    print(io, ",\"comments\":")   # a page or section carries its own thread, as a figure does
-    _agent_comments!(c.anchor, ctx)
-    # the section tree: children nest inside their parent's object, in declaration order
-    print(io, ",\"sections\":[")
-    for (j, child) in enumerate(c.sections)
-        j == 1 || print(io, ",")
-        emit_section(theme, child, pg, ctx)
-    end
-    print(io, "]}")
-    return nothing
+    raw(r) = _json_object(
+        io,
+        "id" => _jsonstr(string(r.id)),
+        "html" => _jsonstr(r.html),
+        "defined_at" => _jsonstr(r.defined_at),
+    )
+    return (
+        "summary" => _jsonstr(something(c.summary, "")),
+        "verdict" => _agent_verdict_json(verdict(c)),
+        # its own checks, each through the `emit_check` dispatch point, so the `{kind:"check", id}`
+        # entries in its `content` resolve within the same object (#173)
+        "checks" => () -> _json_array(x -> emit_check(theme, x, ctx), io, c.checks),
+        "texts" => () -> _json_array(text, io, c.texts),
+        "figures" => () -> _agent_figs!(theme, c.figures, assetdir, ctx),
+        "tables" => () -> _json_array(x -> emit_table(theme, x, ctx), io, c.tables),
+        "codes" => () -> _json_array(x -> emit_code(theme, x, ctx), io, c.codes),
+        "raws" => () -> _json_array(raw, io, c.raws),
+        "content" => () -> _agent_content!(c, ctx),
+        # a page or section carries its own thread, as a figure does
+        "comments" => () -> _agent_comments!(c.anchor, ctx),
+        # the section tree: children nest inside their parent's object, in declaration order
+        "sections" =>
+            () -> _json_array(x -> emit_section(theme, x, pg, ctx), io, c.sections),
+    )
 end
 
 function emit_section(theme::AgentBase, sec, pg, ctx)
-    print(
-        ctx.io,
-        "{\"id\":",
-        _jsonstr(string(sec.id)),
-        ",\"title\":",
-        _jsonstr(sec.title),
-        ",\"depth\":",
-        sec.depth,
-    )
     assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor, sec.anchor)
-    return _agent_container!(theme, sec, pg, assetdir, ctx)
+    return _json_object(
+        ctx.io,
+        "id" => _jsonstr(string(sec.id)),
+        "title" => _jsonstr(sec.title),
+        "depth" => sec.depth,
+        _agent_container_fields(theme, sec, pg, assetdir, ctx)...,
+    )
 end
 
 function emit_page(theme::AgentBase, pg, ctx)
-    print(
-        ctx.io,
-        "{\"id\":",
-        _jsonstr(string(pg.id)),
-        ",\"title\":",
-        _jsonstr(pg.title),
-        ",\"depth\":1,\"part\":",
-        pg.part === nothing ? "null" : _jsonstr(string(pg.part)),
-        ",\"status\":",
-        _jsonstr(string(pg.status)),
-    )
     assetdir = joinpath(ctx.outdir, "assets", "figures", pg.anchor)
-    return _agent_container!(theme, pg, pg, assetdir, ctx)
+    return _json_object(
+        ctx.io,
+        "id" => _jsonstr(string(pg.id)),
+        "title" => _jsonstr(pg.title),
+        "depth" => 1,
+        "part" => pg.part === nothing ? "null" : _jsonstr(string(pg.part)),
+        "status" => _jsonstr(string(pg.status)),
+        _agent_container_fields(theme, pg, pg, assetdir, ctx)...,
+    )
 end
 
 # agent.json up to its pages (title + parts + pages, the latter via the per-node contract); the
@@ -420,17 +330,13 @@ function _agent_json(theme::AgentBase, doc::Document, ctx)
     print(io, "{\"title\":", _jsonstr(doc.meta.title), ",\"parts\":")
     _json_array(io, doc.parts) do (pid, ptitle)
         d = get(doc.part_descs, pid, nothing)
-        return print(
+        st = get(doc.part_status, pid, nothing)
+        return _json_object(
             io,
-            "{\"id\":",
-            _jsonstr(string(pid)),
-            ",\"title\":",
-            _jsonstr(ptitle),
-            ",\"desc\":",
-            _jsonstr(d === nothing ? "" : d.source),
-            ",\"status\":",
-            "null",
-            "}",
+            "id" => _jsonstr(string(pid)),
+            "title" => _jsonstr(ptitle),
+            "desc" => _jsonstr(d === nothing ? "" : d.source),
+            "status" => st === nothing ? "null" : _jsonstr(string(st)),
         )
     end
     print(io, ",\"pages\":")
@@ -445,15 +351,11 @@ function _agent_json_diagnostics(entries)
     io = IOBuffer()
     print(io, ",\"diagnostics\":")
     _json_array(io, entries) do e
-        return print(
+        return _json_object(
             io,
-            "{\"severity\":",
-            _jsonstr(string(e.severity)),
-            ",\"item\":",
-            _jsonstr(e.item),
-            ",\"message\":",
-            _jsonstr(e.message),
-            "}",
+            "severity" => _jsonstr(string(e.severity)),
+            "item" => _jsonstr(e.item),
+            "message" => _jsonstr(e.message),
         )
     end
     print(io, "}")
@@ -471,9 +373,8 @@ end
 
 # A figure in agent.md, inside its block: what it claims, where and how it was made, and pointers to
 # what is behind it — the data file described exactly (columns, points per series), and its image.
-function _agent_md_fig(io, fig, outdir, comments, files)
-    imgs, csv = get(files, fig.id, (String[], nothing))
-    rel(p) = replace(relpath(p, outdir), '\\' => '/')
+function _agent_md_fig(io, fig, ctx)
+    imgs, csv = get(ctx.files, fig.id, (String[], nothing))
     println(io, "- [fig: ", fig.id, "] ", fig.caption)
     isempty(fig.defined_at) || println(io, "  - defined at: ", fig.defined_at)
     isempty(fig.code) || println(io, "  - code: `", fig.code, "`")
@@ -484,13 +385,17 @@ function _agent_md_fig(io, fig, outdir, comments, files)
     else
         series = join(("$(l) ($(n) points)" for (l, n) in d.series), ", ")
         println(
-            io, "  - data: ", rel(csv), " — columns: ", join(d.columns, ", "), "; ", series
+            io,
+            "  - data: ",
+            _agent_rel(csv, ctx),
+            " — columns: ",
+            join(d.columns, ", "),
+            "; ",
+            series,
         )
     end
-    println(io, "  - image: ", isempty(imgs) ? "none" : rel(imgs[1]))
-    for c in get(comments, Symbol(fig.anchor), Comment[])
-        println(io, "  - note (", c.author, "): ", c.text)
-    end
+    println(io, "  - image: ", isempty(imgs) ? "none" : _agent_rel(imgs[1], ctx))
+    _agent_md_notes(io, fig.anchor, ctx; indent="  ")   # inside the figure's block
     return nothing
 end
 
@@ -554,27 +459,18 @@ function _agent_md_code(io, blk)
 end
 
 # A container's content in agent.md, in declaration order: one method per node type, so a type
-# agent.md has no form for is an error naming it. `env` is (outdir, comments, files, rdiag).
-function _agent_md_content(io, c, outdir, comments, files, rdiag)
-    env = (; outdir, comments, files, rdiag)
-    foreach(((_, node),) -> _agent_md_node(io, node, env), _content_items(c))
-    return nothing
-end
-_agent_md_node(io, node, env) = _unhandled_node("agent.md", node)
-_agent_md_node(io, p::Prose, env) = println(io, p.source)
-function _agent_md_node(io, f::Figure, env)
-    return _agent_md_fig(io, f, env.outdir, env.comments, env.files)
-end
-function _agent_md_node(io, t::Table, env)
+# agent.md has no form for is an error naming it.
+_agent_md_node(io, node, ctx) = _unhandled_node("agent.md", node)
+_agent_md_node(io, p::Prose, ctx) = println(io, p.source)
+_agent_md_node(io, f::Figure, ctx) = _agent_md_fig(io, f, ctx)
+function _agent_md_node(io, t::Table, ctx)
     _agent_md_table(io, t)
-    return _agent_md_notes(io, t.anchor, env.comments)
+    return _agent_md_notes(io, t.anchor, ctx)
 end
-_agent_md_node(io, chk::Check, env) = _agent_md_check(io, chk)   # where it was written
-_agent_md_node(io, b::CodeBlock, env) = _agent_md_code(io, b)
-function _agent_md_node(io, s::Section, env)   # a nested section, in declaration order
-    return _agent_md_section(io, s, env.outdir, env.comments, env.files, env.rdiag)
-end
-_agent_md_node(io, r::RawBlock, env) = println(io, "```html\n", r.html, "\n```")   # @raw, as written
+_agent_md_node(io, chk::Check, ctx) = _agent_md_check(io, chk)   # where it was written
+_agent_md_node(io, b::CodeBlock, ctx) = _agent_md_code(io, b)
+_agent_md_node(io, s::Section, ctx) = _agent_md_container(io, s, s.depth, "", ctx)   # nested, in order
+_agent_md_node(io, r::RawBlock, ctx) = println(io, "```html\n", r.html, "\n```")   # @raw, as written
 
 # The one place agent.md turns depth into a heading, for parts (0, `##`), pages (1, `###`) and
 # sections (2, `####` …). Past `######` the level is kept as a bold line (Markdown has no deeper
@@ -593,9 +489,6 @@ function _agent_md_heading(depth::Int, title, anchor, rdiag)
     return string("**", title, "**")
 end
 
-# A container's verdict over its subtree as one bold line ("" when it holds no checks).
-# A container's verdict band over its subtree, then its own checks — the same place every face puts
-# them, ahead of the content (Conventions › Faces).
 # A container's verdict band in agent.md: the count over its subtree and which checks fail. The checks
 # themselves are blocks in the content, each where it was written, after its code.
 function _agent_md_verdict(io, c)
@@ -618,61 +511,49 @@ function _agent_md_verdict(io, c)
     return nothing
 end
 
-# A node's comment thread, after it (where the gallery and LaTeX put it).
-function _agent_md_notes(io, anchor, comments)
-    for c in get(comments, Symbol(anchor), Comment[])
-        println(io, "- note (", c.author, "): ", c.text)
+# A node's comment thread, after it (where the gallery and LaTeX put it); a figure's is indented
+# into its block.
+function _agent_md_notes(io, anchor, ctx; indent="")
+    for c in get(ctx.comments, Symbol(anchor), Comment[])
+        println(io, indent, "- note (", c.author, "): ", c.text)
     end
     return nothing
 end
 
-function _agent_md_section(io, sec, outdir, comments, files, rdiag)
-    println(
-        io,
-        "\n",
-        _agent_md_heading(sec.depth, sec.title, sec.anchor, rdiag),
-        "  [id: ",
-        sec.id,
-        "]",
-    )
-    _agent_md_verdict(io, sec)
-    sec.summary === nothing || println(io, "_", sec.summary, "_")
-    _agent_md_content(io, sec, outdir, comments, files, rdiag)
-    _agent_md_notes(io, sec.anchor, comments)
+# A page or section in agent.md: its heading (with its id, and `badge` after it), its verdict band and
+# summary, its content in declaration order (nested sections included), then its comments.
+function _agent_md_container(io, c, depth, badge, ctx)
+    heading = _agent_md_heading(depth, c.title, c.anchor, ctx.rdiag)
+    println(io, "\n", heading, "  [id: ", c.id, "]", badge)
+    _agent_md_verdict(io, c)
+    c.summary === nothing || println(io, "_", c.summary, "_")
+    foreach(((_, node),) -> _agent_md_node(io, node, ctx), _content_items(c))
+    _agent_md_notes(io, c.anchor, ctx)
     return nothing
 end
 
-function _agent_markdown(doc::Document, outdir, comments, files, rdiag)
+# agent.md's body: the title, then each page under the heading of the part it opens.
+function _agent_markdown(doc::Document, ctx)
     io = IOBuffer()
     isempty(doc.meta.title) || println(io, "# ", doc.meta.title)
     curpart = :__start__
     for pg in doc.pages
-        if pg.part !== curpart
-            curpart = pg.part
-            if pg.part !== nothing
-                k = findfirst(p -> first(p) === pg.part, doc.parts)
-                ptitle = k === nothing ? string(pg.part) : last(doc.parts[k])
-                println(io, "\n", _agent_md_heading(0, ptitle, _anchor(pg.part), rdiag))
-                d = get(doc.part_descs, pg.part, nothing)
-                d === nothing || println(io, d.source)
-            end
-        end
+        pg.part === curpart || _agent_md_part(io, doc, pg.part, ctx)
+        curpart = pg.part
         badge = pg.status === :final ? "" : "  [status: $(pg.status)]"
-        println(
-            io,
-            "\n",
-            _agent_md_heading(1, pg.title, pg.anchor, rdiag),
-            "  [id: ",
-            pg.id,
-            "]",
-            badge,
-        )
-        _agent_md_verdict(io, pg)
-        pg.summary === nothing || println(io, "_", pg.summary, "_")
-        _agent_md_content(io, pg, outdir, comments, files, rdiag)   # sections included, in order
-        _agent_md_notes(io, pg.anchor, comments)
+        _agent_md_container(io, pg, 1, badge, ctx)
     end
     return String(take!(io))
+end
+
+# A part's heading and description in agent.md, where its first page begins (nothing for the pages
+# outside any part).
+function _agent_md_part(io, doc, pid, ctx)
+    pid === nothing && return nothing
+    println(io, "\n", _agent_md_heading(0, _part_title(doc, pid), _anchor(pid), ctx.rdiag))
+    d = get(doc.part_descs, pid, nothing)
+    d === nothing || println(io, d.source)
+    return nothing
 end
 
 # The diagnostics as a closing agent.md section ("" when there are none).
@@ -698,7 +579,7 @@ function emit_document(
     # agent.json's body first: it materializes the figures agent.md then reads. Both files end with
     # the same diagnostics, agent.md's own (a fallback heading) included.
     body = _agent_json(theme, doc, ctx)
-    md = _agent_markdown(doc, outdir, comments, ctx.files, rdiag)
+    md = _agent_markdown(doc, ctx)
     entries = vcat(doc.diag.entries, rdiag)
     write(joinpath(outdir, "agent.json"), string(body, _agent_json_diagnostics(entries)))
     write(joinpath(outdir, "agent.md"), string(md, _agent_md_diagnostics(entries)))

@@ -145,10 +145,12 @@ end
 
 # One (already-materialized) figure → a \includegraphics figure.
 function emit_figure(theme::LaTeXBase, fig, ctx)
-    isempty(fig.assets) &&
-        return _latex_left_out!(ctx, fig.anchor, "figure has no asset to include")
+    if isempty(fig.assets)
+        _latex_left_out!(ctx, fig.anchor, "figure has no asset to include")
+        return emit_comments(theme, fig.anchor, ctx)   # its comments stay, as in every face
+    end
     io = ctx.io
-    rel = replace(relpath(fig.assets[1], ctx.outdir), '\\' => '/')
+    rel = _rel_url(fig.assets[1], ctx.outdir)
     println(io, "\\begin{figure}[htbp]\\centering")
     println(io, "\\includegraphics[width=0.8\\linewidth]{", rel, "}")
     cap = isempty(fig.caption) ? "" : emit_text(theme, fig.caption, fig.anchor, ctx)
@@ -160,13 +162,9 @@ end
 
 # Materialize one figure to `assetdir`, then emit it.
 function _latex_emit_fig!(theme::LaTeXBase, fig, assetdir, ctx)
-    try
-        materialize!(fig, joinpath(assetdir, fig.anchor), figure_formats(theme), ctx.cache)
-    catch e
-        e isa InterruptException && rethrow()
-        push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
-        return nothing
-    end
+    base = joinpath(assetdir, fig.anchor)
+    _try_materialize!(fig, base, figure_formats(theme), ctx.cache, ctx.rdiag) ||
+        return emit_comments(theme, fig.anchor, ctx)   # a failed figure keeps its comments
     emit_figure(theme, fig, ctx)
     return nothing
 end
@@ -292,10 +290,9 @@ function emit_table(theme::LaTeXBase, tbl, ctx)
     return nothing
 end
 
-# The one place a section's depth becomes a LaTeX heading. A page is `\\section` (depth 1), so a
-# top-level section is `\\subsection`; past `\\subparagraph` the level is kept as a bold run-in
+# The one place LaTeX turns depth into a heading, for parts (0), pages (1, `\\section`) and sections
+# (2…, a top-level one is `\\subsection`). Past `\\subparagraph` the level is kept as a bold run-in
 # heading, with a diagnostic (never flattened).
-# The one place LaTeX turns depth into a heading, for parts (0), pages (1) and sections (2…).
 const _LATEX_HEADINGS = (
     "part", "section", "subsection", "subsubsection", "paragraph", "subparagraph"
 )
@@ -315,36 +312,27 @@ function _latex_heading(depth::Int, title, anchor, ctx)
     return string("\\par\\noindent\\textbf{", t, "}\\label{", anchor, "}")
 end
 
-function emit_section(theme::LaTeXBase, sec, pg, ctx)
-    io = ctx.io
-    println(io, _latex_heading(sec, ctx))
-    _latex_checks!(theme, sec, ctx)
-    _latex_emit_content!(
-        theme, sec, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx; page=pg
-    )
-    emit_comments(theme, sec.anchor, ctx)
+# A page's or section's body, after its heading: its checks lead (a tabular of its own checks under a
+# verdict line over its subtree), then its content in declaration order (nested sections included),
+# then its comments. Figures go under `figures/<page>[/<section>]`.
+function _latex_body!(theme::LaTeXBase, c, pg, assetdir, ctx)
+    _latex_checks!(theme, c, ctx)
+    _latex_emit_content!(theme, c, assetdir, ctx; page=pg)
+    emit_comments(theme, c.anchor, ctx)
     return nothing
+end
+
+function emit_section(theme::LaTeXBase, sec, pg, ctx)
+    println(ctx.io, _latex_heading(sec, ctx))
+    assetdir = joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor)
+    return _latex_body!(theme, sec, pg, assetdir, ctx)
 end
 
 function emit_page(theme::LaTeXBase, pg, ctx)
     io = ctx.io
-    # a page = one \section; then its content in declaration order (its subsections included)
-    println(io, _latex_heading(1, pg.title, pg.anchor, ctx))
+    println(io, _latex_heading(1, pg.title, pg.anchor, ctx))   # a page = one \section
     pg.status === :draft && println(io, "\\par\\noindent\\textit{Draft.}")   # its maturity, as every face shows it
-    # checks lead (tabular of the page's own checks + a verdict line over its subtree)
-    _latex_checks!(theme, pg, ctx)
-    _latex_emit_content!(
-        theme, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx; page=pg
-    )
-    emit_comments(theme, pg.anchor, ctx)
-    return nothing
-end
-
-function _part_title(doc::Document, pid)
-    return (
-        i=findfirst(p -> first(p) === pid, doc.parts);
-        i === nothing ? string(pid) : last(doc.parts[i])
-    )
+    return _latex_body!(theme, pg, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
 end
 
 function emit_document(

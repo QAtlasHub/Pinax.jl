@@ -50,6 +50,10 @@ end
 
 _ext(p) = (e=splitext(p)[2]; isempty(e) ? "" : lowercase(e[2:end]))
 
+# A written file as a face names it: relative to the face's directory, with forward slashes (a URL,
+# and the same on Windows).
+_rel_url(path, outdir) = replace(relpath(path, outdir), '\\' => '/')
+
 # Pre-made file (first-class): same-format copy (v1 has no conversion, notes 04).
 function _copyfile(src::AbstractString, base)
     isfile(src) || error("Pinax: @figure file not found: $(src)")
@@ -73,6 +77,7 @@ function _csv_field(v)
     return needs ? string('"', replace(s, '"' => "\"\""), '"') : s
 end
 _csv_num(v::Real) = isfinite(v) ? string(v) : ""   # NaN/Inf -> blank cell
+_csv_num(::Union{Missing,Nothing}) = ""             # a missing value is a gap too, like NaN
 _csv_num(v) = _csv_field(v)                         # categorical x (strings/dates)
 
 # The columns of a data file: the series label, then the x and y axes, named by the plot's axis labels

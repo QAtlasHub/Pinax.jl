@@ -36,6 +36,25 @@ function resolve!(doc::Document)
     return doc
 end
 
+# Materialize one figure into a face's directory. A failure is recorded in `rdiag` (the face then
+# shows the figure as a gap, never drops it silently) and `false` is returned.
+function _try_materialize!(fig, base, fmts, cache, rdiag)
+    try
+        materialize!(fig, base, fmts, cache)
+        return true
+    catch e
+        e isa InterruptException && rethrow()
+        push!(rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
+        return false
+    end
+end
+
+# A part's title as `@part` registered it; the id itself for a part that was never declared.
+function _part_title(doc::Document, pid)
+    i = findfirst(p -> first(p) === pid, doc.parts)
+    return i === nothing ? string(pid) : last(doc.parts[i])
+end
+
 """
     render([doc]; out, theme=nothing, force=false) -> path
 

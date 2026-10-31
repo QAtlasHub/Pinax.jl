@@ -654,28 +654,30 @@ function _card_thumb_fig(pg::Page, bookmarks)
     pg.no_thumbnail && return nothing
     figs = _page_figs(pg)
     isempty(figs) && return nothing
-    if pg.thumbnail !== nothing
-        i = findfirst(f -> f.id === pg.thumbnail.id, figs)
-        i === nothing || return figs[i]
-    end
-    for f in figs
-        f.thumbnail && return f
-    end
-    if !isempty(bookmarks)
-        for f in figs
-            Symbol(f.anchor) in bookmarks && return f
-        end
-    end
-    return figs[1]
+    bookmarked = _first_in(f -> Symbol(f.anchor) in bookmarks, figs)
+    return something(_authored_thumb(pg, figs), bookmarked, figs[1])
 end
+
+# The figure the author chose for the card — `@thumbnail :id`, else one marked `thumbnail=true` — or
+# `nothing`.
+function _authored_thumb(pg::Page, figs)
+    t = pg.thumbnail
+    byid = t === nothing ? nothing : _first_in(f -> f.id === t.id, figs)
+    return something(byid, _first_in(f -> f.thumbnail, figs), Some(nothing))
+end
+
+# The first element of `xs` satisfying `pred`, or `nothing`.
+_first_in(pred, xs) = (i=findfirst(pred, xs); i === nothing ? nothing : xs[i])
+
+# The image extensions a browser draws inline as `<img>` (animated rasters included).
+const _IMG_EXTS = ("svg", "png", "gif", "webp", "jpg", "jpeg", "apng", "avif")
 
 # Pick a card-thumbnail asset for a figure: a raster/vector image if it has one (drawn as <img>),
 # else a PDF (a lazy mini-preview of the actual page), else nothing. Returns (:img|:pdf, rel).
 function _thumb_asset(fig::Figure, outdir)
-    rel(a) = replace(relpath(a, outdir), '\\' => '/')
+    rel(a) = _rel_url(a, outdir)
     for a in fig.assets
-        _ext(a) in ("svg", "png", "jpg", "jpeg", "gif", "webp", "apng", "avif") &&
-            return (:img, rel(a))
+        _ext(a) in _IMG_EXTS && return (:img, rel(a))
     end
     for a in fig.assets
         _ext(a) == "pdf" && return (:pdf, rel(a))
@@ -831,25 +833,33 @@ function emit_page(theme::GalleryBase, pg, ctx)
     return nothing
 end
 
+# A figure count after a Contents entry or a heading: " (n)", or "" when there are none.
+_nfig_span(n) = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
+
+# "1 figure" / "n figures".
+_nfigs_text(n) = string(n, n == 1 ? " figure" : " figures")
+
+# A section's Contents link: its title and figure count, indented by its depth (`base` as in
+# `_toc_indent`).
+function _emit_sec_link(io, sec, base)
+    return println(
+        io,
+        "<a href=\"#",
+        sec.anchor,
+        "\"",
+        _toc_indent(sec, base),
+        ">",
+        _esc(sec.title),
+        _nfig_span(length(sec.figures)),
+        "</a>",
+    )
+end
+
 # A page file's Contents nav, listing its sections (a one-page document has the global TOC instead).
 function _emit_page_nav(pg, io)
     isempty(pg.sections) && return nothing
     println(io, "<nav><strong>Contents</strong>")
-    for sec in _all_sections(pg)
-        n = length(sec.figures)
-        cnt = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
-        println(
-            io,
-            "<a href=\"#",
-            sec.anchor,
-            "\"",
-            _toc_indent(sec, 0),
-            ">",
-            _esc(sec.title),
-            cnt,
-            "</a>",
-        )
-    end
+    foreach(sec -> _emit_sec_link(io, sec, 0), _all_sections(pg))
     println(io, "</nav>")
     return nothing
 end
@@ -869,12 +879,50 @@ function _grouped_pages(doc::Document)
     return groups
 end
 
+# The skeleton every page listing shares (the :toc and :cards index, a one-page document's Contents).
+# With no @part: each page through `item`, inside `wrap` (an opening and a closing tag, "" for none).
+# With parts: one open `<details>` group per part, pages outside any part last as "Other", each
+# group's pages inside `wrap`. `counted` adds the group's page count and its part's description.
+function _emit_grouped(item, doc::Document, io; wrap=("", ""), counted::Bool=true)
+    open, close = wrap
+    if isempty(doc.parts)
+        isempty(open) || println(io, open)
+        foreach(item, doc.pages)
+        isempty(close) || println(io, close)
+        return nothing
+    end
+    for (pid, title, pages) in _grouped_pages(doc)
+        println(io, _group_summary(doc, pid, title, pages, counted), open)
+        foreach(item, pages)
+        println(io, close, "</details>")
+    end
+    return nothing
+end
+
+# A part group's `<details>` opener and `<summary>`.
+function _group_summary(doc::Document, pid, title, pages, counted)
+    head = string(
+        "<details class=\"pinax-group\" open><summary>", _esc(something(title, "Other"))
+    )
+    counted || return string(head, "</summary>")
+    return string(
+        head,
+        " <span class=\"grp-count\">(",
+        length(pages),
+        ")</span></summary>",
+        _part_desc_html(doc, pid),
+    )
+end
+
 # "N section(s) · M figure(s)" (or just figures when a page has no subsections).
 function _count_meta(nsec, nfig)
-    figs = string(nfig, nfig == 1 ? " figure" : " figures")
+    figs = _nfigs_text(nfig)
     nsec == 0 && return figs
     return string(nsec, nsec == 1 ? " section · " : " sections · ", figs)
 end
+
+# A page's counts, over its whole section tree.
+_page_count_meta(pg) = _count_meta(length(_all_sections(pg)), _page_nfigs(pg))
 
 # A part's overview description (markdown → HTML), shown beneath its index group heading; "" if none.
 # Math ($…$) renders client-side via KaTeX (the index loads it); a parse failure falls back to text.
@@ -894,53 +942,25 @@ end
 # Single-page table-of-contents nav: pages (grouped under their @part) + indented section links.
 function _emit_toc_nav(doc::Document, io; has_bib::Bool=false)
     println(io, "<nav><strong>Contents</strong>")
-    pagelink(pg) = begin
-        n = _page_nfigs(pg)
-        cnt = n > 0 ? string(" <span class=\"nfig\">(", n, ")</span>") : ""
-        println(
-            io,
-            "<a href=\"#",
-            pg.anchor,
-            "\">",
-            _esc(pg.title),
-            _page_badges(pg),
-            cnt,
-            "</a>",
-        )
-        for sec in _all_sections(pg)
-            sn = length(sec.figures)
-            scnt = sn > 0 ? string(" <span class=\"nfig\">(", sn, ")</span>") : ""
-            println(
-                io,
-                "<a href=\"#",
-                sec.anchor,
-                "\"",
-                _toc_indent(sec, 1),
-                ">",
-                _esc(sec.title),
-                scnt,
-                "</a>",
-            )
-        end
-    end
-    if isempty(doc.parts)
-        for pg in doc.pages
-            pagelink(pg)
-        end
-    else
-        for (_pid, title, pages) in _grouped_pages(doc)
-            ttl = title === nothing ? "Other" : title
-            println(
-                io, "<details class=\"pinax-group\" open><summary>", _esc(ttl), "</summary>"
-            )
-            for pg in pages
-                pagelink(pg)
-            end
-            println(io, "</details>")
-        end
-    end
+    _emit_grouped(pg -> _emit_toc_nav_page(io, pg), doc, io; counted=false)
     has_bib && println(io, "<a href=\"#bibliography\">References</a>")
     return println(io, "</nav>")
+end
+
+# A page's entry in a one-page document's Contents: the page, then its sections, indented by depth.
+function _emit_toc_nav_page(io, pg)
+    println(
+        io,
+        "<a href=\"#",
+        pg.anchor,
+        "\">",
+        _esc(pg.title),
+        _page_badges(pg),
+        _nfig_span(_page_nfigs(pg)),
+        "</a>",
+    )
+    foreach(sec -> _emit_sec_link(io, sec, 1), _all_sections(pg))
+    return nothing
 end
 
 # A page's badges, wherever the page is named (index card, :toc entry, Contents entry, its heading):
@@ -971,107 +991,67 @@ end
 # The index: one card per page (thumbnail + title + summary + counts) linking to `<page>.html`.
 # `rich=true` (index level :rich) additionally lists each page's sections beneath its summary.
 function _emit_cards(doc::Document, io, outdir, bookmarks; rich::Bool=false)
-    card(pg) = begin
-        nfig = _page_nfigs(pg)
-        nsec = length(pg.sections)
-        print(io, "<a class=\"pinax-card\" href=\"", pg.anchor, ".html\">")
-        _card_thumb!(io, pg, outdir, bookmarks)
+    card(pg) = _emit_card(io, pg, outdir, bookmarks, rich)
+    return _emit_grouped(card, doc, io; wrap=("<div class=\"pinax-cards\">", "</div>"))
+end
+
+function _emit_card(io, pg, outdir, bookmarks, rich)
+    print(io, "<a class=\"pinax-card\" href=\"", pg.anchor, ".html\">")
+    _card_thumb!(io, pg, outdir, bookmarks)
+    print(
+        io,
+        "<div class=\"card-body\"><div class=\"card-title\">",
+        _esc(pg.title),
+        _page_badges(pg),
+        "</div>",
+    )
+    pg.summary === nothing ||
+        print(io, "<div class=\"card-summary\">", _esc(pg.summary), "</div>")
+    rich && _emit_card_sections(io, pg)
+    print(io, "<div class=\"card-meta\">", _page_count_meta(pg), "</div></div></a>")
+    return nothing
+end
+
+# A :rich card's section list: every section of the page, a nested one indented by its depth.
+function _emit_card_sections(io, pg)
+    secs = _all_sections(pg)
+    isempty(secs) && return nothing
+    print(io, "<div class=\"card-sections\">")
+    for sec in secs
         print(
             io,
-            "<div class=\"card-body\"><div class=\"card-title\">",
-            _esc(pg.title),
-            _page_badges(pg),
-            "</div>",
+            "<div class=\"sec-item\"",
+            _toc_indent(sec, 0),
+            "><span class=\"sec-name\">",
+            _esc(sec.title),
+            "</span>",
         )
-        pg.summary === nothing ||
-            print(io, "<div class=\"card-summary\">", _esc(pg.summary), "</div>")
-        if rich && !isempty(pg.sections)
-            print(io, "<div class=\"card-sections\">")
-            for sec in pg.sections
-                print(
-                    io,
-                    "<div class=\"sec-item\"><span class=\"sec-name\">",
-                    _esc(sec.title),
-                    "</span>",
-                )
-                sec.summary === nothing || print(io, " — ", _esc(sec.summary))
-                print(io, "</div>")
-            end
-            print(io, "</div>")
-        end
-        print(io, "<div class=\"card-meta\">", _count_meta(nsec, nfig), "</div></div></a>")
+        sec.summary === nothing || print(io, " — ", _esc(sec.summary))
+        print(io, "</div>")
     end
-    if isempty(doc.parts)
-        println(io, "<div class=\"pinax-cards\">")
-        for pg in doc.pages
-            card(pg)
-        end
-        println(io, "</div>")
-    else
-        for (_pid, title, pages) in _grouped_pages(doc)
-            ttl = title === nothing ? "Other" : title
-            println(
-                io,
-                "<details class=\"pinax-group\" open><summary>",
-                _esc(ttl),
-                " <span class=\"grp-count\">(",
-                length(pages),
-                ")</span></summary>",
-                _part_desc_html(doc, _pid),
-                "<div class=\"pinax-cards\">",
-            )
-            for pg in pages
-                card(pg)
-            end
-            println(io, "</div></details>")
-        end
-    end
+    print(io, "</div>")
     return nothing
 end
 
 # A compact alternative index (level :toc): a link list with one-line summaries, no thumbnails.
 function _emit_toc_index(doc::Document, io)
-    item(pg) = begin
-        nfig = _page_nfigs(pg)
-        nsec = length(pg.sections)
-        print(
-            io,
-            "<li><a href=\"",
-            pg.anchor,
-            ".html\">",
-            _esc(pg.title),
-            "</a>",
-            _page_badges(pg),
-        )
-        pg.summary === nothing ||
-            print(io, " <span class=\"toc-summary\">— ", _esc(pg.summary), "</span>")
-        print(io, " <span class=\"toc-meta\">(", _count_meta(nsec, nfig), ")</span></li>")
-    end
-    if isempty(doc.parts)
-        println(io, "<ul class=\"pinax-toc\">")
-        for pg in doc.pages
-            item(pg)
-        end
-        println(io, "</ul>")
-    else
-        for (_pid, title, pages) in _grouped_pages(doc)
-            ttl = title === nothing ? "Other" : title
-            println(
-                io,
-                "<details class=\"pinax-group\" open><summary>",
-                _esc(ttl),
-                " <span class=\"grp-count\">(",
-                length(pages),
-                ")</span></summary>",
-                _part_desc_html(doc, _pid),
-                "<ul class=\"pinax-toc\">",
-            )
-            for pg in pages
-                item(pg)
-            end
-            println(io, "</ul></details>")
-        end
-    end
+    item(pg) = _emit_toc_item(io, pg)
+    return _emit_grouped(item, doc, io; wrap=("<ul class=\"pinax-toc\">", "</ul>"))
+end
+
+function _emit_toc_item(io, pg)
+    print(
+        io,
+        "<li><a href=\"",
+        pg.anchor,
+        ".html\">",
+        _esc(pg.title),
+        "</a>",
+        _page_badges(pg),
+    )
+    pg.summary === nothing ||
+        print(io, " <span class=\"toc-summary\">— ", _esc(pg.summary), "</span>")
+    print(io, " <span class=\"toc-meta\">(", _page_count_meta(pg), ")</span></li>")
     return nothing
 end
 
@@ -1099,9 +1079,67 @@ function emit_document(
     cache::RenderCache;
     comments_file::AbstractString=joinpath(outdir, "comments.toml"),
 )
+    g = _gallery_setup(theme, doc, String(outdir), cache, comments_file)
+    length(doc.pages) <= 1 && return _emit_single_file(g)   # one page (or none): one file
+    foreach(pg -> _emit_page_file(g, pg), doc.pages)          # else one file per page, then the index
+    return _emit_index_file(g)
+end
+
+# What every file of one gallery render shares: numbers, ids, bibliography, comments and bookmarks,
+# features, and `mkctx(io)`, which makes a file's `EmitCtx`. The shared style.css / app.js of the
+# `:default` asset mode, and KaTeX's files for `katex=:local`, are written here, once.
+function _gallery_setup(theme::GalleryBase, doc::Document, outdir, cache, comments_file)
     nums, ids_eq, eqseq = _gallery_numbers(doc)
     rdiag = DiagEntry[]
     base_ids = _id2anchor(doc)
+    _check_eq_ids!(rdiag, ids_eq, base_ids)
+    bib = _load_bib(doc.meta.bib_sources, rdiag)
+    citenums, citeorder = _gallery_citations(doc, bib)
+    comments, bookmarks = _read_comments(doc, comments_file, rdiag)
+    features = doc.meta.features
+    interactive = any(in(features), (:comments, :bookmarks, :export))
+    katex = doc.meta.katex
+    katex === :local && _copy_katex(outdir)   # vendor math assets for offline viewing
+    ids = merge(base_ids, ids_eq)
+    mkpath(outdir)
+    _write_shared_assets(doc, outdir, interactive)
+    title = isempty(doc.meta.title) ? "Pinax gallery" : doc.meta.title
+    function mkctx(io)
+        return EmitCtx(
+            outdir,
+            io,
+            rdiag,
+            cache,
+            nums,
+            ids,
+            eqseq,
+            bib,
+            citenums,
+            comments,
+            bookmarks,
+            features,
+        )
+    end
+    return (;
+        theme,
+        doc,
+        outdir,
+        rdiag,
+        nums,
+        bib,
+        citeorder,
+        comments,
+        bookmarks,
+        features,
+        interactive,
+        katex,
+        title,
+        mkctx,
+    )
+end
+
+# An equation label that is also a section/figure id is ambiguous: said so, per label.
+function _check_eq_ids!(rdiag, ids_eq, base_ids)
     for k in keys(ids_eq)
         haskey(base_ids, k) && push!(
             rdiag,
@@ -1112,127 +1150,104 @@ function emit_document(
             ),
         )
     end
-    bib = _load_bib(doc.meta.bib_sources, rdiag)
-    citenums, citeorder = _gallery_citations(doc, bib)
-    comments, bookmarks = _read_comments(doc, comments_file, rdiag)
-    features = doc.meta.features
-    interactive = any(in(features), (:comments, :bookmarks, :export))
-    katex_mode = doc.meta.katex
-    katex_mode === :local && _copy_katex(outdir)   # vendor math assets for offline viewing
-    merged_ids = merge(base_ids, ids_eq)
-    mkpath(outdir)
-    # `:default` asset mode → write the shared style.css / app.js once (the files every page links),
-    # instead of inlining the same CSS/JS into each emitted file.
-    if doc.meta.assets === :default
-        write(joinpath(outdir, "style.css"), _combined_css(doc, interactive))
-        _has_js(doc, interactive) &&
-            write(joinpath(outdir, "app.js"), _combined_js(doc, interactive))
-    end
-    title = isempty(doc.meta.title) ? "Pinax gallery" : doc.meta.title
-    mkctx(io) = EmitCtx(
-        String(outdir),
-        io,
-        rdiag,
-        cache,
-        nums,
-        merged_ids,
-        eqseq,
-        bib,
-        citenums,
-        comments,
-        bookmarks,
-        features,
+    return nothing
+end
+
+# `:default` asset mode → the shared style.css / app.js every page links, written once instead of
+# inlining the same CSS/JS into each emitted file.
+function _write_shared_assets(doc::Document, outdir, interactive)
+    doc.meta.assets === :default || return nothing
+    write(joinpath(outdir, "style.css"), _combined_css(doc, interactive))
+    _has_js(doc, interactive) &&
+        write(joinpath(outdir, "app.js"), _combined_js(doc, interactive))
+    return nothing
+end
+
+# A page's title as its heading shows it: its number, its title, its badges.
+function _page_title_html(pg, nums)
+    pnum = get(nums, pg.anchor, "")
+    return string(
+        isempty(pnum) ? "" : string(_esc(pnum), ". "), _esc(pg.title), _page_badges(pg)
     )
+end
 
-    if length(doc.pages) <= 1
-        # One page (or none): a single self-contained file.
-        io = IOBuffer()
-        ctx = mkctx(io)
-        emit_head(theme, io, title, doc, katex_mode, interactive, rdiag)
-        println(io, "<h1>", _esc(title), "</h1>")
-        ntotal = _total_figures(doc)
-        println(
-            io,
-            "<div class=\"pinax-meta\">",
-            ntotal,
-            ntotal == 1 ? " figure" : " figures",
-            "</div>",
-        )
-        interactive && _emit_committed_json(io, comments, bookmarks, features)
-        _emit_toc_nav(doc, io; has_bib=(!isempty(citeorder)))
-        for pg in doc.pages
-            pnum = get(nums, pg.anchor, "")
-            h1 = string(
-                isempty(pnum) ? "" : string(_esc(pnum), ". "),
-                _esc(pg.title),
-                _page_badges(pg),
-            )
-            oh, ch = _gallery_heading(1, pg.anchor, ctx)
-            println(io, "<section class=\"page\" id=\"", pg.anchor, "\">", oh, h1, ch)
-            emit_page(theme, pg, ctx)   # the global TOC nav above already lists its sections
-            println(io, "</section>")
-        end
-        _emit_bibliography(bib, citeorder, io)
-        _emit_diagnostics(doc, rdiag, io)
-        emit_foot(theme, io, doc, katex_mode, interactive, rdiag)
-        path = joinpath(outdir, "index.html")
-        write(path, String(take!(io)))
-        return path
-    end
+# Write a file's buffered HTML to `path`, and return the path.
+function _write_html(path, io)
+    write(path, String(take!(io)))
+    return path
+end
 
-    # Multiple pages: one file per page, then an index of thumbnail cards.
-    for pg in doc.pages
-        io = IOBuffer()
-        ctx = mkctx(io)
-        emit_head(
-            theme, io, string(pg.title, " · ", title), doc, katex_mode, interactive, rdiag
-        )
-        println(
-            io,
-            "<nav class=\"pinax-top\"><a href=\"index.html\">← ",
-            _esc(title),
-            "</a></nav>",
-        )
-        pnum = get(nums, pg.anchor, "")
-        h1 = string(
-            isempty(pnum) ? "" : string(_esc(pnum), ". "), _esc(pg.title), _page_badges(pg)
-        )
-        oh, ch = _gallery_heading(1, pg.anchor, ctx)
-        println(io, oh, h1, ch)
-        n = _page_nfigs(pg)
-        println(
-            io, "<div class=\"pinax-meta\">", n, n == 1 ? " figure" : " figures", "</div>"
-        )
-        interactive && _emit_committed_json(io, comments, bookmarks, features)
-        _emit_page_nav(pg, io)
-        println(io, "<section class=\"page\" id=\"", pg.anchor, "\">")
-        emit_page(theme, pg, ctx)
-        println(io, "</section>")
-        _emit_bibliography(bib, citeorder, io)
-        emit_foot(theme, io, doc, katex_mode, interactive, rdiag)
-        write(joinpath(outdir, pg.anchor * ".html"), String(take!(io)))
-    end
-
+# A one-page (or empty) document: one self-contained `index.html` with the global Contents.
+function _emit_single_file(g)
+    (; theme, doc, title, katex, interactive, rdiag) = g
     io = IOBuffer()
-    emit_head(theme, io, title, doc, katex_mode, false, rdiag)
+    ctx = g.mkctx(io)
+    emit_head(theme, io, title, doc, katex, interactive, rdiag)
     println(io, "<h1>", _esc(title), "</h1>")
-    ntotal = _total_figures(doc)
-    npg = length(doc.pages)
+    println(io, "<div class=\"pinax-meta\">", _nfigs_text(_total_figures(doc)), "</div>")
+    interactive && _emit_committed_json(io, g.comments, g.bookmarks, g.features)
+    _emit_toc_nav(doc, io; has_bib=(!isempty(g.citeorder)))
+    for pg in doc.pages
+        oh, ch = _gallery_heading(1, pg.anchor, ctx)
+        println(
+            io,
+            "<section class=\"page\" id=\"",
+            pg.anchor,
+            "\">",
+            oh,
+            _page_title_html(pg, g.nums),
+            ch,
+        )
+        emit_page(theme, pg, ctx)   # the global TOC nav above already lists its sections
+        println(io, "</section>")
+    end
+    _emit_bibliography(g.bib, g.citeorder, io)
+    _emit_diagnostics(doc, rdiag, io)
+    emit_foot(theme, io, doc, katex, interactive, rdiag)
+    return _write_html(joinpath(g.outdir, "index.html"), io)
+end
+
+# One page of a multi-page document: `<page>.html`, linking back to the index.
+function _emit_page_file(g, pg)
+    (; theme, doc, title, katex, interactive, rdiag) = g
+    io = IOBuffer()
+    ctx = g.mkctx(io)
+    emit_head(theme, io, string(pg.title, " · ", title), doc, katex, interactive, rdiag)
+    println(
+        io, "<nav class=\"pinax-top\"><a href=\"index.html\">← ", _esc(title), "</a></nav>"
+    )
+    oh, ch = _gallery_heading(1, pg.anchor, ctx)
+    println(io, oh, _page_title_html(pg, g.nums), ch)
+    println(io, "<div class=\"pinax-meta\">", _nfigs_text(_page_nfigs(pg)), "</div>")
+    interactive && _emit_committed_json(io, g.comments, g.bookmarks, g.features)
+    _emit_page_nav(pg, io)
+    println(io, "<section class=\"page\" id=\"", pg.anchor, "\">")
+    emit_page(theme, pg, ctx)
+    println(io, "</section>")
+    _emit_bibliography(g.bib, g.citeorder, io)
+    emit_foot(theme, io, doc, katex, interactive, rdiag)
+    return _write_html(joinpath(g.outdir, pg.anchor * ".html"), io)
+end
+
+# A multi-page document's `index.html`: the page listing at its index level, then the diagnostics of
+# the whole render (the page files are written first, so theirs are included).
+function _emit_index_file(g)
+    (; theme, doc, title, katex, rdiag) = g
+    io = IOBuffer()
+    emit_head(theme, io, title, doc, katex, false, rdiag)
+    println(io, "<h1>", _esc(title), "</h1>")
     println(
         io,
         "<div class=\"pinax-meta\">",
-        npg,
+        length(doc.pages),
         " pages · ",
-        ntotal,
-        ntotal == 1 ? " figure" : " figures",
+        _nfigs_text(_total_figures(doc)),
         "</div>",
     )
-    emit_index(theme, doc, io, outdir, bookmarks)
+    emit_index(theme, doc, io, g.outdir, g.bookmarks)
     _emit_diagnostics(doc, rdiag, io)
-    emit_foot(theme, io, doc, katex_mode, false, rdiag)
-    path = joinpath(outdir, "index.html")
-    write(path, String(take!(io)))
-    return path
+    emit_foot(theme, io, doc, katex, false, rdiag)
+    return _write_html(joinpath(g.outdir, "index.html"), io)
 end
 
 # Total figure count across the document (shown in the header, e.g. "547 figures").
@@ -1245,8 +1260,7 @@ function emit_section(theme::GalleryBase, sec, pg, ctx)
     bookmarked = (:bookmarks in ctx.features) && (Symbol(sec.anchor) in ctx.bookmarks)
     num = get(ctx.nums, sec.anchor, "")
     heading = isempty(num) ? _esc(sec.title) : string(_esc(num), ". ", _esc(sec.title))
-    n = length(sec.figures)
-    n > 0 && (heading *= string(" <span class=\"nfig\">(", n, ")</span>"))
+    heading *= _nfig_span(length(sec.figures))
     bookmarked && (heading *= " <span class=\"pinax-bm-on\" title=\"bookmarked\">★</span>")
     cls = bookmarked ? "section bookmarked" : "section"
     open_h, close_h = _gallery_heading(sec, ctx)
@@ -1345,17 +1359,14 @@ function emit_view(theme::GalleryBase, ::Val{:grid}, figs, assetdir, layout, ctx
     fmts = figure_formats(theme)
     for fig in figs
         base = joinpath(assetdir, fig.anchor)
-        try
-            materialize!(fig, base, fmts, ctx.cache)   # cache hit skips gen (notes 10)
-        catch e
-            e isa InterruptException && rethrow()
-            push!(ctx.rdiag, DiagEntry(ERROR, fig.anchor, "materialize failed: $(e)"))
-            _emit_placeholder(fig, "figure failed", io)
+        # a cache hit skips gen (notes 10)
+        if !_try_materialize!(fig, base, fmts, ctx.cache, ctx.rdiag)
+            _emit_placeholder(theme, fig, "figure failed", ctx)
             continue
         end
         if isempty(fig.assets)
             push!(ctx.rdiag, DiagEntry(WARNING, fig.anchor, "figure produced no assets"))
-            _emit_placeholder(fig, "no assets", io)
+            _emit_placeholder(theme, fig, "no assets", ctx)
             continue
         end
         emit_figure(theme, fig, ctx)
@@ -1393,9 +1404,11 @@ function _facet_groups(figures, facet::AbstractString)
     return [(v, groups[v]) for v in order]
 end
 
-# A broken/empty figure: a visible card plus a link back to the diagnostics section.
-function _emit_placeholder(fig::Figure, why, io)
-    return println(
+# A broken/empty figure: a visible card plus a link back to the diagnostics section, and the figure's
+# comments, which a figure with nothing to draw still carries.
+function _emit_placeholder(theme::GalleryBase, fig::Figure, why, ctx)
+    io = ctx.io
+    print(
         io,
         "<figure id=\"",
         fig.anchor,
@@ -1403,8 +1416,10 @@ function _emit_placeholder(fig::Figure, why, io)
         _esc(why),
         " (",
         _esc(string(fig.id)),
-        ") — see <a href=\"#diagnostics\">diagnostics</a></div></figure>",
+        ") — see <a href=\"#diagnostics\">diagnostics</a></div>",
     )
+    emit_comments(theme, fig.anchor, ctx)
+    return println(io, "</figure>")
 end
 
 # A @table artifact -> an HTML table inside a figure card (reusing the figure/figcaption styling).
@@ -1618,69 +1633,65 @@ end
 function emit_figure(theme::GalleryBase, fig, ctx)
     io = ctx.io
     println(io, "<figure id=\"", fig.anchor, "\">")
-    for a in fig.assets
-        rel = replace(relpath(a, ctx.outdir), '\\' => '/')   # forward slashes for URLs (Windows-safe)
-        ext = _ext(a)
-        if ext in ("svg", "png", "gif", "webp", "jpg", "jpeg", "apng", "avif")
-            # Raster + animated raster (gif/apng/webp) render inline as <img> — the browser plays the
-            # animation. A file-path @figure ("…/anim.gif") is the usual way to embed a precomputed GIF.
-            println(io, "<img src=\"", _esc(rel), "\" alt=\"", _esc(string(fig.id)), "\">")
-            # a download affordance so the figure can be saved while viewing the gallery itself
-            println(
-                io,
-                "<a class=\"pinax-dl\" href=\"",
-                _esc(rel),
-                "\" download title=\"download ",
-                _esc(basename(a)),
-                "\">⤓ download</a>",
-            )
-        elseif ext == "pdf"
-            # Embed PDFs via the browser's native viewer (notes 04 §3: "pdf -> iframe"), with an
-            # open/download fallback for browsers that block inline PDFs (e.g. some file:// setups).
-            println(
-                io,
-                "<iframe class=\"pinax-pdf\" src=\"",
-                _esc(rel),
-                "\" title=\"",
-                _esc(string(fig.id)),
-                "\"></iframe>",
-            )
-            println(
-                io,
-                "<a class=\"pinax-open\" href=\"",
-                _esc(rel),
-                "\" target=\"_blank\" rel=\"noopener\">open ",
-                _esc(basename(a)),
-                " ↗</a>",
-            )
-            println(
-                io,
-                "<a class=\"pinax-dl\" href=\"",
-                _esc(rel),
-                "\" download title=\"download ",
-                _esc(basename(a)),
-                "\">⤓ download</a>",
-            )
-        else
-            println(io, "<a href=\"", _esc(rel), "\">", _esc(basename(a)), "</a>")
-        end
+    foreach(a -> _emit_asset(io, a, fig, ctx), fig.assets)
+    caphtml = _figcaption_html(theme, fig, ctx)
+    isempty(caphtml) || println(io, "<figcaption>", caphtml, "</figcaption>")
+    emit_comments(theme, fig.anchor, ctx)   # co-located: a figure's comments live in its card
+    return println(io, "</figure>")
+end
+
+# One asset of a figure card: an image drawn inline, a PDF in the browser's viewer, or else a link.
+# An image or a PDF also gets a download link, so it can be saved while viewing the gallery itself.
+function _emit_asset(io, a, fig, ctx)
+    rel = _rel_url(a, ctx.outdir)
+    ext = _ext(a)
+    if ext in _IMG_EXTS
+        # Raster + animated raster (gif/apng/webp) render inline as <img> — the browser plays the
+        # animation. A file-path @figure ("…/anim.gif") is the usual way to embed a precomputed GIF.
+        println(io, "<img src=\"", _esc(rel), "\" alt=\"", _esc(string(fig.id)), "\">")
+    elseif ext == "pdf"
+        # Embed PDFs via the browser's native viewer (notes 04 §3: "pdf -> iframe"), with an
+        # open/download fallback for browsers that block inline PDFs (e.g. some file:// setups).
+        println(
+            io,
+            "<iframe class=\"pinax-pdf\" src=\"",
+            _esc(rel),
+            "\" title=\"",
+            _esc(string(fig.id)),
+            "\"></iframe>",
+        )
+        println(
+            io,
+            "<a class=\"pinax-open\" href=\"",
+            _esc(rel),
+            "\" target=\"_blank\" rel=\"noopener\">open ",
+            _esc(basename(a)),
+            " ↗</a>",
+        )
+    else
+        return println(io, "<a href=\"", _esc(rel), "\">", _esc(basename(a)), "</a>")
     end
+    return println(
+        io,
+        "<a class=\"pinax-dl\" href=\"",
+        _esc(rel),
+        "\" download title=\"download ",
+        _esc(basename(a)),
+        "\">⤓ download</a>",
+    )
+end
+
+# A figure's caption line: its number in bold, then its caption ("" when it has neither).
+function _figcaption_html(theme::GalleryBase, fig, ctx)
     num = get(ctx.nums, fig.anchor, "")
     cap = if isempty(fig.caption)
         ""
     else
         emit_text(theme, fig.caption, fig.anchor, ctx; block=false)
     end
-    caphtml = if isempty(num)
-        cap
-    elseif isempty(cap)
-        string("<b>", _esc(num), "</b>")
-    else
-        string("<b>", _esc(num), ".</b> ", cap)
-    end
-    isempty(caphtml) || println(io, "<figcaption>", caphtml, "</figcaption>")
-    emit_comments(theme, fig.anchor, ctx)   # co-located: a figure's comments live in its card
-    return println(io, "</figure>")
+    isempty(num) && return cap
+    isempty(cap) && return string("<b>", _esc(num), "</b>")
+    return string("<b>", _esc(num), ".</b> ", cap)
 end
 
 # References section (notes 03): cited entries in citation order, each anchored (`ref-<key>`) so a
