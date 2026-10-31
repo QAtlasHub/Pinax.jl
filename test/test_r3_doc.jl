@@ -39,3 +39,36 @@ end
     diag = md[first(findfirst("## Diagnostics", md)):end]
     @test occursin("`comment`", diag) && occursin("`bookmark`", diag)
 end
+
+@testset "a bookmark no face can show is a diagnostic, like a comment" begin
+    Pinax.reset!()
+    @page :p "P" begin
+        @figure "a.svg" id = :f
+        @section :s "S" begin end
+    end
+    toml = """
+    [bookmark]
+    s = true
+    f = true
+    p = true
+    gone = true
+    off = false
+    """
+    _, bookmarks, rdiag = _store_diags(toml)
+    @test Set([:s, :f, :p, :gone]) == bookmarks   # read as written; only the faces decide
+    @test _said(rdiag, "gone", "bookmark", "names no node")
+    @test _said(rdiag, "f", "bookmark on a figure", "sections")
+    @test _said(rdiag, "p", "bookmark on a page", "sections")
+    @test !any(d -> d.item in ("s", "off"), rdiag)   # a shown one, and one that is off
+    @test !any(d -> occursin("feature is off", d.message), rdiag)
+
+    # the :bookmarks feature off hides every bookmark, and is said once, like comments
+    Pinax.reset!(; features=(:comments,))
+    @page :p "P" begin
+        @section :s "S" begin end
+    end
+    _, _, rdiag = _store_diags("[bookmark]\ns = true\n")
+    @test _said(rdiag, "comments.toml", "bookmarks", ":bookmarks feature is off")
+    _, _, rdiag = _store_diags("[bookmark]\ns = false\n")
+    @test isempty(rdiag)   # nothing set, nothing hidden
+end
