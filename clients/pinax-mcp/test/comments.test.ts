@@ -216,3 +216,30 @@ test("add_comment takes a page and a section, and refuses what no face shows a c
   const data = parse(readFileSync(cf, "utf8")) as any;
   assert.deepEqual(Object.keys(data.comment).sort(), ["p1", "s1"]);
 });
+
+test("a non-string id, text, author or query is refused, never coerced", { timeout: 20000 }, async () => {
+  const cf = tmpToml();
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [serverEntry, "--agent", fixture, "--comments", cf],
+  });
+  const client = new Client({ name: "pinax-mcp-test", version: "0" }, { capabilities: {} });
+  await client.connect(transport);
+  const refused = async (name: string, args: Record<string, unknown>, key: string, shown: string) => {
+    const res = await client.callTool({ name, arguments: args });
+    assert.equal(res.isError, true, `${name} ${key}`);
+    assert.match((res.content as any)[0].text, new RegExp(`'${key}' must be a string, not ${shown}`));
+  };
+  try {
+    await refused("add_comment", { id: { x: 1 }, text: "n" }, "id", '\\{"x":1\\}');
+    await refused("add_comment", { id: "p1_fig1", text: 5 }, "text", "5");
+    await refused("add_comment", { id: "p1_fig1", text: "n", author: null }, "author", "null");
+    await refused("set_bookmark", { id: ["s1"] }, "id", '\\["s1"\\]');
+    await refused("get_unit", { id: 5 }, "id", "5");
+    await refused("get_figure_data", { id: true }, "id", "true");
+    await refused("search", { query: 2 }, "query", "2");
+  } finally {
+    await client.close();
+  }
+  assert.throws(() => readFileSync(cf, "utf8"), /ENOENT/); // nothing was written
+});

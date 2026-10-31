@@ -118,7 +118,13 @@ interface Tool {
 
 const ok = (text: string): Reply => ({ content: [{ type: "text", text }] });
 const err = (text: string): Reply => ({ content: [{ type: "text", text }], isError: true });
-const str = (args: Args, key: string): string => String(args[key] ?? "");
+// A string argument, or `fallback` when it is absent; any other value is refused, never coerced.
+function str(args: Args, key: string, fallback = ""): string {
+  const v = args[key];
+  if (v === undefined) return fallback;
+  if (typeof v !== "string") throw new Error(`'${key}' must be a string, not ${JSON.stringify(v)}`);
+  return v;
+}
 const inputs = (properties: object, required: string[] = []) => ({
   type: "object" as const,
   properties,
@@ -205,6 +211,7 @@ function addComment({ atlas, store }: Context, a: Args): Reply {
   if (!store) return disabled("add_comment");
   const id = str(a, "id");
   const text = str(a, "text");
+  const author = str(a, "author", "llm");
   if (!id || !text) return err("add_comment requires 'id' and 'text'");
   const refused = refusal(
     atlas,
@@ -214,7 +221,7 @@ function addComment({ atlas, store }: Context, a: Args): Reply {
       `a comment on a ${u.kind} is shown nowhere: comment on a page, section, figure or table (the ${u.kind}'s container is '${u.parent ?? ""}')`,
   );
   if (refused) return refused;
-  const turns = store.addComment(id, text, String(a.author ?? "llm"));
+  const turns = store.addComment(id, text, author);
   return ok(
     `comment added to '${id}' (now ${turns.length} turn(s)). Re-render the document to bake it into the gallery / agent.json.`,
   );
