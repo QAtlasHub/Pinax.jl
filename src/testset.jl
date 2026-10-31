@@ -548,22 +548,30 @@ function _check_from(expr, label::AbstractString, outcome, i::Int)
     nums = o === :error ? nothing : _approx_numbers(expr)
     nums === nothing && return _indicator_check(id, label, o)
     (; got, want, atol, rtol) = nums
-    # No margin exists for a non-finite value or a zero tolerance: say so on the check, flagged as an
-    # indicator, rather than emitting a non-finite delta or fabricated numbers (#116).
+    # No margin exists for a non-finite value or tolerance (or a zero one, below): say so on the
+    # check, flagged as an indicator, rather than emitting non-finite or fabricated numbers (#116).
     (isfinite(got) && isfinite(want)) || return _indicator_check(
         id, "$(label)  [got = $(got), want = $(want): no margin]", o
     )
-    # isapprox passes iff |x-y| <= max(atol, rtol*max(|x|,|y|)) (#115). Record the term that
-    # governs, so `delta <= tol` is exactly that test: absolute when atol is the larger bound, else
-    # relative to max(|x|,|y|).
+    (isfinite(atol) && isfinite(rtol)) || return _indicator_check(
+        id, "$(label)  [atol = $(atol), rtol = $(rtol): no margin]", o
+    )
+    return _margin_check(id, String(label), got, want, atol, rtol, o)
+end
+
+# isapprox passes iff |x-y| <= max(atol, rtol*max(|x|,|y|)) (#115). Record the term that governs, so
+# `delta <= tol` is exactly that test: absolute when atol is the larger bound, else relative to
+# max(|x|,|y|). Finite got, want and tolerances, as `_check_from` hands them over.
+function _margin_check(id, label, got, want, atol, rtol, o)
     scale = max(abs(got), abs(want))
     atol <= 0 &&
         rtol * scale <= 0 &&
         return _indicator_check(id, "$(label)  [zero tolerance: no margin]", o)
-    if atol >= rtol * scale
-        return Check(id, String(label), got, want, abs(got - want), atol, :abs, o)
-    end
-    return Check(id, String(label), got, want, abs(got - want) / scale, rtol, :rel, o)
+    diff = abs(got - want)
+    isfinite(diff) ||
+        return _indicator_check(id, "$(label)  [|got - want| overflows: no margin]", o)
+    atol >= rtol * scale && return Check(id, label, got, want, diff, atol, :abs, o)
+    return Check(id, label, got, want, diff / scale, rtol, :rel, o)
 end
 
 # An indicator: every assertion still shows up in the verdict, but it has no numbers and no margin.

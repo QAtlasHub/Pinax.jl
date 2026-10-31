@@ -245,4 +245,29 @@ const R3Ext = Base.get_extension(Pinax, :PinaxTestExt)
             pg, Check(:t, "c", 1.0, 1.0, 0.0, 0.5, :abs, :pass, "", :code_gone)
         )
     end
+
+    @testset "a non-finite tolerance has no margin: an indicator, never tol = Inf" begin
+        for e in (:(isapprox(1.0, 1.1; atol=Inf)), :(isapprox(1.0, 1.1; rtol=Inf)))
+            c = Pinax._check_from(e, "x", :pass, 0)
+            @test c.kind === :indicator
+            @test occursin("no margin", c.label)
+        end
+        # a difference too large for a Float64 has no margin either
+        @test Pinax._check_from(:(isapprox(1e308, -1e308; rtol=0.1)), "x", :fail, 0).kind ===
+            :indicator
+        # live: the check reaches agent.json with null numbers, not the string "Inf"
+        root = R3Ext.PinaxTestSet("Test report")
+        R3Ext._with_testset(root) do
+            @testset "test_inf.jl" begin
+                @test isapprox(1.0, 1.1; atol=Inf)
+            end
+        end
+        @test only(only(root.node.children).checks).kind === :indicator
+        out = joinpath(mktempdir(), "rep")
+        render_test_report(root.node; out=out)
+        @test !occursin("\"Inf\"", read(joinpath(out, "agent", "agent.json"), String))
+        # and a margin check refuses an infinite number where it is built
+        @test_throws r"finite" Check(:t, "x", 1.0, 1.1, 0.1, Inf, :abs, :pass)
+        @test_throws r"finite" Check(:t, "x", Inf, 1.0, Inf, 0.5, :rel, :fail)
+    end
 end
