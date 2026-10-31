@@ -116,7 +116,7 @@ end
         end
         Pinax.render(; out=joinpath(tmp, "a"), theme=TableOverrideAgent())
         j = read(joinpath(tmp, "a", "agent.json"), String)
-        @test occursin("\"custom_tbl\":\"p_tbl1\"", j)   # override fired via _agent_tables! dispatch
+        @test occursin("\"custom_tbl\":\"p_tbl1\"", j)   # the emit_table override fired
         @test !occursin("\"header\"", j)                  # default emit_table did NOT run
     end
 
