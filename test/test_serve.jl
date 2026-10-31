@@ -130,3 +130,23 @@ end
         close(h.server)
     end
 end
+
+@testset "serve: a missing file is 404; a request with no request line gets no reply" begin
+    root = mktempdir()
+    write(joinpath(root, "index.html"), "<html>ok</html>")
+    h = Pinax.serve(root; host="127.0.0.1", blocking=false, port=8158)
+    try
+        @test occursin("404 Not Found: nope.html", _raw_get(h.port, "/nope.html"))
+        # a client that opens and sends only a blank line: the server closes it without a response
+        sock = Pinax.Sockets.connect("127.0.0.1", h.port)
+        write(sock, "\r\n")
+        t = Timer(_ -> close(sock), 10)
+        try
+            @test isempty(read(sock, String))
+        finally
+            close(t)
+        end
+    finally
+        close(h.server)
+    end
+end
