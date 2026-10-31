@@ -312,29 +312,27 @@ function _latex_heading(depth::Int, title, anchor, ctx)
     return string("\\par\\noindent\\textbf{", t, "}\\label{", anchor, "}")
 end
 
-function emit_section(theme::LaTeXBase, sec, pg, ctx)
-    io = ctx.io
-    println(io, _latex_heading(sec, ctx))
-    _latex_checks!(theme, sec, ctx)
-    _latex_emit_content!(
-        theme, sec, joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor), ctx; page=pg
-    )
-    emit_comments(theme, sec.anchor, ctx)
+# A page's or section's body, after its heading: its checks lead (a tabular of its own checks under a
+# verdict line over its subtree), then its content in declaration order (nested sections included),
+# then its comments. Figures go under `figures/<page>[/<section>]`.
+function _latex_body!(theme::LaTeXBase, c, pg, assetdir, ctx)
+    _latex_checks!(theme, c, ctx)
+    _latex_emit_content!(theme, c, assetdir, ctx; page=pg)
+    emit_comments(theme, c.anchor, ctx)
     return nothing
+end
+
+function emit_section(theme::LaTeXBase, sec, pg, ctx)
+    println(ctx.io, _latex_heading(sec, ctx))
+    assetdir = joinpath(ctx.outdir, "figures", pg.anchor, sec.anchor)
+    return _latex_body!(theme, sec, pg, assetdir, ctx)
 end
 
 function emit_page(theme::LaTeXBase, pg, ctx)
     io = ctx.io
-    # a page = one \section; then its content in declaration order (its subsections included)
-    println(io, _latex_heading(1, pg.title, pg.anchor, ctx))
+    println(io, _latex_heading(1, pg.title, pg.anchor, ctx))   # a page = one \section
     pg.status === :draft && println(io, "\\par\\noindent\\textit{Draft.}")   # its maturity, as every face shows it
-    # checks lead (tabular of the page's own checks + a verdict line over its subtree)
-    _latex_checks!(theme, pg, ctx)
-    _latex_emit_content!(
-        theme, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx; page=pg
-    )
-    emit_comments(theme, pg.anchor, ctx)
-    return nothing
+    return _latex_body!(theme, pg, pg, joinpath(ctx.outdir, "figures", pg.anchor), ctx)
 end
 
 function emit_document(
