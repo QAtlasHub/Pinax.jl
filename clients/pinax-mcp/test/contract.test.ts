@@ -23,6 +23,8 @@ function unnamedKeys(schema: z.ZodType, value: unknown, path: string): string[] 
   switch (def.type) {
     case "lazy":
       return unnamedKeys(def.getter(), value, path);
+    case "pipe": // a refined and transformed object: walk what it reads
+      return unnamedKeys(def.in, value, path);
     case "optional":
     case "nullable":
       return value == null ? [] : unnamedKeys(def.innerType, value, path);
@@ -116,4 +118,38 @@ test("an indicator check carries no numbers", () => {
 test("a 0.1 page status 'trial' reads as 'draft'", () => {
   const doc = AgentDocZ.parse(changed((d) => (d.pages[0].status = "trial")));
   assert.equal(doc.pages[0].status, "draft");
+});
+
+test("the key walk reaches a check's own keys", () => {
+  const extra = changed((d) => (firstCheck(d).zqextra = 1));
+  assert.ok(unnamedKeys(AgentDocZ, extra, "$").some((k) => k.endsWith(".zqextra")));
+});
+
+test("a check's kind, outcome, pass and numbers agree, or it does not parse", () => {
+  const refused = (change: (c: any) => void, why: RegExp) => {
+    const r = AgentDocZ.safeParse(changed((d) => change(firstCheck(d))));
+    assert.equal(r.success, false);
+    assert.match(r.error!.issues.map((i) => i.message).join("\n"), why);
+  };
+  // the first check is a passing "rel" check with all four numbers
+  refused((c) => (c.pass = false), /contradicts outcome/);
+  refused((c) => ((c.outcome = "error"), (c.pass = true)), /contradicts outcome/);
+  refused((c) => (c.kind = "indicator"), /an indicator check has null got, want, delta and tol/);
+  refused((c) => (c.tol = null), /a "rel" check needs got, want, delta and tol/);
+  refused((c) => ((c.kind = "abs"), (c.got = null)), /a "abs" check needs got, want, delta and tol/);
+  // a non-finite number is written as a string, and is still a number
+  assert.ok(AgentDocZ.safeParse(changed((d) => (firstCheck(d).tol = "Inf"))).success);
+});
+
+test("a check written before outcome existed reads its outcome from pass", () => {
+  const doc = AgentDocZ.parse(
+    changed((d) => {
+      const c = firstCheck(d);
+      delete c.outcome;
+      c.pass = false;
+    }),
+  );
+  assert.equal(firstCheck(doc).outcome, "fail");
+  const passing = AgentDocZ.parse(changed((d) => delete firstCheck(d).outcome));
+  assert.equal(firstCheck(passing).outcome, "pass");
 });

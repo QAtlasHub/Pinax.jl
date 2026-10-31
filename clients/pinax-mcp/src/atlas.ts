@@ -7,7 +7,7 @@
 // store), so a single id -> unit map is the index.
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { AgentDocZ, type AgentDoc, type ContentRef, type Page } from "./schema.js";
+import { AgentDocZ, type AgentDoc, type Check, type ContentRef, type Page } from "./schema.js";
 
 export type UnitKind =
   | "part"
@@ -108,11 +108,10 @@ function hitIn(u: Unit, [field, text]: Field, q: string): SearchHit[] {
 
 // ---- outline helpers ----
 
-// a container's verdict over its subtree ("" when it holds no checks — never a vacuous PASS)
-// A check's result as the outline states it (an agent.json from before 0.2 has `pass` alone).
-const checkResult = (n: any): string =>
-  typeof n.outcome === "string" ? n.outcome.toUpperCase() : n.pass ? "PASS" : "FAIL";
+// A check's result as the outline states it (the schema fills an older check's outcome from `pass`).
+const checkResult = (n: Check): string => n.outcome.toUpperCase();
 
+// a container's verdict over its subtree ("" when it holds no checks — never a vacuous PASS)
 const verdictOf = (node: any): string =>
   node.verdict ? `  [${node.verdict.verdict} ${node.verdict.passed}/${node.verdict.total}]` : "";
 

@@ -85,7 +85,7 @@ export const CheckKindZ = z.enum(["abs", "rel", "indicator"]);
 // What `Test` recorded: it passed, it failed, or it threw (an error, always an indicator). `pass` is
 // derived from it (true exactly when the outcome is "pass").
 export const CheckOutcomeZ = z.enum(["pass", "fail", "error"]);
-export const CheckZ = z
+const CheckFieldsZ = z
   .object({
     id: z.string(),
     label: z.string(),
@@ -94,12 +94,27 @@ export const CheckZ = z
     delta: NumZ.nullable(),
     tol: NumZ.nullable(),
     kind: CheckKindZ,
-    outcome: CheckOutcomeZ.optional(), // absent from an agent.json written before it: read `pass`
+    outcome: CheckOutcomeZ.optional(), // absent from an agent.json written before it: read from `pass`
     pass: z.boolean(),
     defined_at: z.string().optional(), // where the @test was written, "path:line"
     code_id: z.string().nullable().optional(), // the code block it was captured from, by id
   })
   .passthrough();
+
+// How a check's fields disagree, or null when they agree: `pass` is derived from `outcome`, an
+// indicator has no numbers, and an abs / rel check has all four.
+function checkMismatch(c: z.infer<typeof CheckFieldsZ>): string | null {
+  if (c.outcome !== undefined && c.pass !== (c.outcome === "pass"))
+    return `pass ${c.pass} contradicts outcome "${c.outcome}"`;
+  const numbers = [c.got, c.want, c.delta, c.tol].filter((n) => n !== null).length;
+  if (c.kind === "indicator") return numbers ? "an indicator check has null got, want, delta and tol" : null;
+  return numbers < 4 ? `a "${c.kind}" check needs got, want, delta and tol` : null;
+}
+
+export const CheckZ = CheckFieldsZ.superRefine((c, ctx) => {
+  const mismatch = checkMismatch(c);
+  if (mismatch) ctx.addIssue({ code: "custom", message: mismatch });
+}).transform((c) => ({ ...c, outcome: c.outcome ?? (c.pass ? "pass" : "fail") }));
 
 // A container's verdict over its whole subtree; `null` when the subtree holds no checks.
 export const VerdictZ = z
