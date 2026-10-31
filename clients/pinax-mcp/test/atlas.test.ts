@@ -234,3 +234,11 @@ test("a check is searched by its label alone", () => {
   const hits = loadAtlas(fixture).search("isapprox(1.0001").filter((h) => h.kind === "check");
   assert.deepEqual(hits.map((h) => `${h.id}.${h.field}`), ["s1_t1.label"]);
 });
+
+test("a figure's assets and data are asked of a figure: any other id has none", () => {
+  const atlas = loadAtlas(fixture);
+  for (const id of ["p1", "s1", "p1_tbl1", "no-such-id"]) {
+    assert.deepEqual(atlas.figureAssets(id), [], id);
+    assert.equal(atlas.figureData(id), null, id);
+  }
+});
