@@ -452,7 +452,8 @@ function emit_page(theme::AgentBase, pg, ctx)
     return _agent_container!(theme, pg, pg, assetdir, ctx)
 end
 
-# Build the whole agent.json (title + parts + pages, the latter via the per-node contract).
+# agent.json up to its pages (title + parts + pages, the latter via the per-node contract); the
+# diagnostics close it once agent.md has run.
 function _agent_json(theme::AgentBase, doc::Document, ctx)
     io = ctx.io
     print(io, "{\"title\":", _jsonstr(doc.meta.title), ",\"parts\":[")
@@ -477,10 +478,17 @@ function _agent_json(theme::AgentBase, doc::Document, ctx)
         i == 1 || print(io, ",")
         emit_page(theme, pg, ctx)
     end
-    # what the build and this render recorded — a left-out node, a failed figure — as data, so an
-    # agent sees the gaps instead of inferring them (Conventions › Faces)
-    print(io, "],\"diagnostics\":[")
-    for (i, e) in enumerate(vcat(doc.diag.entries, ctx.rdiag))
+    print(io, "]")
+    return String(take!(io))
+end
+
+# agent.json's closing `diagnostics`: what the build and this render recorded — a left-out node, a
+# failed figure, an agent.md fallback heading — as data, so an agent sees the gaps instead of
+# inferring them (Conventions › Faces). Written last, once agent.md has added its own.
+function _agent_json_diagnostics(entries)
+    io = IOBuffer()
+    print(io, ",\"diagnostics\":[")
+    for (i, e) in enumerate(entries)
         i == 1 || print(io, ",")
         print(
             io,
@@ -713,8 +721,7 @@ function _agent_markdown(doc::Document, outdir, comments, files, rdiag)
 end
 
 # The diagnostics as a closing agent.md section ("" when there are none).
-function _agent_md_diagnostics(doc, rdiag)
-    entries = vcat(doc.diag.entries, rdiag)
+function _agent_md_diagnostics(entries)
     isempty(entries) && return ""
     lines = ("- [$(e.severity)] $(e.item): $(e.message)" for e in entries)
     return string("\n## Diagnostics\n", join(lines, "\n"), "\n")
@@ -733,11 +740,13 @@ function emit_document(
     comments, _bm = _read_comments(doc, comments_file, rdiag)
     mkpath(outdir)
     ctx = AgentCtx(IOBuffer(), String(outdir), comments, cache, rdiag)
-    # agent.json first: it materializes the figures agent.md then reads. agent.md ends with every
-    # diagnostic, its own (a fallback heading) included.
-    write(joinpath(outdir, "agent.json"), _agent_json(theme, doc, ctx))
+    # agent.json's body first: it materializes the figures agent.md then reads. Both files end with
+    # the same diagnostics, agent.md's own (a fallback heading) included.
+    body = _agent_json(theme, doc, ctx)
     md = _agent_markdown(doc, outdir, comments, ctx.files, rdiag)
-    write(joinpath(outdir, "agent.md"), string(md, _agent_md_diagnostics(doc, rdiag)))
+    entries = vcat(doc.diag.entries, rdiag)
+    write(joinpath(outdir, "agent.json"), string(body, _agent_json_diagnostics(entries)))
+    write(joinpath(outdir, "agent.md"), string(md, _agent_md_diagnostics(entries)))
     return joinpath(outdir, "agent.json")
 end
 

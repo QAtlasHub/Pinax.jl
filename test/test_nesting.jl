@@ -1,5 +1,6 @@
 using Pinax
 using Test
+using JSON
 
 # `@section` nests to any depth (#170, #173). Depth counts from the part: a page is 1, a top-level
 # section 2, its child 3, and so on. Each backend maps depth to a heading in one place, and a depth
@@ -136,5 +137,9 @@ end
         @test occursin("##### S3", md)
         @test occursin("###### S4", md)
         @test occursin("**S5**", md)   # beyond ######: a bold line
+        # and both files say so: agent.json's diagnostics are agent.md's, fallbacks included
+        diag = only(filter(d -> d["item"] == "s5", JSON.parse(js)["diagnostics"]))
+        @test occursin("depth 5", diag["message"])
+        @test occursin("[WARNING] s5", md)
     end
 end
