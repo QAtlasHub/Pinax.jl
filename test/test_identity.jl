@@ -197,4 +197,43 @@ _sec(id) = only(s for s in Pinax._all_sections(_pg()) if s.id === id)
         @test only(n for n in ns if n.id === :mine).generated == false
         @test all(n -> n.generated, filter(n -> n.kind in (:page, :section), ns))
     end
+
+    # The anchor names a node's HTML id, its files and its cache entry, so two ids never share one.
+    # An id of safe characters is its own anchor; any other id keeps a readable form plus a hash.
+    @testset "anchors are unique: an id outside [A-Za-z0-9_-] gets a hashed anchor" begin
+        @test Pinax._anchor(:energy_fig1) == "energy_fig1"
+        @test Pinax._anchor(Symbol("p_fig-2")) == "p_fig-2"
+        a, b = Pinax._anchor(:α_fig), Pinax._anchor(:β_fig)
+        @test a != b && startswith(a, "__fig-") && occursin(r"^[A-Za-z0-9_-]+$", a)
+        @test Pinax._anchor(:α_fig) == a   # stable
+
+        tmp = mktempdir()
+        svg = joinpath(tmp, "f.svg")
+        write(svg, "<svg xmlns='http://www.w3.org/2000/svg'/>")
+        Pinax.reset!()
+        @page :p "P" begin
+            @figure svg id = :α_fig
+            @figure svg id = :β_fig
+        end
+        out = joinpath(tmp, "g")
+        mkpath(out)
+        cf = joinpath(out, "comments.toml")
+        Pinax.add_comment(cf, :α_fig, "BY_ID"; author="me")        # the MCP / API writes the id
+        Pinax.add_comment(cf, Symbol(b), "BY_ANCHOR"; author="me")  # the gallery writes the anchor
+        Pinax.add_comment(cf, :β_fig, "ALSOBYID"; author="me")    # both keys: both turns kept
+        html = read(Pinax.render(; out=out), String)
+        html = replace(
+            html,
+            r"<script type=\"application/json\" id=\"pinax-committed\">.*?</script>"s => "",
+        )
+        @test isfile(joinpath(out, "assets", "figures", "p", a * ".svg"))
+        @test isfile(joinpath(out, "assets", "figures", "p", b * ".svg"))
+        @test occursin("BY_ID", html) &&
+            occursin("BY_ANCHOR", html) &&
+            occursin("ALSOBYID", html)
+        @test !occursin("names no node", html)
+        Pinax.render(; out=joinpath(tmp, "a"), theme=:agent, comments_file=cf)
+        md = read(joinpath(tmp, "a", "agent.md"), String)
+        @test occursin("BY_ID", md) && occursin("BY_ANCHOR", md)
+    end
 end

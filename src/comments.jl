@@ -103,7 +103,18 @@ function _read_comments(doc, path::AbstractString, rdiag)
         ),
     )
     kinds = _node_kinds(doc)
-    for id in sort!(collect(keys(comments)))
+    # A comment is stored under a node's id (the API, pinax-mcp) or its anchor (the gallery writes
+    # what it shows); the faces look a node's comments up by its anchor, so key them all that way.
+    byanchor = Dict{Symbol,Symbol}(Symbol(_anchor(id)) => id for id in keys(kinds))
+    stored = comments
+    comments = Dict{Symbol,Vector{Comment}}()
+    for k in sort!(collect(keys(stored)))   # a node's turns under both keys are kept, id's first
+        append!(
+            get!(comments, haskey(kinds, k) ? Symbol(_anchor(k)) : k, Comment[]), stored[k]
+        )
+    end
+    for key in sort!(collect(keys(comments)))
+        id = get(byanchor, key, key)
         k = get(kinds, id, nothing)
         msg = if k === nothing
             "a comment names no node in this document, so it is shown nowhere. A generated id " *

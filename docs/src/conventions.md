@@ -44,6 +44,10 @@ or pull request that tracks the gap.
 - The id is the node's only name. It is its HTML anchor, the key its comments are stored under, its
   address in `agent.json` and pinax-mcp, and what `@ref` points at. There is no second naming
   scheme.
+  - The anchor — the HTML id, and the name of the node's files — is the id itself when the id uses
+    only `[A-Za-z0-9_-]`. Any other id (`:α_fig`, `:エネルギー`) keeps a readable form followed by a
+    short hash of the whole id, so two ids never share an anchor or a file. A comment may be stored
+    under either the id or the anchor.
 - An id the **author writes** is never renamed. A collision is an error raised where the second
   node is written, naming the id.
 - An id **Pinax generates** is the container's id plus a short stable hash of the node's own

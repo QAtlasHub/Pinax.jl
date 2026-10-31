@@ -575,7 +575,14 @@ end
 # ============================================================ helpers
 
 # Anchor used both in HTML attributes and as a filesystem path component, so restrict it to a safe charset.
-_anchor(id::Symbol) = replace(string(id), r"[^A-Za-z0-9_-]" => "_")
+# A node's anchor — its HTML id, the name of its files, its cache entry — so no two ids share one. An
+# id of safe characters (`[A-Za-z0-9_-]`, the common case) is its own anchor; any other id keeps a
+# readable form (unsafe characters as `_`) followed by a short hash of the whole id.
+function _anchor(id::Symbol)
+    s = string(id)
+    occursin(r"^[A-Za-z0-9_-]+$", s) && return s
+    return string(replace(s, r"[^A-Za-z0-9_-]" => "_"), "-", _stable_hash(s))
+end
 # ── identity (Conventions › Identity) ───────────────────────────────
 #
 # Every id is unique in the whole document and is the node's only name: its anchor, comment key and
