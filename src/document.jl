@@ -163,20 +163,11 @@ mutable struct Check
     # reported exactly once, by that suite when there is one, else by `render`.
     indicator::Bool       # a 1/0 pass indicator (a `@test` with no recoverable numbers), not a margin
 end
-# Keep the shorter positional forms working (source/code_anchor default to "", reported and
-# indicator to false) — every existing construction is unchanged.
-function Check(id, label, got, want, delta, tol, kind, pass)
-    return Check(id, label, got, want, delta, tol, kind, pass, "", "", false, false)
-end
-function Check(id, label, got, want, delta, tol, kind, pass, source)
-    return Check(id, label, got, want, delta, tol, kind, pass, source, "", false, false)
-end
-function Check(id, label, got, want, delta, tol, kind, pass, source, code_anchor)
-    return Check(
-        id, label, got, want, delta, tol, kind, pass, source, code_anchor, false, false
-    )
-end
-function Check(id, label, got, want, delta, tol, kind, pass, source, code_anchor, reported)
+# The shorter positional forms: source and code_anchor default to "", reported to false. `indicator`
+# is the full form's alone.
+function Check(
+    id, label, got, want, delta, tol, kind, pass, source="", code_anchor="", reported=false
+)
     return Check(
         id, label, got, want, delta, tol, kind, pass, source, code_anchor, reported, false
     )
