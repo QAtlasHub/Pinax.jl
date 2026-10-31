@@ -63,6 +63,17 @@ test("a missing store is non-fatal (empty)", () => {
   assert.deepEqual(store.comments("any"), []);
 });
 
+test("a write creates the store's missing directories, an existing one is reused", () => {
+  const root = mkdtempSync(join(tmpdir(), "pinax-mcp-mkdir-"));
+  const path = join(root, "out", "agent", "comments.toml"); // two levels not there yet
+  const store = new CommentStore(path);
+  store.addComment("fig", "first", "llm");
+  store.setBookmark("fig", true); // the directory now exists: written to, not refused
+  const data = parse(readFileSync(path, "utf8")) as any;
+  assert.deepEqual({ ...data.comment.fig[0] }, { author: "llm", text: "first" });
+  assert.equal(data.bookmark.fig, true);
+});
+
 test("a store that does not parse is never overwritten: a write refuses, naming the file", () => {
   const dir = mkdtempSync(join(tmpdir(), "pinax-mcp-bad-"));
   const path = join(dir, "comments.toml");
