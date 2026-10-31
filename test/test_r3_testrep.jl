@@ -116,4 +116,22 @@ const R3Ext = Base.get_extension(Pinax, :PinaxTestExt)
         @test occursin("AFTER=false", txt)         # and the call leaves no capture open behind it
         @test occursin("1/1 PASS", read(joinpath(out, "agent", "agent.md"), String))
     end
+
+    @testset "a @caption after @test_broken in a test names nothing, as in a page" begin
+        root = R3Ext.PinaxTestSet("Test report")
+        R3Ext._with_testset(root) do
+            @testset "test_broken.jl" begin
+                @test 1 == 1
+                @test_broken 1 == 2
+                @caption "RELABELED"
+            end
+        end
+        node = only(root.node.children)
+        @test node.nbroken == 1
+        # the earlier check keeps its label; the @caption is an error where it is written
+        @test node.checks[1].label == "1 == 1"
+        @test node.checks[1].outcome === :pass
+        @test [c.outcome for c in node.checks[2:end]] == [:error]
+        @test !any(c -> c.label == "RELABELED", node.checks)
+    end
 end
