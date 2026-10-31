@@ -59,15 +59,11 @@ end
         @test occursin("T & M", lx)
     end
 
-    @testset "ragged columns -> missing cell (blank text / null json)" begin
-        tmp = mktempdir()
+    @testset "ragged columns are an error where the table is written, never padded" begin
         Pinax.reset!(; title="t")
-        @page :p "P" begin
-            @table (a=[1, 2], b=[10])   # b shorter -> 2nd row's b is missing
+        @test_throws "is ragged" @page :p "P" begin
+            @table (a=[1, 2], b=[10])
         end
-        Pinax.render(; out=joinpath(tmp, "a"), theme=:agent)
-        aj = read(joinpath(tmp, "a", "agent.json"), String)
-        @test occursin("[2,null]", aj)
     end
 
     @testset "unsupported input errors clearly" begin

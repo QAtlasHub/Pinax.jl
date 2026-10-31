@@ -429,7 +429,7 @@ function _agent_json(theme::AgentBase, doc::Document, ctx)
             ",\"desc\":",
             _jsonstr(d === nothing ? "" : d.source),
             ",\"status\":",
-            haskey(doc.part_status, pid) ? _jsonstr(string(doc.part_status[pid])) : "null",
+            "null",
             "}",
         )
     end
