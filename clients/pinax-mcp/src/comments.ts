@@ -49,6 +49,10 @@ export class CommentStore {
     const data = this.read(true);
     const comment = (data.comment ??= {});
     const turns = (comment[id] ??= []) as CommentTurn[];
+    if (!Array.isArray(turns))
+      throw new Error(
+        `${this.path}: [comment.${id}] is one table, not a list of turns: write each turn as [[comment.${id}]]`,
+      );
     turns.push({ author, text });
     this.write(data);
     return this.comments(id);

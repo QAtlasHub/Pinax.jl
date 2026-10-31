@@ -38,28 +38,46 @@ rendering reports an unparseable one in the document's diagnostics.
 """
 read_comments(path::AbstractString) = _parse_comments(path)[1:2]
 
-# `read_comments`, plus the parse error of an unreadable store (`nothing` when it parsed or is absent).
+# `read_comments`, plus what the store holds that is not a comment: the parse error of an unreadable
+# store, or an entry in the wrong shape, each as a diagnostic (none when it is well-formed or absent).
 function _parse_comments(path::AbstractString)
     comments = Dict{Symbol,Vector{Comment}}()
     bookmarks = Set{Symbol}()
-    isfile(path) || return comments, bookmarks, nothing
+    problems = DiagEntry[]
+    isfile(path) || return comments, bookmarks, problems
     data = try
         TOML.parsefile(path)
     catch e
-        return comments, bookmarks, e
+        msg = "the comment store does not parse, so no comment is shown: $(sprint(showerror, e))"
+        push!(problems, DiagEntry(ERROR, basename(path), msg))
+        return comments, bookmarks, problems
     end
+    bad(id, msg) = push!(problems, DiagEntry(WARNING, string(id), msg))
     for (id, entries) in get(data, "comment", Dict{String,Any}())
-        entries isa AbstractVector || continue
-        turns = Comment[
-            Comment(string(get(e, "author", "")), string(get(e, "text", ""))) for
-            e in entries if e isa AbstractDict
-        ]
+        if !(entries isa AbstractVector)
+            bad(
+                id,
+                "`[comment.$(id)]` is one table, not a list of turns: write each turn as `[[comment.$(id)]]`",
+            )
+            continue
+        end
+        turns = Comment[]
+        for (i, e) in enumerate(entries)
+            if e isa AbstractDict && haskey(e, "text")
+                push!(turns, Comment(string(get(e, "author", "")), string(e["text"])))
+            else
+                bad(
+                    id,
+                    "turn $(i) is not a comment (a table with a `text`), so it is not shown",
+                )
+            end
+        end
         isempty(turns) || (comments[Symbol(id)] = turns)
     end
     for (id, on) in get(data, "bookmark", Dict{String,Any}())
         on === true && push!(bookmarks, Symbol(id))
     end
-    return comments, bookmarks, nothing
+    return comments, bookmarks, problems
 end
 
 # The node kinds every face shows comments on (Conventions › Faces).
@@ -72,37 +90,13 @@ const _KIND_NAMES = Dict(
     :raw => "raw block",
 )
 
-# Every node id in `doc`, with its kind.
-function _node_kinds(doc)
-    kinds = Dict{Symbol,Symbol}(pid => :part for (pid, _) in doc.parts)
-    function visit(c, kind)
-        kinds[c.id] = kind
-        foreach(n -> kinds[n.id] = :text, c.texts)
-        foreach(n -> kinds[n.id] = :figure, c.figures)
-        foreach(n -> kinds[n.id] = :table, c.tables)
-        foreach(n -> kinds[n.id] = :code, c.codes)
-        foreach(n -> kinds[n.id] = :check, c.checks)
-        foreach(n -> kinds[n.id] = :raw, c.raws)
-        return foreach(s -> visit(s, :section), c.sections)
-    end
-    foreach(pg -> visit(pg, :page), doc.pages)
-    return kinds
-end
-
 # The comments a face renders `doc` with. A comment no face can show — the store does not parse, its
 # id names no node, or it names a kind that carries no comments — goes into `rdiag`, never silently
 # nowhere.
 function _read_comments(doc, path::AbstractString, rdiag)
-    comments, bookmarks, err = _parse_comments(path)
-    err === nothing || push!(
-        rdiag,
-        DiagEntry(
-            ERROR,
-            basename(path),
-            "the comment store does not parse, so no comment is shown: $(sprint(showerror, err))",
-        ),
-    )
-    kinds = _node_kinds(doc)
+    comments, bookmarks, problems = _parse_comments(path)
+    append!(rdiag, problems)
+    kinds = Dict(n.id => n.kind for n in node_ids(doc))
     # A comment is stored under a node's id (the API, pinax-mcp) or its anchor (the gallery writes
     # what it shows); the faces look a node's comments up by its anchor, so key them all that way.
     byanchor = Dict{Symbol,Symbol}(Symbol(_anchor(id)) => id for id in keys(kinds))

@@ -74,6 +74,12 @@ test("a store that does not parse is never overwritten: a write refuses, naming 
   assert.equal(readFileSync(path, "utf8"), bad); // what a person wrote is still there
 });
 
+test("a [comment.x] single table is not appended to: a write refuses, saying the shape", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "pinax-mcp-shape-")), "comments.toml");
+  writeFileSync(path, '[comment.fig]\nauthor = "me"\ntext = "one table"\n');
+  assert.throws(() => new CommentStore(path).addComment("fig", "new"), /\[\[comment\.fig\]\]/);
+});
+
 // ---- end-to-end: the write tool over MCP, gated on --comments ----
 
 const here = dirname(fileURLToPath(import.meta.url));

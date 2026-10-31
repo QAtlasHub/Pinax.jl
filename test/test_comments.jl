@@ -132,4 +132,28 @@ using Test
         diag = html[first(findfirst("id=\"diagnostics\"", html)):end]
         @test occursin("broken.toml", diag) && occursin("does not parse", diag)
     end
+
+    @testset "a store entry in the wrong shape is a diagnostic, not silence" begin
+        # `[comment.p]` is one table, not a turn list; a turn that is not a table, or has no text,
+        # is not a turn either — each is said, and the well-formed turns are still shown
+        f = joinpath(tmp, "shapes.toml")
+        write(
+            f,
+            """
+            comment.p = [{ author = "me", text = "KEPT_TURN" }, "not a table", { author = "me" }]
+            [comment.q]
+            author = "me"
+            text = "one table"
+            """,
+        )
+        Pinax.reset!()
+        @page :p "P" begin end
+        @page :q "Q" begin end
+        Pinax.render(; out=site("sshapes"), theme=:agent, comments_file=f)
+        md = read(joinpath(site("sshapes"), "agent.md"), String)
+        @test occursin("KEPT_TURN", md)
+        diag = md[first(findfirst("## Diagnostics", md)):end]
+        @test occursin("q:", diag) && occursin("[[comment.q]]", diag)
+        @test occursin("p:", diag) && occursin("turn 2", diag) && occursin("turn 3", diag)
+    end
 end
