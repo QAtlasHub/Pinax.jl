@@ -99,10 +99,12 @@ _report_page(title) = only(p for p in Pinax.current_document().pages if p.title 
         pg = _report_page("test_sweep.jl")
         figs = vcat(pg.figures, (s.figures for s in Pinax._all_sections(pg))...)
         conv = only(f for f in figs if occursin("_conv_", string(f.id)))
-        series = conv.data.series
-        @test [s.label for s in series] == ["m = a", "m = b"]
-        @test series[1].want == [1.0, 1.0] && series[2].want == [2.0, 2.0]
-        @test series[2].lo == [1.5, 1.5] && series[2].hi == [2.5, 2.5]
+        # the data file holds what the plot draws: each series' values, reference and band
+        y = Dict(s.label => s.y for s in conv.data.series)
+        @test sort!(collect(keys(y))) ==
+            sort!(["m = $m $f" for m in ("a", "b") for f in ("got", "want", "lo", "hi")])
+        @test y["m = a want"] == [1.0, 1.0] && y["m = b want"] == [2.0, 2.0]
+        @test y["m = b lo"] == [1.5, 1.5] && y["m = b hi"] == [2.5, 2.5]
         svg = read(conv.gen(), String)
         @test count("<polygon", svg) == 2          # one tolerance band per series, not the last one
     end
