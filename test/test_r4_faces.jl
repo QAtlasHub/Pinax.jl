@@ -133,7 +133,8 @@ Test.finish(r::_R4Iso) = r
     @test occursin("\\part{Part A}\\label{a}\n\\section{P1}\\label{p1}\n", tex)
     @test occursin("\\part{Part B}\\label{b}\n\\section{P2}\\label{p2}\n", tex)
     # a render that records no diagnostic removes the sidecar an earlier render left
-    @test !isfile(joinpath(out, "diagnostics.md"))
+    # the stand-in compiler is a POSIX shell script, so only there is this render free of diagnostics
+    Sys.iswindows() || @test !isfile(joinpath(out, "diagnostics.md"))
 end
 
 # The check table of the section titled `title` in a gallery page: from its verdict band to the end of
