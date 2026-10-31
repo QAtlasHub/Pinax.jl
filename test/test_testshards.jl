@@ -51,6 +51,29 @@ function shard_suite()
     return d
 end
 
+# A red fixture, so the counts compared below are not all zero: one unit holding one test of each
+# outcome. Run only in a subprocess, where its red suite cannot fail this one.
+function red_suite()
+    d = mktempdir()
+    write(
+        joinpath(d, "unit_r.jl"),
+        """
+        using Test
+        @testset "red" begin
+            @test true
+            @test 1 == 2
+            @test error("boom")
+            @test_broken false
+        end
+        """,
+    )
+    write(
+        joinpath(d, "runtests.jl"),
+        "using TestShards\nTestShards.@shard begin\n    include(\"unit_r.jl\")\nend\n",
+    )
+    return d
+end
+
 # Run a fixture in a subprocess, optionally under a capture. Returns (ok, log, records_dir, report).
 # `TESTSHARDS_*` is stripped first: when THIS suite is itself sharded, the child would otherwise
 # inherit the outer shard's id and split the fixture too.
@@ -169,6 +192,17 @@ end
         _, _, captured, _ = captured_run()
         @test !isempty(unit_counts(plain))
         @test unit_counts(plain) == unit_counts(captured)
+    end
+
+    @testset "…and so are a red unit's: failed, errored and broken each counted" begin
+        # The fixture above passes everything, so its fail / error / broken counts are zeros on
+        # both sides and would agree with a fold that never counted them.
+        red = red_suite()
+        ok_plain, _, plain, _ = run_fixture(red; capture=false)
+        ok_captured, _, captured, _ = run_fixture(red; capture=true)
+        @test !ok_plain && !ok_captured        # red both ways: the capture hides nothing
+        @test unit_counts(plain) == [("unit_r.jl", 1, 1, 1, 1)]
+        @test unit_counts(captured) == unit_counts(plain)
     end
 
     @testset "the completeness verdict rides in the artifact" begin
