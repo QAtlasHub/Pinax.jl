@@ -164,4 +164,27 @@ _ub_diags() = [(d.item, d.message) for d in Pinax.current_document().diag.entrie
             TestNode("T"; children=[bad]); out=mktempdir()
         )
     end
+
+    @testset "a capped margin figure plots each check at its own number" begin
+        n = Pinax._MAX_MARGIN_BARS + 5
+        # check k spends k% of its tolerance, so the worst bars are the last `_MAX_MARGIN_BARS`
+        chk(k) = Check(:t, "c$(k)", 1.0, 1.0, k / 100, 1.0, :abs, true)
+        out = joinpath(mktempdir(), "rep")
+        render_test_report(
+            TestNode("T"; children=[TestNode("test_m.jl"; checks=chk.(1:n))]); out=out
+        )
+        csv = read(
+            joinpath(
+                out, "agent", "assets", "figures", "test_m_jl", "test_m_jl_margins.csv"
+            ),
+            String,
+        )
+        rows = [split(l, ",") for l in split(chomp(csv), "\n")[2:end]]
+        margin = [
+            (parse(Int, r[2]), parse(Float64, r[3])) for r in rows if r[1] == "margin"
+        ]
+        @test first.(margin) == collect(6:n)           # the checks' own numbers, in order
+        @test last.(margin) == [k / 100 for k in 6:n]  # each at its own margin
+        @test startswith(csv, "series,check #,")
+    end
 end
