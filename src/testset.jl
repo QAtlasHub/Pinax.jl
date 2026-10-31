@@ -1816,10 +1816,15 @@ function _node_to_dict(n)
     return d
 end
 
-# TOML has no `missing` / `nothing` and no arbitrary objects, so a cell outside its type system is
-# carried as its display string — the same text the gallery would have shown for it.
-_toml_cell(x::Union{Real,Bool,AbstractString}) = x
+# TOML holds integers, floats, booleans and strings. `missing` / `nothing` cross as a marker table and
+# come back as themselves; any other cell (a `1//3`, a `π`, an object) as its display string — the
+# same text the gallery shows for it.
+_toml_cell(x::Union{Integer,AbstractFloat,Bool,AbstractString}) = x
+_toml_cell(::Missing) = Dict{String,Any}("missing" => true)
+_toml_cell(::Nothing) = Dict{String,Any}("nothing" => true)
 _toml_cell(x) = _cellstr(x)
+_from_toml_cell(x) = x
+_from_toml_cell(d::AbstractDict) = haskey(d, "missing") ? missing : nothing
 
 function _table_to_dict(t::Table)
     t.params === nothing ||
@@ -1841,7 +1846,7 @@ function _dict_to_table(d::AbstractDict)
         _anchor(id),
         get(d, "caption", ""),
         String[string(h) for h in get(d, "header", Any[])],
-        Vector{Any}[Any[c for c in row] for row in get(d, "rows", Any[])],
+        Vector{Any}[Any[_from_toml_cell(c) for c in row] for row in get(d, "rows", Any[])],
         get(d, "code", ""),
         nothing,
         get(d, "defined_at", ""),

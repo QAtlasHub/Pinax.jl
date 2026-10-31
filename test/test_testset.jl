@@ -217,7 +217,7 @@ end
         back = Pinax.load_test_dump(p).children[1]
         @test only(back.texts).source == "a description"
         @test back.tables[1].caption == "a caption"
-        @test back.tables[1].rows == Vector{Any}[Any[10, -0.1], Any[20, ""]]  # missing → its cell text
+        @test isequal(back.tables[1].rows, Vector{Any}[Any[10, -0.1], Any[20, missing]])
         @test only(back.raws).id === :r1 && only(back.raws).html == "<p>raw panel</p>"
         @test back.content ==
             Pair{Symbol,Int}[:text => 1, :code => 1, :check => 1, :table => 1, :raw => 1]
@@ -922,6 +922,26 @@ end
         md = read(joinpath(dir, "two", "agent", "agent.md"), String)
         @test occursin("TOP_PROSE_a", md) && occursin("TOP_PROSE_b", md)
         @test count("TOP_CHECK", md) >= 2
+    end
+
+    @testset "a shard dump carries every table cell: no crash, missing stays missing" begin
+        tbl = Pinax.Table(
+            :tb,
+            "tb",
+            "",
+            ["a", "b", "c", "d"],
+            [Any[1 // 3, π, missing, nothing]],
+            "",
+            nothing,
+            "",
+        )
+        n = TestNode("test_x.jl"; tables=[tbl], content=[:table => 1])
+        back = Pinax.load_test_dump(
+            Pinax.dump_test_report(n, joinpath(mktempdir(), "c.toml"))
+        )
+        row = only(only(back.tables).rows)
+        @test row[1] == "1//3" && row[2] == "π"   # the text the gallery shows for them
+        @test ismissing(row[3]) && row[4] === nothing
     end
 
     @testset "a shard dump keeps where each node was written and what each check points at" begin
