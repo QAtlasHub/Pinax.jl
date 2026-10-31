@@ -207,3 +207,22 @@ end
     @test Pinax._figure_table(Plots.contour(1:4, 1:4, rand(4, 4))) === nothing
     @test Pinax._figure_table(Plots.plot(1:3, 1:3, 1:3)) === nothing
 end
+
+@testset "the Plots extension: a plot of several subplots has no one pair of axes" begin
+    # its series come from every subplot, but a data file names ONE x and y axis: writing subplot 2's
+    # points under subplot 1's axis names would misname them, so the figure has no data form
+    p1 = Plots.plot([1, 2], [3.0, 4.0]; xlabel="beta", ylabel="E")
+    p2 = Plots.plot([1, 2], [5.0, 6.0]; xlabel="t", ylabel="m")
+    @test Pinax._figure_table(Plots.plot(p1, p2; layout=2)) === nothing
+    @test Pinax._figure_table(p1).xlabel == "beta"        # control: one subplot keeps its axes
+    # and the agent face says the figure has no data form, rather than writing a misnamed file
+    tmp = mktempdir()
+    Pinax.reset!(; title="T")
+    @page :p "P" begin
+        @figure Plots.plot(p1, p2; layout=2) id = :two
+    end
+    Pinax.render(; out=tmp, theme=:agent)
+    aj = read(joinpath(tmp, "agent.json"), String)
+    @test occursin("\"item\":\"two\",\"message\":\"this figure has no data form", aj)
+    @test !isfile(joinpath(tmp, "assets", "figures", "p", "two.csv"))
+end

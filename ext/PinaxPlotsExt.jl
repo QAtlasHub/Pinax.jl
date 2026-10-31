@@ -35,8 +35,10 @@ end
 
 # Every series' points + axis labels, for the agent face's data file. Missing axis guides degrade to
 # "" (Plots' accessors vary by version). `nothing` when no series has points, or one is not a list
-# of points.
+# of points, or the plot has several subplots: a data file names one x and one y axis, and each
+# subplot has its own.
 function Pinax._figure_table(p::Plots.Plot)
+    length(p.subplots) == 1 || return nothing
     series = NamedTuple[]
     for s in p.series_list
         pts = _points(s)
