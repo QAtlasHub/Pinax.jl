@@ -163,7 +163,7 @@ function Pinax.completeness_overview(c::TestShards.Completeness)
                 (; metric="verdict", value=ok ? "every unit ran exactly once" : "FAILED"),
             ],
             code="",
-            id=:completeness,
+            gen_id=:completeness,
             caption="Completeness — whether the shards between them ran every unit they observed, " *
                     "exactly once. A report missing a shard reads as a smaller suite unless it says so.",
         )

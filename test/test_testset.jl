@@ -1127,4 +1127,24 @@ end
         agent = read(joinpath(dir, "rep", "agent", "agent.json"), String)
         @test count("{\"id\":\"code_s_jl_2_3\",\"caption\"", agent) == 1   # one code object in `codes`
     end
+
+    # The figures and tables a test report draws itself (a page's margin figure, a sweep's figures,
+    # the overview's tables) have ids Pinax generates: one that meets an id a test's own description
+    # produced steps aside (`-2`) rather than stopping the report, and none of them is author-written.
+    @testset "a report's own figures never collide with a testset's section" begin
+        ok() = [Check(:c, "ok", 1.0, 1.0, 0.0, 0.5, :abs, true)]
+        n = TestNode("test_x.jl"; children=[TestNode("margins"; checks=ok())], checks=ok())
+        dir = mktempdir()
+        Pinax.render_test_report(TestNode("T"; children=[n]); out=joinpath(dir, "r"))
+        ns = Pinax.node_ids(Pinax.current_document())
+        ids = [x.id for x in ns]
+        @test allunique(ids)
+        @test :test_x_jl_margins in ids                       # the testset's section keeps its id
+        fig = only(
+            x for
+            x in ns if x.kind === :figure && startswith(string(x.id), "test_x_jl_margins")
+        )
+        @test fig.id === Symbol("test_x_jl_margins-2") && fig.generated
+        @test all(x -> x.generated, filter(x -> x.kind in (:figure, :table), ns))
+    end
 end

@@ -747,7 +747,7 @@ function _push_margin_figure!(page_id::Symbol, checks::Vector{Check})
         caption="Tolerance budget spent by each check. The dashed line is the pass/fail " *
                 "boundary — a bar close to it passed, but barely." *
                 cap_note,
-        id=Symbol(page_id, :_margins),
+        gen_id=Symbol(page_id, :_margins),
         data=data,
     )
     return nothing
@@ -1003,7 +1003,7 @@ function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, 
         code=fp,
         caption="Convergence of `$(q)` over the swept axis `$(xvar)`. Dashed line = `want`; the shaded " *
                 "band is the tolerance; a red marker is a failed check.",
-        id=Symbol(cid, :_conv_, qi[]),
+        gen_id=Symbol(cid, :_conv_, qi[]),
         data=(;
             xlabel=string(xvar),
             ylabel="got",
@@ -1033,7 +1033,7 @@ function _push_sweep_figures!(cid::Symbol, qi::Ref{Int}, label::AbstractString, 
         code=fp,
         caption="Tolerance budget `delta/tol` of `$(q)` over `$(xvar)`; the dashed line at 1.0 is the " *
                 "pass/fail boundary.",
-        id=Symbol(cid, :_swpmargin_, qi[]),
+        gen_id=Symbol(cid, :_swpmargin_, qi[]),
         data=(;
             xlabel=string(xvar),
             ylabel="delta / tol",
@@ -1495,7 +1495,7 @@ function render_test_report(
             code="",
             caption="Provenance — when this report ran, against what code, on which Julia / OS. " *
                     "A report that omits these cannot be told apart from a stale one.",
-            id=:provenance,
+            gen_id=:provenance,
         )
         rows = NamedTuple[]
         _collect_rows!(rows, root, page_when)
@@ -1504,7 +1504,7 @@ function render_test_report(
             code="",
             caption="Per-file result profile. `worst margin` is the largest `delta/tol` seen in " *
                     "that file: 1.0 means a check landed exactly on its tolerance.",
-            id=:per_file,
+            gen_id=:per_file,
         )
     finally
         _exit_page!()
@@ -1585,7 +1585,7 @@ function _render_matrix(
                 field="matrix cells", value=join(unique(c for (_, c) in pairs), "  ·  ")
             )],
             code="",
-            id=:provenance,
+            gen_id=:provenance,
             caption="This report merges CI matrix cells (issue #69 K); each cell is a part below. " *
                     "The provenance (Julia / OS / commit) is the cell label — a merge job's own is not the cells'.",
         )
@@ -1598,7 +1598,7 @@ function _render_matrix(
         isempty(rows) || _push_table!(;
             data=rows,
             code="",
-            id=:per_file,
+            gen_id=:per_file,
             caption="Per-cell, per-file result profile. `worst margin` is the largest `delta/tol` in that (cell, file).",
         )
     finally

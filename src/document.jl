@@ -1057,6 +1057,8 @@ function _current_container()
     return tc === :inert ? :inert : nothing
 end
 
+# `gen_id` is a base for an id Pinax generates itself (a test report's own figures): it steps aside
+# with `-2` on a collision and is never author-written, unlike `id`.
 function _push_figure!(;
     gen,
     code,
@@ -1064,13 +1066,16 @@ function _push_figure!(;
     params=nothing,
     caption="",
     id=nothing,
+    gen_id=nothing,
     thumbnail=false,
     data=nothing,
 )
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
     c === nothing && error("@figure outside of a @section or @page")
-    base = Symbol(c.id, "_fig_", _stable_hash(string(code, "|", _params_key(params))))
+    base = something(
+        gen_id, Symbol(c.id, "_fig_", _stable_hash(string(code, "|", _params_key(params))))
+    )
     fid = _node_id!(c, id, base, "figure")
     fig = Figure(
         fid,
@@ -1121,7 +1126,14 @@ macro table(args...)
 end
 
 function _push_table!(;
-    data, code, at=nothing, caption="", id=nothing, header=nothing, params=nothing
+    data,
+    code,
+    at=nothing,
+    caption="",
+    id=nothing,
+    gen_id=nothing,
+    header=nothing,
+    params=nothing,
 )
     c = _current_container()
     c === :inert && return nothing   # inside a test with the report off — no-op (invariant V)
@@ -1134,7 +1146,8 @@ function _push_table!(;
             "$(length(hdr)) columns — check `header=` length or ragged rows",
         )
     end
-    tid = _node_id!(c, id, Symbol(c.id, "_tbl_", _stable_hash(string(code))), "table")
+    base = something(gen_id, Symbol(c.id, "_tbl_", _stable_hash(string(code))))
+    tid = _node_id!(c, id, base, "table")
     tbl = Table(
         tid, _anchor(tid), string(caption), hdr, rows, code, params, _defined_at(at)
     )
