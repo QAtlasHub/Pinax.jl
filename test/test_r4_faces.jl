@@ -68,3 +68,70 @@ using JSON: JSON
         ),
     ]
 end
+
+# A testset that keeps the results of the document's own checks, so a failing check is data here.
+mutable struct _R4Iso <: Test.AbstractTestSet
+    description::String
+    results::Vector{Any}
+    _R4Iso(desc::AbstractString=""; kw...) = new(String(desc), Any[])
+end
+Test.record(r::_R4Iso, x) = (push!(r.results, x); x)
+Test.finish(r::_R4Iso) = r
+
+@testset "LaTeX: check rows, a code block, a comment, part headings, a stale sidecar" begin
+    tmp = mktempdir()
+    # a stand-in compiler, so this render records no diagnostic at all ("no LaTeX compiler" is one)
+    bin = joinpath(tmp, "bin")
+    mkpath(bin)
+    write(joinpath(bin, "latexmk"), "#!/bin/sh\nexit 0\n")
+    chmod(joinpath(bin, "latexmk"), 0o755)
+    out = joinpath(tmp, "l")
+    mkpath(out)
+    write(joinpath(out, "diagnostics.md"), "# Diagnostics\n- STALE\n")   # an earlier render's
+    write(
+        joinpath(out, "comments.toml"),
+        "[[comment.p1]]\nauthor = \"me\"\ntext = \"P1_NOTE\"\n",
+    )
+    Pinax.reset!(; title="T")
+    line = @__LINE__
+    @testset _R4Iso "iso" begin
+        @part :a "Part A" begin
+            @page :p1 "P1" begin
+                @test error("boom")
+                @test 1 + 1 == 2
+                @code CODE_VAL = 40 + 2 caption = "CODE_CAP" id = :cd
+            end
+        end
+        @part :b "Part B" begin
+            @page :p2 "P2" begin end
+        end
+    end
+    at(n) = "test/test_r4_faces.jl:$(line + n)"
+    withenv("PATH" => string(bin, ":", ENV["PATH"])) do
+        Pinax.render(; out=out, theme=:latex)
+    end
+    tex = read(joinpath(out, "document.tex"), String)
+    texid(c) = replace(string(c.id), "_" => "\\_")
+    c_err, c_ind = Pinax.current_document().pages[1].checks
+    texat(n) = replace(at(n), "_" => "\\_")
+    # an errored check reads ERROR, not FAIL; an indicator has blank number cells; each label ends
+    # with where its @test was written
+    @test occursin(
+        "\n$(texid(c_err)) & error(\"boom\") @ $(texat(4)) &  &  &  &  & ERROR \\\\\n" *
+        "$(texid(c_ind)) & 1 + 1 == 2 @ $(texat(5)) &  &  &  &  & PASS \\\\\n",
+        tex,
+    )
+    # a code block: its caption, its source, then its output
+    @test occursin(
+        "\\par\\noindent\\textbf{CODE\\_CAP}\n\\begin{verbatim}\nCODE_VAL = 40 + 2\n" *
+        "# => \n42\n\\end{verbatim}\n",
+        tex,
+    )
+    # a comment, its author in bold
+    @test occursin("\n\\item \\textbf{me} P1\\_NOTE\n", tex)
+    # each part opens with its own heading, the second one too
+    @test occursin("\\part{Part A}\\label{a}\n\\section{P1}\\label{p1}\n", tex)
+    @test occursin("\\part{Part B}\\label{b}\n\\section{P2}\\label{p2}\n", tex)
+    # a render that records no diagnostic removes the sidecar an earlier render left
+    @test !isfile(joinpath(out, "diagnostics.md"))
+end
