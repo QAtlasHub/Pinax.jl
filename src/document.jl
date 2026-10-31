@@ -19,7 +19,11 @@ end
 "Diagnostic severity (notes 09)."
 @enum Severity ERROR WARNING INFO
 
-"One diagnostic. `item` is the anchor of the related page/section/figure."
+"""
+One diagnostic. `item` says what it is about, as text: a node's id or anchor; a name for a part of
+the render that is no node (`"overview"`, `"sweep"`, `"preamble"`, `"bibliography"`, `"latex"`); or
+a file name (a comment store). It is a label for the reader, not something to look a node up by.
+"""
 struct DiagEntry
     severity::Severity
     item::String
@@ -173,8 +177,9 @@ _cellstr(x) = x === missing ? "" : string(x)
 """
 A single PASS/FAIL check (a `Test` `@test` recorded into a container) — one assertion of a computed
 value against a reference. `delta` is the deviation under the term that governs the bound — `:abs`
-is `|got - want|`, `:rel` is `|got - want| / max(|got|, |want|)`, as `isapprox` defines them — so
-`pass` is `delta <= tol`. An `indicator` check (no recoverable numbers) is a 1/0 and carries no
+is `|got - want|`, `:rel` is `|got - want| / max(|got|, |want|)`, as `isapprox` defines them. `pass`
+is what `Test` recorded for the assertion and is never recomputed from `delta` and `tol` (`isapprox`
+combines `atol` and `rtol` in a way one `kind` cannot reproduce). An `indicator` check (no recoverable numbers) is a 1/0 and carries no
 margin. Renders to a row of the container's check table, a LaTeX tabular row, and a native-typed
 JSON object in `agent.json` (the machine-readable verdict).
 """
@@ -563,7 +568,6 @@ end
 
 # ============================================================ helpers
 
-# Anchor used both in HTML attributes and as a filesystem path component, so restrict it to a safe charset.
 # A node's anchor — its HTML id, the name of its files, its cache entry — so no two ids share one. An
 # id of safe characters (`[A-Za-z0-9_-]`, the common case) is its own anchor; any other id keeps a
 # readable form (unsafe characters as `_`) followed by a short hash of the whole id.
@@ -885,7 +889,7 @@ end
 A navigation group of pages (LaTeX `\\part`). `@part :id \"Title\" [desc=md\"…\"] begin … end` — the
 pages declared inside belong to this part and are grouped (collapsibly) under it in the index and nav.
 `desc=` is an overview shown beneath the part heading on the index (what this whole group covers).
-A part is NOT a file; each `@page` (or top-level `@section`) inside it is still its own HTML page.
+A part is NOT a file; each `@page` inside it is still its own HTML page.
 `status=` sets a default maturity (`:draft` or `:final`) that the part's pages inherit — so a whole
 group of drafts is declared once, the published result living in a separate part. A part is written
 at the top level.

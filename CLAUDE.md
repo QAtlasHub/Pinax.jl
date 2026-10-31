@@ -54,7 +54,8 @@ when adding any node type: it needs a human render **and** an agent-data form.
 - **`agent.json` is the neutral LLM seam** (the data face above) that pinax-mcp, registries
   (Archeion), and LLMs all read — treat its shape as a contract, not an internal detail.
 - **`status` is a page's maturity:** `:draft` (a manuscript) or `:final` (the published version);
-  anything else is an error. Pinax only carries it.
+  anything else is an error. Pinax only carries it. During 0.2, `:trial` (the 0.1 spelling) is
+  still accepted as a deprecated alias of `:draft`, with a warning.
 - **Every container with checks carries `verdict` + `checks` in `agent.json`** — `verdict` is
   `{verdict:"PASS|FAIL", passed, total, failed}` over the subtree (`null` with no checks, never a
   vacuous PASS) and `checks` holds the container's own `{id,label,got,want,delta,tol,kind,pass,…}`.

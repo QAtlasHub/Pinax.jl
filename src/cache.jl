@@ -1,8 +1,8 @@
 # cache.jl — incremental render: skip unchanged figures across renders, clean orphans (notes 10).
 #
 # A figure is re-materialized only when its cache key changed or its asset files are gone.
-# The cache key = hash(@figure source `code` + params identity + requested formats); it is
-# computed WITHOUT calling `gen`, so a hit skips materialization entirely. The previous render's
+# The cache key = hash(@figure source `code` + params identity + requested formats + the data
+# fingerprint, when a vault is given — see below); it is computed WITHOUT calling `gen`, so a hit skips materialization entirely. The previous render's
 # outputs are tracked in a manifest under `out/`; assets it produced but this render did not are
 # deleted (orphan cleanup).
 #

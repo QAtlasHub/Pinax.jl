@@ -26,8 +26,10 @@ Then `render(; out, theme=MyTheme())`, `theme=:mine`, or `theme="path/to/mytheme
 The shipped bases — `GalleryBase` (HTML), `LaTeXBase`, `AgentBase` — instead implement
 `emit_document` as a walk that dispatches to one generic per node (`emit_page`, `emit_section`,
 `emit_figure`, `emit_node`, `emit_table`, `emit_check`, `emit_code`, `emit_text`, `emit_view`,
-`emit_comments`, `emit_index`). Subtype one of those to change some nodes and inherit the rest; those generics have
-no fallback of their own, so they are only relevant once something calls them.
+`emit_comments`, `emit_index`). Subtype one of those to change some nodes and inherit the rest. Only
+`emit_node` has a fallback of its own — an error naming the theme and the node type, so a node a
+theme has no form for is never dropped silently; the others have none, so they are only relevant
+once something calls them.
 
 Traits, which do have defaults: `output_format` (`:html` | `:latex` | `:agent`), `figure_formats`
 (which formats are requested from figure objects), `index_level` and `number`.

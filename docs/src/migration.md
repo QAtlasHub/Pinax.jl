@@ -61,8 +61,9 @@ longer accepts is an error that says what to write instead.
 
 ## Programs that read `agent.json`
 
-The shape is a contract, and 0.2 settles it; pinax-mcp moves with it. Every node now names where it
-was written, every container carries the same keys, and nothing is inlined as a cut copy.
+The shape is a contract, and 0.2 settles it; pinax-mcp moves with it. Every prose block, figure,
+table, code block, `@raw` block and check now names where it was written (`defined_at`; parts, pages
+and sections do not), every container carries the same keys, and nothing is inlined as a cut copy.
 
 | 0.1 | 0.2 |
 |---|---|

@@ -97,8 +97,9 @@ A test suite reports one bit: green or red. A `@test isapprox(E, oracle; rtol=1e
 the reference and the tolerance, then threw all three away. `Pinax.test` renders the suite instead —
 one page per test file, each check carrying the margin it passed by.
 
-**The suite is not touched.** There is no Pinax macro to add to it; the suite stays plain
-`@testset` / `@test`, and the one Pinax touch is the call:
+**The suite is not touched.** Nothing Pinax has to be added to it — the suite stays plain
+`@testset` / `@test` (the optional `@pinaxignore`, below, only leaves a testset out of the
+report), and the one Pinax touch is the call:
 
 ```julia
 using Pinax, Test
