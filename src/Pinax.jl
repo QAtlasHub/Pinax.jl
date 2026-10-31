@@ -63,5 +63,6 @@ export render,
 export read_comments, add_comment, set_bookmark!
 export @pinaxignore
 export render_test_report, dump_test_report, completeness_overview
+export node_ids
 
 end # module Pinax

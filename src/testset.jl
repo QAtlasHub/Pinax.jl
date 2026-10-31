@@ -570,6 +570,7 @@ mutable struct TestNode
     codes::Vector{CodeBlock}
     texts::Vector{Prose}                # @desc prose blocks
     content::Vector{Pair{Symbol,Int}}   # declaration order of texts/figures/tables/raws/checks/codes
+    written::Set{Symbol}                # ids of its content the author wrote (`id=`); others generated
 end
 
 function TestNode(
@@ -586,6 +587,7 @@ function TestNode(
     codes::Vector{CodeBlock}=CodeBlock[],
     texts::Vector{Prose}=Prose[],
     content::Vector{Pair{Symbol,Int}}=Pair{Symbol,Int}[],
+    written::Set{Symbol}=Set{Symbol}(),
 )
     id = _slug(description)
     return TestNode(
@@ -604,6 +606,7 @@ function TestNode(
         codes,
         texts,
         content,
+        written,
     )
 end
 
@@ -1280,6 +1283,7 @@ end
 function _emit_own_content!(n::TestNode, acc::Vector{Check})
     c = _ctx_container()
     c === nothing && return acc
+    union!(_ensure_document!().written, n.written)   # the ids its author wrote stay written
     # No interleaved `content` (a legacy dump, a hand-built node) — place checks then codes directly,
     # so a dumped `@code` still shows.
     if isempty(n.content) && (!isempty(n.checks) || !isempty(n.codes))
@@ -1693,6 +1697,7 @@ function _node_to_dict(n)
             Dict{String,Any}("kind" => String(k), "i" => i) for (k, i) in n.content
         ]
     )
+    isempty(n.written) || (d["written"] = sort!([String(id) for id in n.written]))
     isempty(n.children) || (d["child"] = [_node_to_dict(c) for c in n.children])
     return d
 end
@@ -1803,6 +1808,7 @@ function _dict_to_node(d::AbstractDict)
             e in get(d, "content", Any[]) if e["kind"] != "figure"
         ],
         children=TestNode[_dict_to_node(c) for c in get(d, "child", Any[])],
+        written=Set{Symbol}(Symbol(id) for id in get(d, "written", Any[])),
     )
 end
 

@@ -143,4 +143,58 @@ _sec(id) = only(s for s in Pinax._all_sections(_pg()) if s.id === id)
         @test only(_pg().checks).label == "isapprox(Ms[end], 0.0; atol = 0.1)"
         @test only(_pg().figures).code == "Ms[end]"
     end
+
+    # Which ids the author wrote and which Pinax generated is data, not a guess from an id's shape:
+    # `node_ids` lists every node — sections at any depth included — with its kind and that flag.
+    @testset "node_ids: every node, its kind, and whether Pinax generated its id" begin
+        Pinax.reset!()
+        @testset _IdentIso "iso" begin
+            @part :grp "G" begin
+                @page :p "P" begin
+                    @desc "prose"
+                    @figure 1 id = :named
+                    @figure 2
+                    @section :s "S" begin
+                        @section :deep "D" begin
+                            @table (a=[1],) id = :tbl
+                            @raw "<i>r</i>"
+                        end
+                        @testset "conv" begin
+                            @test true
+                        end
+                    end
+                end
+            end
+        end
+        ns = Pinax.node_ids(Pinax.current_document())
+        byid = Dict(n.id => n for n in ns)
+        @test [n.id for n in ns][1:3] == [:grp, :p, first(_pg().texts).id]
+        written = Set(n.id for n in ns if !n.generated)
+        @test written == Set([:grp, :p, :named, :s, :deep, :tbl])
+        @test byid[:deep].kind === :section && byid[:s_conv].kind === :section
+        @test byid[:s_conv].generated   # a @testset's section id is generated
+        @test count(n -> n.kind === :check, ns) == 1 &&
+            all(n -> n.generated, filter(n -> n.kind === :check, ns))
+        @test Set(n.kind for n in ns) ==
+            Set([:part, :page, :text, :figure, :section, :table, :raw, :code, :check])
+    end
+
+    @testset "node_ids: a written id survives a shard dump; test-report pages are generated" begin
+        n = Pinax.TestNode("test_x.jl")
+        push!(
+            n.tables,
+            Pinax.Table(:mine, "mine", "", ["a"], Vector{Any}[Any[1]], "", nothing),
+        )
+        push!(n.content, :table => 1)
+        push!(n.written, :mine)
+        d = Pinax.dump_test_report(
+            Pinax.TestNode("r"; children=[n]), joinpath(mktempdir(), "s.toml")
+        )
+        back = Pinax.load_test_dump(d)
+        @test :mine in only(back.children).written
+        Pinax.render_test_report(back; out=mktempdir())
+        ns = Pinax.node_ids(Pinax.current_document())
+        @test only(n for n in ns if n.id === :mine).generated == false
+        @test all(n -> n.generated, filter(n -> n.kind in (:page, :section), ns))
+    end
 end
