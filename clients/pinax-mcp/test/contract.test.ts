@@ -66,3 +66,24 @@ test("the outline ends with the document's diagnostics", () => {
   const o = loadAtlas(emitted).outline();
   assert.match(o, /## Diagnostics\n- \[ERROR\] p2_fig_\w+: materialize failed/);
 });
+
+// The emitted fixture, changed by `change` (a deep copy; `raw` stays as Pinax wrote it).
+const changed = (change: (doc: any) => void): unknown => {
+  const doc = structuredClone(raw);
+  change(doc);
+  return doc;
+};
+
+test("the schema holds the small sets the emitter writes to them", () => {
+  assert.ok(AgentDocZ.safeParse(changed((d) => (d.diagnostics = [{ severity: "WARNING", item: "x", message: "m" }]))).success);
+  assert.ok(AgentDocZ.safeParse(changed((d) => (d.diagnostics = [{ severity: "INFO", item: "x", message: "m" }]))).success);
+  assert.equal(AgentDocZ.safeParse(changed((d) => (d.diagnostics = [{ severity: "FATAL", item: "x", message: "m" }]))).success, false);
+  assert.equal(AgentDocZ.safeParse(changed((d) => d.pages[0].content.push({ kind: "picture", id: "x" }))).success, false);
+  assert.equal(AgentDocZ.safeParse(changed((d) => d.pages[0].sections[0].content.push({ kind: "picture", id: "x" }))).success, false);
+  assert.equal(AgentDocZ.safeParse(changed((d) => (d.pages[0].status = "published"))).success, false);
+});
+
+test("a 0.1 page status 'trial' reads as 'draft'", () => {
+  const doc = AgentDocZ.parse(changed((d) => (d.pages[0].status = "trial")));
+  assert.equal(doc.pages[0].status, "draft");
+});

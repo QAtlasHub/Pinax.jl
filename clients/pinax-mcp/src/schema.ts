@@ -12,8 +12,9 @@ export const Params = z.union([z.null(), z.string(), z.record(z.string(), ParamS
 
 export const CommentZ = z.object({ author: z.string(), text: z.string() }).passthrough();
 
-// A content-order reference — {kind: "figure"|"table"|..., id} in declaration order.
-export const ContentRefZ = z.object({ kind: z.string(), id: z.string() }).passthrough();
+// A content-order reference — {kind, id} in declaration order; a kind is one the emitter writes.
+export const ContentKindZ = z.enum(["text", "figure", "table", "code", "check", "raw", "section"]);
+export const ContentRefZ = z.object({ kind: ContentKindZ, id: z.string() }).passthrough();
 
 // A @table node — first-class tabular data, id-addressable like a figure.
 export const TableNodeZ = z
@@ -103,6 +104,22 @@ export const VerdictZ = z
   })
   .passthrough();
 
+// The keys a page and a section share (Pinax writes one container shape for both).
+const containerShape = {
+  id: z.string(),
+  title: z.string(),
+  depth: z.number().optional(),
+  verdict: VerdictZ.nullable().optional(),
+  texts: z.array(TextZ).optional(),
+  figures: z.array(FigureZ),
+  tables: z.array(TableNodeZ).optional(),
+  codes: z.array(CodeZ).optional(),
+  raws: z.array(RawZ).optional(),
+  checks: z.array(CheckZ).optional(),
+  content: z.array(ContentRefZ).optional(),
+  comments: z.array(CommentZ).optional(), // the container's own thread, as a figure carries one
+};
+
 // Sections nest to any depth: `depth` counts from the part (a page is 1, a top-level section 2).
 export interface SectionT {
   id: string;
@@ -124,41 +141,23 @@ export interface SectionT {
 export const SectionZ: z.ZodType<SectionT> = z.lazy(() =>
   z
     .object({
-      id: z.string(),
-      title: z.string(),
-      depth: z.number().optional(),
+      ...containerShape,
       summary: z.string().optional(),
-      verdict: VerdictZ.nullable().optional(),
-      texts: z.array(TextZ).optional(),
-      figures: z.array(FigureZ),
-      tables: z.array(TableNodeZ).optional(),
-      codes: z.array(CodeZ).optional(),
-      raws: z.array(RawZ).optional(),
-      checks: z.array(CheckZ).optional(),
-      content: z.array(ContentRefZ).optional(),
-      comments: z.array(CommentZ).optional(), // the section's own thread, as a figure carries one
       sections: z.array(SectionZ).optional(),
     })
     .passthrough(),
 );
 
+// A page's maturity: "draft" (a manuscript) or "final" (the published version). A 0.1 document
+// wrote "trial" for "draft"; it reads as "draft".
+export const StatusZ = z.preprocess((s) => (s === "trial" ? "draft" : s), z.enum(["draft", "final"]));
+
 export const PageZ = z
   .object({
-    id: z.string(),
-    title: z.string(),
-    depth: z.number().optional(),
+    ...containerShape,
     part: z.string().nullable(),
-    status: z.string().optional(), // maturity: "draft" (a manuscript) or "final" (the published version)
+    status: StatusZ.optional(),
     summary: z.string().nullable().optional(),
-    texts: z.array(TextZ).optional(),
-    figures: z.array(FigureZ),
-    tables: z.array(TableNodeZ).optional(),
-    codes: z.array(CodeZ).optional(),
-    raws: z.array(RawZ).optional(),
-    verdict: VerdictZ.nullable().optional(),
-    checks: z.array(CheckZ).optional(),
-    content: z.array(ContentRefZ).optional(),
-    comments: z.array(CommentZ).optional(), // the page's own thread, as a figure carries one
     sections: z.array(SectionZ),
   })
   .passthrough();
@@ -174,7 +173,7 @@ export const PartZ = z
 
 // What the build and the render recorded: a node a face left out, a figure that failed, …
 export const DiagnosticZ = z
-  .object({ severity: z.string(), item: z.string(), message: z.string() })
+  .object({ severity: z.enum(["ERROR", "WARNING", "INFO"]), item: z.string(), message: z.string() })
   .passthrough();
 
 export const AgentDocZ = z
